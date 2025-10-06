@@ -6,7 +6,6 @@ import * as fs from 'fs';
 import { DetalheProcesso, Documento, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
 import { AwsS3Service } from 'src/services/aws-s3.service';
-import redis from 'src/shared/redis';
 import { normalizeString } from 'src/utils/normalize-string';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { userAgents } from 'src/utils/user-agents';
@@ -14,10 +13,14 @@ import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
 import { PjeLoginService } from './login.service';
 import { CaptchaService } from 'src/services/captcha.service';
+import Redis from 'ioredis';
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
-
+  private readonly redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: Number(process.env.REDIS_PORT) || 6379,
+  });
   constructor(
     private readonly loginService: PjeLoginService,
     private readonly captchaService: CaptchaService,
@@ -45,11 +48,6 @@ export class ProcessDocumentsFindService {
     return new Promise((res) => setTimeout(res, ms));
   }
 
-  private async randomDelay(min = 1000, max = 3000) {
-    const time = Math.floor(Math.random() * (max - min + 1)) + min;
-    await this.delay(time);
-  }
-
   /**
    * 🔹 Alterna conta a cada 5 processos processados
    * @param force força a troca de conta imediatamente
@@ -65,20 +63,31 @@ export class ProcessDocumentsFindService {
     this.contadorProcessos++;
     return this.contas[this.contaIndex];
   }
+  delayMs = Math.floor(Math.random() * (5000 - 1000 + 1)) + 5000; // 5 a 10s
 
   async execute(numeroDoProcesso: string, tentativas = 0): Promise<Root> {
     const regionTRT = Number(numeroDoProcesso.split('.')[3]);
     const { username, password } = this.getConta();
     console.log({ regionTRT, username, password });
     try {
-      const tokenCaptcha = await redis.get('pje:token:captcha');
+      const tokenCaptcha = await this.redis.get('pje:token:captcha');
       // 🔹 Escolhe a conta atual
 
-      const { cookies } = await this.loginService.execute(
-        regionTRT,
-        username,
-        password,
+      let cookies = await this.redis.get(
+        `pje:session:${regionTRT}:${username}`,
       );
+      if (!cookies) {
+        this.logger.debug(
+          `Nenhum cookie em cache para ${username}, realizando login...`,
+        );
+        const loginResult = await this.loginService.execute(
+          regionTRT,
+          username,
+          password,
+        );
+        cookies = loginResult.cookies;
+      }
+
       await axios.get(
         `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
         {
@@ -98,11 +107,10 @@ export class ProcessDocumentsFindService {
       for (let i = 1; i <= 3; i++) {
         try {
           // Delay antes da requisição de dados básicos
-          const delayMs = Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000; // 5 a 10s
           this.logger.debug(
-            `⏱ Delay de ${delayMs}ms antes de dar inicio a ${i}ª instância`,
+            `⏱ Delay de ${this.delayMs}ms antes de dar inicio a ${i}ª instância`,
           );
-          await this.delay(delayMs);
+          await this.delay(this.delayMs);
           const typeUrl = i === 3 ? 'tst' : `trt${regionTRT}`; // --- IGNORE ---
 
           const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
@@ -124,9 +132,9 @@ export class ProcessDocumentsFindService {
           if (!detalheProcesso) continue;
 
           this.logger.debug(
-            `⏱ Delay de ${delayMs}ms antes de processar a ${i}ª instância`,
+            `⏱ Delay de ${this.delayMs}ms antes de processar a ${i}ª instância`,
           );
-          await this.delay(delayMs);
+          await this.delay(this.delayMs);
           let processoResponse: ProcessosResponse = await this.fetchProcess(
             numeroDoProcesso,
             detalheProcesso.id,
@@ -184,10 +192,16 @@ export class ProcessDocumentsFindService {
 
       return normalizeResponse(numeroDoProcesso, newInstances, '', true);
     } catch (error) {
+      console.log(error);
+
       if (error.response?.data?.codigoErro === 'ARQ-028') {
         this.logger.warn(
           `Erro ARQ-028 com ${username}, tentando novamente mesma conta...`,
         );
+        this.logger.warn(
+          `Erro ARQ-028 com ${username}, tentando novamente mesma conta...`,
+        );
+
         if (tentativas >= 1) {
           return normalizeResponse(
             numeroDoProcesso,
@@ -196,30 +210,29 @@ export class ProcessDocumentsFindService {
           );
         }
 
-        // 🔹 tenta logar de novo com a MESMA conta
-        await this.loginService.execute(regionTRT, username, password, true);
+        // 🔹 Tenta executar novamente usando o cookie existente
         return await this.execute(numeroDoProcesso, tentativas + 1);
       }
 
       // 🔹 Para outros erros → troca de conta
-      if (tentativas < this.contas.length) {
-        this.logger.warn(
-          `⚠️ Erro com a conta ${username}, tentando próxima conta...`,
-        );
+      // if (tentativas < this.contas.length) {
+      //   this.logger.warn(
+      //     `⚠️ Erro com a conta ${username}, tentando próxima conta...`,
+      //   );
 
-        // força troca de conta
-        const { username: newUser, password: newPass } = this.getConta(true);
-        if (username === newUser) {
-          // se só tiver uma conta configurada, não entra em loop infinito
-          return normalizeResponse(
-            numeroDoProcesso,
-            [],
-            'ANÁLISE - FALHA AO TENTAR ACESSAR INFORMAÇÕES, TENTE NOVAMENTE MAIS TARDE',
-          );
-        }
-        await this.loginService.execute(regionTRT, newUser, newPass, true);
-        return await this.execute(numeroDoProcesso, tentativas + 1);
-      }
+      //   // força troca de conta
+      //   const { username: newUser, password: newPass } = this.getConta(true);
+      //   if (username === newUser) {
+      //     // se só tiver uma conta configurada, não entra em loop infinito
+      //     return normalizeResponse(
+      //       numeroDoProcesso,
+      //       [],
+      //       'ANÁLISE - FALHA AO TENTAR ACESSAR INFORMAÇÕES, TENTE NOVAMENTE MAIS TARDE',
+      //     );
+      //   }
+      //   await this.loginService.execute(regionTRT, newUser, newPass);
+      //   return await this.execute(numeroDoProcesso, tentativas + 1);
+      // }
 
       // 🔹 Se já tentou todas as contas, falha de vez
       return normalizeResponse(
@@ -266,7 +279,7 @@ export class ProcessDocumentsFindService {
       if (tokenCaptcha) {
         const captchaKey = `pje:token:captcha:${instance}`;
 
-        await redis.set(captchaKey, tokenCaptcha);
+        await this.redis.set(captchaKey, tokenCaptcha);
       }
       return response.data;
     } catch (error: any) {
@@ -303,7 +316,10 @@ export class ProcessDocumentsFindService {
         tokenDesafio: tokenDesafio,
       };
       // Salva no Redis por 5 minutos
-      await redis.set(redisCaptchaKey, JSON.stringify(captchaDetalheProcesso));
+      await this.redis.set(
+        redisCaptchaKey,
+        JSON.stringify(captchaDetalheProcesso),
+      );
       return captcha.resposta;
     } catch (error) {
       console.error('Erro ao buscar captcha:', error.message);
@@ -320,7 +336,6 @@ export class ProcessDocumentsFindService {
 
     const uploadedDocuments: Documento[] = [];
     const processedDocumentIds = new Set<string>(); // para evitar duplicidade
-    const delayMs = Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000; // 5 a 10s
 
     // Regex para tipos de documentos seguindo o modelo /.*palavra1.*palavra2.*/i
     const regexDocumentos = [
@@ -366,9 +381,9 @@ export class ProcessDocumentsFindService {
       const buffersPorInstancia: { [instanciaId: string]: Buffer } = {};
       for (const instance of instances) {
         this.logger.debug(
-          `⏱ Delay de ${delayMs}ms antes de buscar documento da ${instance.instance}ª instância`,
+          `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${instance.instance}ª instância`,
         );
-        await this.delay(delayMs);
+        await this.delay(this.delayMs);
 
         const filePath = await this.documentoService.execute(
           instance.id,

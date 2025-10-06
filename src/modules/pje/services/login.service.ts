@@ -20,7 +20,10 @@ puppeteer.use(StealthPlugin());
 @Injectable()
 export class PjeLoginService {
   private readonly logger = new Logger(PjeLoginService.name);
-  private readonly redis = new Redis(process.env.REDIS_HOST as string);
+  private readonly redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: Number(process.env.REDIS_PORT) || 6379,
+  });
 
   private delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
@@ -32,6 +35,8 @@ export class PjeLoginService {
     password: string,
     expired: boolean = false,
   ): Promise<{ cookies: string }> {
+    await this.redis.ping();
+    this.logger.log('Redis conectado com sucesso');
     const cacheKey = `pje:session:${regionTRT}:${username}`;
 
     // 1️⃣ Verifica se já existe sessão em cache
@@ -56,8 +61,8 @@ export class PjeLoginService {
         );
 
         browser = await puppeteer.launch({
-          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-          headless: true,
+          // executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+          headless: false,
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -84,12 +89,8 @@ export class PjeLoginService {
         await page.goto(loginUrl, { waitUntil: 'networkidle2' });
 
         // Botão "Acesso com certificado"
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle0' }),
-          page.evaluate(() => {
-            (document.querySelector('#btnSsoPdpj') as HTMLElement)?.click();
-          }),
-        ]);
+        await page.click('#btnSsoPdpj');
+        await page.waitForSelector('#username', { timeout: 10000 });
 
         // Login
         await page.waitForSelector('#username', { visible: true });
@@ -108,12 +109,23 @@ export class PjeLoginService {
 
         // 🔹 Validação do login (checa se o painel carregou)
         try {
-          await page.waitForSelector('button[name="Meu Painel"]', {
-            visible: true,
-            timeout: 5000,
-          });
-          await page.click('button[name="Meu Painel"]');
-        } catch {
+          const pageContent = await page.content();
+          if (pageContent.includes('JBWEB000065: HTTP Status 401')) {
+            this.logger.warn(
+              `Conta ${username} recebeu JBWEB000065 (401). Tentando próxima conta...`,
+            );
+            return { cookies: '' };
+          }
+          // Aguarda o botão "Meu Painel" ficar visível
+          // await page.waitForSelector('button[name="Meu Painel"]', {
+          //   visible: true,
+          //   timeout: 15000, // aumenta timeout se a página demorar
+          // });
+
+          // // Opcional: clicar no botão depois de aparecer
+          // await page.click('button[name="Meu Painel"]');
+        } catch (err) {
+          console.log('Erro ao encontrar o painel:', err);
           throw new ServiceUnavailableException(
             `Falha no login: painel não encontrado no TRT-${regionTRT}`,
           );

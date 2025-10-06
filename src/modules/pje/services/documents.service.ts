@@ -1,14 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import redis from 'src/shared/redis';
+
 import puppeteer from 'puppeteer';
 import { userAgents } from 'src/utils/user-agents';
 import { PjeLoginService } from './login.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import Redis from 'ioredis';
 
 @Injectable()
 export class DocumentoService {
+  private readonly redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: Number(process.env.REDIS_PORT) || 6379,
+  });
   private readonly logger = new Logger(DocumentoService.name);
   constructor(private readonly loginService: PjeLoginService) {}
   async execute(
@@ -23,7 +28,9 @@ export class DocumentoService {
         this.logger.error('Parâmetros inválidos fornecidos');
         return '';
       }
-      const tokenCaptcha = await redis.get(`pje:token:captcha:${instancia}`);
+      const tokenCaptcha = await this.redis.get(
+        `pje:token:captcha:${instancia}`,
+      );
       const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`; // --- IGNORE ---
 
       const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha}`;
