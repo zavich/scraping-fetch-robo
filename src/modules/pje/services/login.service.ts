@@ -61,8 +61,8 @@ export class PjeLoginService {
         );
 
         browser = await puppeteer.launch({
-          // executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-          headless: false,
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+          headless: true,
           args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -116,14 +116,6 @@ export class PjeLoginService {
             );
             return { cookies: '' };
           }
-          // Aguarda o botão "Meu Painel" ficar visível
-          // await page.waitForSelector('button[name="Meu Painel"]', {
-          //   visible: true,
-          //   timeout: 15000, // aumenta timeout se a página demorar
-          // });
-
-          // // Opcional: clicar no botão depois de aparecer
-          // await page.click('button[name="Meu Painel"]');
         } catch (err) {
           console.log('Erro ao encontrar o painel:', err);
           throw new ServiceUnavailableException(
