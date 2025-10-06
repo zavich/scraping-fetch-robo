@@ -6,7 +6,7 @@ import { Job } from 'bullmq';
 import axios from 'axios';
 import { ProcessDocumentsFindService } from '../../services/process-documents-find.service';
 
-@Processor('pje-documentos', { concurrency: 2 }) // 2 por vez
+@Processor('pje-documentos', { concurrency: 1 }) // 1 por vez
 export class DocumentosWorker extends WorkerHost {
   private readonly logger = new Logger(DocumentosWorker.name);
 
