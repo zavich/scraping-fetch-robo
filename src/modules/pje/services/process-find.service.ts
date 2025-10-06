@@ -120,7 +120,6 @@ export class ProcessFindService {
                 regionTRT,
               );
             }
-
             instances.push(processoResponse);
           } catch (err) {
             this.logger.warn(
@@ -131,6 +130,18 @@ export class ProcessFindService {
         }
       }
 
+      const erroIndex = instances.findIndex(
+        (instance) => 'mensagemErro' in instance && instance.mensagemErro,
+      );
+      if (erroIndex !== -1) {
+        return normalizeResponse(
+          numeroDoProcesso,
+          [],
+          instances[erroIndex].mensagemErro,
+          false,
+          origem,
+        );
+      }
       return normalizeResponse(numeroDoProcesso, instances, '', false, origem);
     } catch (error) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
