@@ -204,7 +204,6 @@ export function normalizeResponse(
     valor: body[0]?.numero,
   } as Root;
 }
-
 function scoreIniciais(partesIni: string, tituloIni: string): number {
   if (!partesIni || !tituloIni) return 0;
   let score = 0;
@@ -222,7 +221,7 @@ export function atualizarNomesPartes(
 ): Partes[] {
   const regexNomePessoa = /\b[A-ZÁ-Ú]{2,}(?:\s+[A-ZÁ-Ú]{2,})+\b/g;
   const regexEmpresa =
-    /\b[A-ZÁ-Ú&\.\-]{2,}(?:\s+[A-ZÁ-Ú&\.\-]{2,})*\b(?:\s*(?:S\/A|LTDA|ME|EIRELI))?/g;
+    /\b(?!CNPJ|CPF|SALA|ED|NNN|NNNN|NN)[A-ZÁ-Ú&.\-]{2,}(?:\s+[A-ZÁ-Ú&.\-]{2,})*(?:\s*(?:S\/?A|LTDA|ME|EIRELI))?\b/g;
 
   const gerarIniciais = (nome?: string): string => {
     if (!nome) return '';
@@ -234,7 +233,7 @@ export function atualizarNomesPartes(
       .join('');
   };
 
-  // Extrair nomes dos títulos
+  // 🔹 Extrair nomes dos títulos
   const nomesExtraidos: string[] = [];
   const empresasExtraidas: string[] = [];
 
@@ -244,20 +243,40 @@ export function atualizarNomesPartes(
     empresasExtraidas.push(...(titulo.match(regexEmpresa) || []));
   });
 
-  const todosNomesExtraidos = [...empresasExtraidas, ...nomesExtraidos];
+  // 🔹 Limpar ruídos
+  const limpar = (arr: string[]) =>
+    arr.filter(
+      (n) =>
+        n.length > 3 &&
+        !/^(CNPJ|CPF|NN\.|NNNN|SALA|ED)$/i.test(n.trim()) &&
+        !/^\d+$/.test(n.trim()),
+    );
+
+  const nomesLimpados = limpar(nomesExtraidos);
+  const empresasLimpadas = empresasExtraidas.filter((n) =>
+    /\bS[\s./]*A\b|\bLTDA\b|\bME\b|\bEIRELI\b/.test(n),
+  ); // 👈 garante que são empresas de verdade
+
+  console.log('nomesLimpados', nomesLimpados);
+  console.log('empresasLimpadas', empresasLimpadas);
+
+  const todosNomesExtraidos = [...nomesLimpados, ...empresasLimpadas];
 
   return partes.map((parte) => {
     const copiaParte = { ...parte };
+
+    // 👇 se for empresa, restringe à lista de empresas reais
     const nomesParaAssociar =
       parte.documento?.tipo === 'CNPJ'
-        ? empresasExtraidas
+        ? empresasLimpadas.length > 0
+          ? empresasLimpadas
+          : todosNomesExtraidos
         : todosNomesExtraidos;
 
     let melhorScore = 0;
     let melhorNome = copiaParte.nome;
 
     for (const nomeCompleto of nomesParaAssociar) {
-      // ⚖️ Comparar documentos: se CPF/CNPJ bate, substitui direto
       if (
         parte.documento?.numero &&
         nomeCompleto.includes(parte.documento.numero)
@@ -283,6 +302,11 @@ export function atualizarNomesPartes(
         melhorScore = score;
         melhorNome = nomeCompleto;
       }
+    }
+
+    // 🟢 Se é empresa (CNPJ) e há apenas uma empresa extraída, assume diretamente
+    if (parte.documento?.tipo === 'CNPJ' && empresasLimpadas.length === 1) {
+      melhorNome = empresasLimpadas[0];
     }
 
     copiaParte.nome = melhorNome;
