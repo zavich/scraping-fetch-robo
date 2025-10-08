@@ -335,11 +335,9 @@ export class ProcessDocumentsFindService {
     this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
 
     const uploadedDocuments: Documento[] = [];
-    const processedDocumentIds = new Set<string>(); // para evitar duplicidade
+    const processedDocumentIds = new Set<string>();
 
-    // Regex para tipos de documentos seguindo o modelo /.*palavra1.*palavra2.*/i
     const regexDocumentos = [
-      // Processo principal / execução
       /.*peticao.*inicial.*/i,
       /.*sentenca.*/i,
       /.*embargos.*de.*declaracao.*/i,
@@ -349,19 +347,14 @@ export class ProcessDocumentsFindService {
       /.*decisao.*de.*admissibilidade.*/i,
       /.*agravo.*de.*instrumento.*/i,
       /.*decisao.*/i,
-      /.*decisao.*\/.*acordao.*/i,
       /.*agravo.*interno.*/i,
       /.*recurso.*extraordinario.*/i,
       /.*planilha.*de.*calculo.*/i,
       /.*embargos.*a.*execucao.*/i,
       /.*agravo.*de.*peticao.*/i,
-
-      // Documentos aleatórios antes da sentença
       /.*procuracao.*/i,
       /.*habilitacao.*/i,
       /.*substabelecimento.*/i,
-
-      // Documentos aleatórios após a sentença
       /.*manifestacao.*/i,
       /.*ccb.*/i,
       /.*cessao.*/i,
@@ -371,15 +364,13 @@ export class ProcessDocumentsFindService {
       /.*decisoes.*/i,
       /.*despachos.*/i,
       /.*intimacoes.*/i,
-
-      // Primeira instância
       /.*prevencao.*/i,
     ];
 
-    try {
-      // 1️⃣ Baixa todos os PDFs das instâncias
-      const buffersPorInstancia: { [instanciaId: string]: Buffer } = {};
-      for (const instance of instances) {
+    const buffersPorInstancia: Record<string, Buffer> = {};
+
+    for (const instance of instances) {
+      try {
         this.logger.debug(
           `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${instance.instance}ª instância`,
         );
@@ -396,46 +387,47 @@ export class ProcessDocumentsFindService {
         const fileBuffer = fs.readFileSync(filePath);
         buffersPorInstancia[instance.id] = fileBuffer;
 
-        // Remove arquivo temporário
+        // remove o arquivo temporário
         try {
           fs.unlinkSync(filePath);
           this.logger.debug(
-            `Arquivo temporário ${filePath} deletado com sucesso`,
+            `🗑️ Arquivo temporário ${filePath} deletado com sucesso`,
           );
         } catch (err) {
           this.logger.warn(
-            `Não foi possível deletar ${filePath}: ${err.message}`,
+            `⚠️ Não foi possível deletar ${filePath}: ${err.message}`,
           );
         }
-      }
 
-      // 2️⃣ Para cada PDF, extrai bookmarks dos tipos desejados
-      for (const [, buffer] of Object.entries(buffersPorInstancia)) {
-        const bookmarks = await this.pdfExtractService.extractBookmarks(buffer);
+        // tenta extrair bookmarks e processar
+        try {
+          const bookmarks =
+            await this.pdfExtractService.extractBookmarks(fileBuffer);
 
-        // Filtra bookmarks usando regex
-        const bookmarksFiltrados = bookmarks.filter((b) =>
-          regexDocumentos.some((r) => r.test(normalizeString(b.title))),
-        );
+          const bookmarksFiltrados = bookmarks.filter((b) =>
+            regexDocumentos.some((r) => r.test(normalizeString(b.title))),
+          );
 
-        for (const bookmark of bookmarksFiltrados) {
-          // Checa se já foi processado
-          if (processedDocumentIds.has(bookmark.id)) {
-            this.logger.debug(
-              `Documento "${bookmark.title}" (id: ${bookmark.id}) já processado, pulando.`,
-            );
-            continue;
-          }
+          for (const bookmark of bookmarksFiltrados) {
+            if (processedDocumentIds.has(bookmark.id)) continue;
 
-          // Extrai páginas correspondentes
-          const extractedPdfBuffer =
-            await this.pdfExtractService.extractPagesByIndex(
-              buffer,
-              bookmark.id,
-            );
+            const extractedPdfBuffer =
+              await this.pdfExtractService.extractPagesByIndex(
+                fileBuffer,
+                bookmark.id,
+              );
 
-          if (extractedPdfBuffer) {
-            const fileName = `${bookmark.title.replace(/\s+/g, '_')}_${bookmark.index}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.pdf`;
+            if (!extractedPdfBuffer) {
+              this.logger.warn(
+                `⚠️ Não foi possível extrair o buffer PDF para o bookmark "${bookmark.title}" (id: ${bookmark.id})`,
+              );
+              continue;
+            }
+
+            const fileName = `${bookmark.title.replace(/\s+/g, '_')}_${bookmark.index}_${Date.now()}_${Math.random()
+              .toString(36)
+              .slice(2, 8)}.pdf`;
+
             const url = await this.awsS3Service.uploadPdf(
               extractedPdfBuffer,
               fileName,
@@ -448,19 +440,30 @@ export class ProcessDocumentsFindService {
               date: bookmark.data,
             });
 
-            processedDocumentIds.add(bookmark.id); // marca como processado
+            processedDocumentIds.add(bookmark.id);
+          }
+        } catch (pdfError: any) {
+          // Captura erros específicos do pdfjs-dist
+          const msg =
+            pdfError?.message || pdfError?.toString() || 'Erro desconhecido';
+          if (msg.includes('PasswordException') || msg.includes('Encryption')) {
+            this.logger.error(
+              `🔐 PDF protegido por senha na instância ${instance.instance}`,
+            );
           } else {
-            this.logger.warn(
-              `Não foi possível extrair o buffer PDF para o bookmark "${bookmark.title}" (id: ${bookmark.id})`,
+            this.logger.error(
+              `❌ Erro ao processar PDF da instância ${instance.instance}: ${msg}`,
             );
           }
+          continue; // ignora esse PDF e vai pro próximo
         }
+      } catch (err) {
+        this.logger.error(
+          `❌ Erro inesperado ao processar documentos da instância ${instance.instance}: ${err.message}`,
+        );
       }
-
-      return uploadedDocuments;
-    } catch (error) {
-      this.logger.error('Erro ao fazer upload dos documentos restritos', error);
-      return [];
     }
+
+    return uploadedDocuments;
   }
 }
