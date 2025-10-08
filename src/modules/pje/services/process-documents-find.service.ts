@@ -209,7 +209,7 @@ export class ProcessDocumentsFindService {
             'ANÁLISE - FALHA AO TENTAR ACESSAR INFORMAÇÕES, TENTE NOVAMENTE MAIS TARDE',
           );
         }
-
+        await this.loginService.execute(regionTRT, username, password, true);
         // 🔹 Tenta executar novamente usando o cookie existente
         return await this.execute(numeroDoProcesso, tentativas + 1);
       }
