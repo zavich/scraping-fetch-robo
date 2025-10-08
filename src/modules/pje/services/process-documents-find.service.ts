@@ -215,24 +215,24 @@ export class ProcessDocumentsFindService {
       }
 
       // 🔹 Para outros erros → troca de conta
-      // if (tentativas < this.contas.length) {
-      //   this.logger.warn(
-      //     `⚠️ Erro com a conta ${username}, tentando próxima conta...`,
-      //   );
+      if (tentativas < this.contas.length) {
+        this.logger.warn(
+          `⚠️ Erro com a conta ${username}, tentando próxima conta...`,
+        );
 
-      //   // força troca de conta
-      //   const { username: newUser, password: newPass } = this.getConta(true);
-      //   if (username === newUser) {
-      //     // se só tiver uma conta configurada, não entra em loop infinito
-      //     return normalizeResponse(
-      //       numeroDoProcesso,
-      //       [],
-      //       'ANÁLISE - FALHA AO TENTAR ACESSAR INFORMAÇÕES, TENTE NOVAMENTE MAIS TARDE',
-      //     );
-      //   }
-      //   await this.loginService.execute(regionTRT, newUser, newPass);
-      //   return await this.execute(numeroDoProcesso, tentativas + 1);
-      // }
+        // força troca de conta
+        const { username: newUser, password: newPass } = this.getConta(true);
+        if (username === newUser) {
+          // se só tiver uma conta configurada, não entra em loop infinito
+          return normalizeResponse(
+            numeroDoProcesso,
+            [],
+            'ANÁLISE - FALHA AO TENTAR ACESSAR INFORMAÇÕES, TENTE NOVAMENTE MAIS TARDE',
+          );
+        }
+        await this.loginService.execute(regionTRT, newUser, newPass);
+        return await this.execute(numeroDoProcesso, tentativas + 1);
+      }
 
       // 🔹 Se já tentou todas as contas, falha de vez
       return normalizeResponse(
