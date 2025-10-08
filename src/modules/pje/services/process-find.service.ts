@@ -21,7 +21,7 @@ export class ProcessFindService {
 
     try {
       const balance = await this.captchaService.getBalance();
-      if (balance) {
+      if (balance < 0.001) {
         // valor mínimo depende do serviço (ex: 0.001 USD)
         this.logger.warn(`Saldo insuficiente no 2Captcha: ${balance}`);
         throw new Error('Saldo insuficiente no 2Captcha');
