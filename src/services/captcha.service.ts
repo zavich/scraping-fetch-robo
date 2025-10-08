@@ -106,4 +106,36 @@ export class CaptchaService {
       return {} as CaptchaResult;
     }
   }
+  async getBalance(): Promise<number> {
+    try {
+      // const response = await axios.get('https://2captcha.com/res.php', {
+      //   params: {
+      //     key: this.apiKey,
+      //     action: 'getbalance',
+      //     json: 1,
+      //   },
+      // });
+      const response = await firstValueFrom(
+        this.httpService.get<TwoCaptchaResultResponse>(
+          'https://2captcha.com/res.php',
+          {
+            params: {
+              key: this.API_KEY,
+              action: 'getbalance',
+              json: 1,
+            },
+          },
+        ),
+      );
+      if (response.data.status === 1) {
+        return parseFloat(response.data.request);
+      } else {
+        this.logger.warn(`Erro ao consultar saldo: ${response.data.request}`);
+        return 0;
+      }
+    } catch (error) {
+      this.logger.error('Falha ao consultar saldo no 2Captcha:', error);
+      return 0;
+    }
+  }
 }

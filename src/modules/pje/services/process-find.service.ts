@@ -20,6 +20,12 @@ export class ProcessFindService {
     const regionTRT = Number(numeroDoProcesso.split('.')[3]);
 
     try {
+      const balance = await this.captchaService.getBalance();
+      if (balance) {
+        // valor mínimo depende do serviço (ex: 0.001 USD)
+        this.logger.warn(`Saldo insuficiente no 2Captcha: ${balance}`);
+        throw new Error('Saldo insuficiente no 2Captcha');
+      }
       const instances: ProcessosResponse[] = [];
       // Percorre 1ª e 2ª instância
       if (origem === 'TST') {
@@ -153,6 +159,13 @@ export class ProcessFindService {
         );
         return this.execute(numeroDoProcesso, origem); // reprocessa com novo login
       }
+      return normalizeResponse(
+        numeroDoProcesso,
+        [],
+        error.message,
+        false,
+        origem,
+      );
 
       throw error;
     }
@@ -208,7 +221,7 @@ export class ProcessFindService {
       const captcha = await this.captchaService.resolveCaptcha(imagem);
       return captcha.resposta;
     } catch (error) {
-      this.logger.error('Erro ao resolver captcha:', error.message);
+      this.logger.error('Erro ao resolver captcha:', error);
       return '';
     }
   }
