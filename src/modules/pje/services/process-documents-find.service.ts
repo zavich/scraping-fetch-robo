@@ -38,6 +38,10 @@ export class ProcessDocumentsFindService {
       username: process.env.PJE_USER_SECOND as string,
       password: process.env.PJE_PASS_SECOND as string,
     },
+    {
+      username: process.env.PJE_USER_THIRD as string,
+      password: process.env.PJE_PASS_THIRD as string,
+    },
   ];
 
   // 🔹 Controle de alternância
@@ -192,8 +196,6 @@ export class ProcessDocumentsFindService {
 
       return normalizeResponse(numeroDoProcesso, newInstances, '', true);
     } catch (error) {
-      console.log(error);
-
       if (error.response?.data?.codigoErro === 'ARQ-028') {
         this.logger.warn(
           `Erro ARQ-028 com ${username}, tentando novamente mesma conta...`,
