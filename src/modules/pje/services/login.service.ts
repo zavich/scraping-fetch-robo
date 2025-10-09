@@ -114,10 +114,11 @@ export class PjeLoginService {
             this.logger.warn(
               `Conta ${username} recebeu JBWEB000065 (401). Tentando próxima conta...`,
             );
-            return { cookies: '' };
+            throw new ServiceUnavailableException(
+              `Conta ${username} inválida para TRT-${regionTRT}.`,
+            );
           }
         } catch (err) {
-          console.log('Erro ao encontrar o painel:', err);
           throw new ServiceUnavailableException(
             `Falha no login: painel não encontrado no TRT-${regionTRT}`,
           );

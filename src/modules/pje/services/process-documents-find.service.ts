@@ -84,14 +84,17 @@ export class ProcessDocumentsFindService {
         this.logger.debug(
           `Nenhum cookie em cache para ${username}, realizando login...`,
         );
-        const loginResult = await this.loginService.execute(
-          regionTRT,
-          username,
-          password,
-        );
-        cookies = loginResult.cookies;
+        try {
+          const loginResult = await this.loginService.execute(
+            regionTRT,
+            username,
+            password,
+          );
+          cookies = loginResult.cookies;
+        } catch (error) {
+          throw new Error(`Erro ao realizar login: ${error.message}`);
+        }
       }
-
       await axios.get(
         `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
         {
@@ -106,7 +109,6 @@ export class ProcessDocumentsFindService {
           },
         },
       );
-
       const instances: ProcessosResponse[] = [];
       for (let i = 1; i <= 3; i++) {
         try {

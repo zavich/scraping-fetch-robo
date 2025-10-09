@@ -257,9 +257,6 @@ export function atualizarNomesPartes(
     /\bS[\s./]*A\b|\bLTDA\b|\bME\b|\bEIRELI\b/.test(n),
   ); // 👈 garante que são empresas de verdade
 
-  console.log('nomesLimpados', nomesLimpados);
-  console.log('empresasLimpadas', empresasLimpadas);
-
   const todosNomesExtraidos = [...nomesLimpados, ...empresasLimpadas];
 
   return partes.map((parte) => {
