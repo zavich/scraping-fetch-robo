@@ -29,6 +29,7 @@ export class DocumentosWorker extends WorkerHost {
         numero,
         cookies,
       );
+      const result = instances.slice(0, 2);
 
       const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
       this.logger.log(`🔎 CONSULTA FINALIZADA PARA ${numero}`);
@@ -44,7 +45,7 @@ export class DocumentosWorker extends WorkerHost {
         });
         return response;
       }
-      const response = normalizeResponse(numero, instances, '', true);
+      const response = normalizeResponse(numero, result, '', true);
 
       await axios.post(webhookUrl, response, {
         headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },

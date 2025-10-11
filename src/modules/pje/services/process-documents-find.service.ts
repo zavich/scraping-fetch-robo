@@ -1,14 +1,12 @@
 // src/modules/pje/services/process-find.service.ts
 
 import { Injectable, Logger } from '@nestjs/common';
-import axios from 'axios';
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
 import { normalizeString } from 'src/utils/normalize-string';
-import { userAgents } from 'src/utils/user-agents';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
 import { ProcessFindService } from './process-find.service';
@@ -37,7 +35,16 @@ export class ProcessDocumentsFindService {
   ): Promise<ProcessosResponse[]> {
     const regionTRT = Number(numeroDoProcesso.split('.')[3]);
     try {
-      const instances = await this.processFindService.execute(numeroDoProcesso);
+      const instances = (
+        await this.processFindService.execute(numeroDoProcesso)
+      ).map((instance, i) => {
+        const instanceNumber = i + 1;
+        return {
+          ...instance,
+          grau: instanceNumber === 1 ? 'PRIMEIRO_GRAU' : 'SEGUNDO_GRAU',
+          instance: instanceNumber.toString(),
+        };
+      });
 
       const documentosRestritos = await this.uploadDocumentosRestritos(
         regionTRT,
@@ -54,34 +61,6 @@ export class ProcessDocumentsFindService {
     } catch (error) {
       console.log(error);
       return [];
-    }
-  }
-  async fetchCaptcha(
-    imagem: string,
-    tokenDesafio: string,
-    numeroDoProcesso: string,
-  ): Promise<string> {
-    try {
-      const redisCaptchaKey = `pje:captcha:${numeroDoProcesso}`;
-
-      const captcha = await this.captchaService.resolveCaptcha(imagem);
-      const captchaDetalheProcesso = {
-        resposta: captcha.resposta,
-        tokenDesafio: tokenDesafio,
-      };
-
-      // 🔹 Salva por 5 minutos no Redis, específico por processo
-      await this.redis.set(
-        redisCaptchaKey,
-        JSON.stringify(captchaDetalheProcesso),
-        'EX',
-        300,
-      );
-
-      return captcha.resposta;
-    } catch (error) {
-      console.error('Erro ao buscar captcha:', error.message);
-      return '';
     }
   }
 
@@ -127,11 +106,7 @@ export class ProcessDocumentsFindService {
     ];
 
     const buffersPorInstancia: Record<string, Buffer> = {};
-    const lastInstance = instances.reduce((max, current) =>
-      Number(current.instance) > Number(max.instance) ? current : max,
-    );
-    // for (const instance of instances) {
-    // let cookies = await this.redis.get(`pje:session:${regionTRT}`);
+    const lastInstance = instances[instances.length - 1];
 
     try {
       this.logger.debug(
@@ -152,7 +127,12 @@ export class ProcessDocumentsFindService {
 
       // remove o arquivo temporário
       try {
-        fs.unlinkSync(filePath);
+        fs.promises
+          .unlink(filePath)
+          .catch((err) =>
+            this.logger.warn(`Não foi possível deletar: ${err.message}`),
+          );
+
         this.logger.debug(
           `🗑️ Arquivo temporário ${filePath} deletado com sucesso`,
         );

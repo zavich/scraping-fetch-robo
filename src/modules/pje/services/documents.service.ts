@@ -4,7 +4,6 @@ import axios from 'axios';
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import * as path from 'path';
-import puppeteer from 'puppeteer';
 import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
@@ -28,8 +27,9 @@ export class DocumentoService {
       }
 
       // 🔹 Recupera tokenCaptcha específico do processo
-      const tokenCaptchaKey = `pje:token:captcha:${processNumber}:${instancia}`;
-      const tokenCaptcha = await this.redis.get(tokenCaptchaKey);
+      const tokenCaptcha = await this.redis.get(
+        `pje:token:captcha:${processNumber}:${instancia}`,
+      );
 
       const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
       const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha || ''}`;
@@ -37,12 +37,6 @@ export class DocumentoService {
       // 🔹 Extrai access_token_1g do cookie
       const match = cookies.match(/access_token_1g=([^;]+)/);
       const accessToken1g = match ? match[1] : null;
-
-      if (!accessToken1g) {
-        this.logger.warn('access_token_1g não encontrado no cookie');
-      } else {
-        console.log('Access Token:', accessToken1g);
-      }
 
       const response = await axios.get(url, {
         headers: {
@@ -64,8 +58,13 @@ export class DocumentoService {
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      // gera nome de arquivo único
-      const filePath = path.join(tempDir, `${processId}.pdf`);
+      const sanitizedProcessNumber = processNumber.replace(/\D+/g, '');
+
+      const fileName = `proc_${sanitizedProcessNumber}_${instancia}_${processId}_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}.pdf`;
+
+      const filePath = path.join(tempDir, fileName);
 
       // salva no disco
       fs.writeFileSync(filePath, buffer);
@@ -76,30 +75,6 @@ export class DocumentoService {
     } catch (error) {
       this.logger.error('Erro ao executar DocumentoService', error);
       throw error; // deixa o Nest lançar 500 mas logado corretamente
-    }
-  }
-
-  async htmlToPdfBuffer(html: string) {
-    const browser = await puppeteer.launch({
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      headless: true,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-software-rasterizer',
-      ],
-    });
-    try {
-      const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({ format: 'A4' });
-      return pdfBuffer;
-    } finally {
-      await browser.close();
     }
   }
 }

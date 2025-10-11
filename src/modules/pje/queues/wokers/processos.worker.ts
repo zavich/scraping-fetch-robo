@@ -19,8 +19,8 @@ export class ProcessosWorker extends WorkerHost {
       const { numero, origem } = job.data;
       this.logger.log(`📄 Consultando processo ${numero}`);
       const instances = await this.processFindService.execute(numero, origem);
-      const response = normalizeResponse(numero, instances, '', false, origem);
-      console.log('response', response.resposta?.instancias?.[0]?.partes);
+      const result = instances.slice(0, 2);
+      const response = normalizeResponse(numero, result, '', false, origem);
 
       const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
       await axios.post(webhookUrl, response, {

@@ -204,16 +204,44 @@ export function normalizeResponse(
     valor: body[0]?.numero,
   } as Root;
 }
-function scoreIniciais(partesIni: string, tituloIni: string): number {
-  if (!partesIni || !tituloIni) return 0;
-  let score = 0;
-  const tituloArr = tituloIni?.split('');
-  partesIni?.split('').forEach((l) => {
-    if (tituloArr?.includes(l)) score++;
-  });
-  return score / partesIni.length; // retorna % de correspondência
-}
+function gerarSiglas(nome: string): string {
+  const stopwords = new Set([
+    'DE',
+    'DA',
+    'DO',
+    'DAS',
+    'DOS',
+    'E',
+    'EM',
+    'NO',
+    'NA',
+    'NOS',
+    'NAS',
+    'A',
+    'O',
+    'AS',
+    'OS',
+    'POR',
+    'COM',
+  ]);
 
+  return nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .replace(/[.,]/g, ' ') // trata pontos e vírgulas como separadores
+    .replace(/[()]/g, '') // remove parênteses
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((word) => !stopwords.has(word.toUpperCase())) // 🔹 ignora stopwords
+    .map((word) => {
+      // se for sigla tipo "S." → pega a letra
+      if (/^[A-Z]\.?$/.test(word)) return word[0];
+      // se for palavra tipo "SANTANDER" → primeira letra
+      return word[0];
+    })
+    .join('')
+    .toUpperCase();
+}
 export function atualizarNomesPartes(
   titulos: ItensProcesso[],
   partes: Partes[],
@@ -222,13 +250,6 @@ export function atualizarNomesPartes(
     /([A-Z][A-Z0-9&\.\(\)-]*(?:\s+[A-Z0-9&\.\(\)-]+)+)/g;
 
   // 🔹 Função para gerar siglas corretamente
-  const gerarSiglas = (nome: string) =>
-    nome
-      .replace(/[()]/g, '') // remove parênteses
-      .split(/\s+/)
-      .map((word) => (word.includes('.') ? word.replace(/\./g, '') : word[0]))
-      .join('')
-      .toUpperCase();
 
   // 🔹 Extrair nomes completos dos títulos com siglas
   const nomesExtraidos: { nome: string; siglas: string }[] = [];
@@ -286,8 +307,9 @@ export function atualizarNomesPartes(
   });
 }
 function matchSiglas(sigParte: string, sigTitulo: string): boolean {
-  sigParte = sigParte.replace(/[^A-Z0-9]/g, '');
+  sigParte = sigParte.replace(/[^A-Z0-9]/g, '').slice(0, 4); // 🔹 apenas 4 primeiras letras
   sigTitulo = sigTitulo.replace(/[^A-Z0-9]/g, '');
+
   let i = 0;
   for (const c of sigTitulo) {
     if (c === sigParte[i]) i++;
