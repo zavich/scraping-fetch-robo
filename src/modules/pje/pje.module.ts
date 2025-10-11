@@ -14,6 +14,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { ProcessosWorker } from './queues/wokers/processos.worker';
 import { DocumentosWorker } from './queues/wokers/documentos.worker';
 import { CaptchaService } from 'src/services/captcha.service';
+import { LoginPoolService } from './services/login-pool.service';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { CaptchaService } from 'src/services/captcha.service';
     PdfExtractService,
     ProcessosWorker,
     DocumentosWorker,
+    LoginPoolService,
   ],
   exports: [],
 })

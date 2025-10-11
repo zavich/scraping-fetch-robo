@@ -37,7 +37,7 @@ export class PjeLoginService {
   ): Promise<{ cookies: string }> {
     await this.redis.ping();
     this.logger.log('Redis conectado com sucesso');
-    const cacheKey = `pje:session:${regionTRT}:${username}`;
+    const cacheKey = `pje:session:${regionTRT}`;
 
     // 1️⃣ Verifica se já existe sessão em cache
     const cachedCookies = await this.redis.get(cacheKey);
@@ -126,6 +126,7 @@ export class PjeLoginService {
 
         // 🔹 Se chegou até aqui, login foi bem-sucedido
         const cookies = await page.cookies();
+
         const cookieString = cookies
           .map((c) => `${c.name}=${c.value}`)
           .join('; ');

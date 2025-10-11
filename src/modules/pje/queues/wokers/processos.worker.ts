@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import axios from 'axios';
 import { ProcessFindService } from '../../services/process-find.service';
+import { normalizeResponse } from 'src/utils/normalizeResponse';
 
 @Processor('pje-processos', { concurrency: 10, lockDuration: 600000 }) // paralelo
 export class ProcessosWorker extends WorkerHost {
@@ -14,14 +15,19 @@ export class ProcessosWorker extends WorkerHost {
   }
 
   async process(job: Job<{ numero: string; origem: string }>) {
-    const { numero, origem } = job.data;
-    this.logger.log(`📄 Consultando processo ${numero}`);
-    const response = await this.processFindService.execute(numero, origem);
-    console.log('response', response);
+    try {
+      const { numero, origem } = job.data;
+      this.logger.log(`📄 Consultando processo ${numero}`);
+      const instances = await this.processFindService.execute(numero, origem);
+      const response = normalizeResponse(numero, instances, '', false, origem);
+      console.log('response', response.resposta?.instancias?.[0]?.partes);
 
-    const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
-    await axios.post(webhookUrl, response, {
-      headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
-    });
+      const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
+      await axios.post(webhookUrl, response, {
+        headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+      });
+    } catch (error) {
+      this.logger.error(`Error processing job ${job.id}: ${error.message}`);
+    }
   }
 }

@@ -4,9 +4,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
-import { normalizeResponse } from 'src/utils/normalizeResponse';
 
-import { Root } from 'src/interfaces/normalize';
 import { CaptchaService } from 'src/services/captcha.service';
 import { userAgents } from 'src/utils/user-agents';
 
@@ -16,7 +14,10 @@ export class ProcessFindService {
 
   constructor(private readonly captchaService: CaptchaService) {}
 
-  async execute(numeroDoProcesso: string, origem: string): Promise<Root> {
+  async execute(
+    numeroDoProcesso: string,
+    origem?: string,
+  ): Promise<ProcessosResponse[]> {
     const regionTRT = Number(numeroDoProcesso.split('.')[3]);
 
     try {
@@ -82,7 +83,7 @@ export class ProcessFindService {
         }
       } else {
         // 1ª e 2ª instância para outros casos
-        for (let i = 1; i < 3; i++) {
+        for (let i = 1; i <= 3; i++) {
           try {
             const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
               `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
@@ -140,15 +141,10 @@ export class ProcessFindService {
         (instance) => 'mensagemErro' in instance && instance.mensagemErro,
       );
       if (erroIndex !== -1) {
-        return normalizeResponse(
-          numeroDoProcesso,
-          [],
-          instances[erroIndex].mensagemErro,
-          false,
-          origem,
-        );
+        return [];
       }
-      return normalizeResponse(numeroDoProcesso, instances, '', false, origem);
+      const result = instances.slice(0, 2);
+      return result;
     } catch (error) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
 
@@ -159,13 +155,7 @@ export class ProcessFindService {
         );
         return this.execute(numeroDoProcesso, origem); // reprocessa com novo login
       }
-      return normalizeResponse(
-        numeroDoProcesso,
-        [],
-        error.message,
-        false,
-        origem,
-      );
+      return [];
 
       throw error;
     }
@@ -180,14 +170,6 @@ export class ProcessFindService {
     regionTRT?: number,
   ) {
     try {
-      console.log('fetchProcess chamado com:', {
-        numeroDoProcesso,
-        detalheProcessoId,
-        instance,
-        tokenDesafio,
-        resposta,
-        regionTRT,
-      });
       const typeUrl = instance === '3' ? 'tst' : `trt${regionTRT}`; // --- IGNORE ---
 
       let url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${detalheProcessoId}`;

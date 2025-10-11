@@ -1,12 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
+import * as fs from 'fs';
+import Redis from 'ioredis';
+import * as path from 'path';
 import puppeteer from 'puppeteer';
 import { userAgents } from 'src/utils/user-agents';
-import { PjeLoginService } from './login.service';
-import * as fs from 'fs';
-import * as path from 'path';
-import Redis from 'ioredis';
 
 @Injectable()
 export class DocumentoService {
@@ -15,7 +14,6 @@ export class DocumentoService {
     port: Number(process.env.REDIS_PORT) || 6379,
   });
   private readonly logger = new Logger(DocumentoService.name);
-  constructor(private readonly loginService: PjeLoginService) {}
   async execute(
     processId: number,
     regionTRT: number,
@@ -28,15 +26,27 @@ export class DocumentoService {
         this.logger.error('Parâmetros inválidos fornecidos');
         return '';
       }
-      const tokenCaptcha = await this.redis.get(
-        `pje:token:captcha:${instancia}`,
-      );
-      const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`; // --- IGNORE ---
 
-      const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha}`;
+      // 🔹 Recupera tokenCaptcha específico do processo
+      const tokenCaptchaKey = `pje:token:captcha:${processNumber}:${instancia}`;
+      const tokenCaptcha = await this.redis.get(tokenCaptchaKey);
+
+      const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
+      const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha || ''}`;
+
+      // 🔹 Extrai access_token_1g do cookie
+      const match = cookies.match(/access_token_1g=([^;]+)/);
+      const accessToken1g = match ? match[1] : null;
+
+      if (!accessToken1g) {
+        this.logger.warn('access_token_1g não encontrado no cookie');
+      } else {
+        console.log('Access Token:', accessToken1g);
+      }
+
       const response = await axios.get(url, {
         headers: {
-          Cookie: cookies,
+          Authorization: `Bearer ${accessToken1g}`,
           'x-grau-instancia': instancia,
           referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
           'user-agent':
