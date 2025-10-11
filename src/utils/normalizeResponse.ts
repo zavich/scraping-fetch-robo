@@ -217,96 +217,81 @@ function scoreIniciais(partesIni: string, tituloIni: string): number {
 export function atualizarNomesPartes(
   titulos: ItensProcesso[],
   partes: Partes[],
-  limiar = 0.5,
 ): Partes[] {
-  const regexNomePessoa = /\b[A-ZÁ-Ú]{2,}(?:\s+[A-ZÁ-Ú]{2,})+\b/g;
-  const regexEmpresa =
-    /\b(?!CNPJ|CPF|SALA|ED|NNN|NNNN|NN)[A-ZÁ-Ú&.\-]{2,}(?:\s+[A-ZÁ-Ú&.\-]{2,})*(?:\s*(?:S\/?A|LTDA|ME|EIRELI))?\b/g;
+  const regexNomeCompleto =
+    /([A-Z][A-Z0-9&\.\(\)-]*(?:\s+[A-Z0-9&\.\(\)-]+)+)/g;
 
-  const gerarIniciais = (nome?: string): string => {
-    if (!nome) return '';
-    return nome
-      .replace(/[.,]/g, '')
-      .replace(/\b(S\/A|LTDA|ME|EIRELI)\b/g, '')
-      ?.split(/\s+/)
-      .map((w) => w[0])
-      .join('');
-  };
+  // 🔹 Função para gerar siglas corretamente
+  const gerarSiglas = (nome: string) =>
+    nome
+      .replace(/[()]/g, '') // remove parênteses
+      .split(/\s+/)
+      .map((word) => (word.includes('.') ? word.replace(/\./g, '') : word[0]))
+      .join('')
+      .toUpperCase();
 
-  // 🔹 Extrair nomes dos títulos
-  const nomesExtraidos: string[] = [];
-  const empresasExtraidas: string[] = [];
+  // 🔹 Extrair nomes completos dos títulos com siglas
+  const nomesExtraidos: { nome: string; siglas: string }[] = [];
 
-  titulos.forEach((item) => {
-    const titulo = item.titulo || '';
-    nomesExtraidos.push(...(titulo.match(regexNomePessoa) || []));
-    empresasExtraidas.push(...(titulo.match(regexEmpresa) || []));
+  titulos.forEach(({ titulo }) => {
+    let match: RegExpExecArray | null;
+    while ((match = regexNomeCompleto.exec(titulo)) !== null) {
+      const nome = String(match[1]).trim();
+      if (nome.split(/\s+/).length >= 2) {
+        nomesExtraidos.push({ nome, siglas: gerarSiglas(nome) });
+      }
+    }
   });
 
-  // 🔹 Limpar ruídos
-  const limpar = (arr: string[]) =>
-    arr.filter(
-      (n) =>
-        n.length > 3 &&
-        !/^(CNPJ|CPF|NN\.|NNNN|SALA|ED)$/i.test(n.trim()) &&
-        !/^\d+$/.test(n.trim()),
-    );
-
-  const nomesLimpados = limpar(nomesExtraidos);
-  const empresasLimpadas = empresasExtraidas.filter((n) =>
-    /\bS[\s./]*A\b|\bLTDA\b|\bME\b|\bEIRELI\b/.test(n),
-  ); // 👈 garante que são empresas de verdade
-
-  const todosNomesExtraidos = [...nomesLimpados, ...empresasLimpadas];
+  // 🔹 Remover duplicatas
+  const nomesUnicos = Array.from(
+    new Map(nomesExtraidos.map((n) => [n.nome, n])).values(),
+  );
 
   return partes.map((parte) => {
-    const copiaParte = { ...parte };
+    // ⚠️ Não altera nomes de advogados
+    if (parte.tipo === 'ADVOGADO') return parte;
 
-    // 👇 se for empresa, restringe à lista de empresas reais
-    const nomesParaAssociar =
-      parte.documento?.tipo === 'CNPJ'
-        ? empresasLimpadas.length > 0
-          ? empresasLimpadas
-          : todosNomesExtraidos
-        : todosNomesExtraidos;
+    const sigParte = gerarSiglas(parte.nome);
+    let melhorNome = parte.nome;
+    for (const { nome: nomeTitulo, siglas: sigTituloRaw } of nomesUnicos) {
+      // Empresa só se CNPJ
+      const sigTitulo = sigTituloRaw.replace(/[^A-Z0-9]/g, '')?.trim();
+      const sigParteClean = sigParte.replace(/[^A-Z0-9]/g, '')?.trim();
+      // if (
+      //   parte.documento?.tipo === 'CNPJ' &&
+      //   !/[A-Z]{1,}\s*(?:S\/A|LTDA|ME|EIRELI)/i.test(nomeTitulo)
+      // ) {
+      //   continue;
+      // }
 
-    let melhorScore = 0;
-    let melhorNome = copiaParte.nome;
-
-    for (const nomeCompleto of nomesParaAssociar) {
+      // Número do documento bate → assume direto
       if (
         parte.documento?.numero &&
-        nomeCompleto.includes(parte.documento.numero)
+        nomeTitulo.includes(parte.documento.numero)
       ) {
-        melhorNome = nomeCompleto;
+        melhorNome = nomeTitulo;
         break;
       }
 
-      // ⚖️ Impedir que ADVOGADO seja confundido com empresa
-      if (parte.tipo === 'ADVOGADO' && nomeCompleto.match(regexEmpresa)) {
-        continue;
-      }
-
-      const iniciaisParte = gerarIniciais(copiaParte.nome).toUpperCase();
-      const iniciaisTitulo = gerarIniciais(nomeCompleto).toUpperCase();
-      const score = scoreIniciais(iniciaisParte, iniciaisTitulo);
-
-      if (
-        score > melhorScore &&
-        score >= limiar &&
-        nomeCompleto?.split(' ').length > 1
-      ) {
-        melhorScore = score;
-        melhorNome = nomeCompleto;
+      // Correspondência mínima de siglas → pega primeiro match
+      // Correspondência mínima de siglas → pega primeiro match aproximado
+      if (matchSiglas(sigParteClean, sigTitulo)) {
+        melhorNome = nomeTitulo;
+        break;
       }
     }
 
-    // 🟢 Se é empresa (CNPJ) e há apenas uma empresa extraída, assume diretamente
-    if (parte.documento?.tipo === 'CNPJ' && empresasLimpadas.length === 1) {
-      melhorNome = empresasLimpadas[0];
-    }
-
-    copiaParte.nome = melhorNome;
-    return copiaParte;
+    return { ...parte, nome: melhorNome };
   });
+}
+function matchSiglas(sigParte: string, sigTitulo: string): boolean {
+  sigParte = sigParte.replace(/[^A-Z0-9]/g, '');
+  sigTitulo = sigTitulo.replace(/[^A-Z0-9]/g, '');
+  let i = 0;
+  for (const c of sigTitulo) {
+    if (c === sigParte[i]) i++;
+    if (i === sigParte.length) return true;
+  }
+  return false;
 }
