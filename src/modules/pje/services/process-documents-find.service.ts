@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
-import { CaptchaService } from 'src/services/captcha.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
@@ -18,7 +17,6 @@ export class ProcessDocumentsFindService {
     port: Number(process.env.REDIS_PORT) || 6379,
   });
   constructor(
-    private readonly captchaService: CaptchaService,
     private readonly documentoService: DocumentoService,
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
@@ -45,7 +43,7 @@ export class ProcessDocumentsFindService {
           instance: instanceNumber.toString(),
         };
       });
-
+      if (!instances || instances.length === 0) return [];
       const documentosRestritos = await this.uploadDocumentosRestritos(
         regionTRT,
         instances,
@@ -184,6 +182,9 @@ export class ProcessDocumentsFindService {
           });
 
           processedDocumentIds.add(bookmark.id);
+          await this.redis.del(
+            `pje:token:captcha:${processNumber}:${lastInstance.instance}`,
+          ); // limpa tokenCaptcha usado
         }
       } catch (pdfError: any) {
         // Captura erros específicos do pdfjs-dist
@@ -203,7 +204,7 @@ export class ProcessDocumentsFindService {
     } catch (err) {
       console.log(err);
       this.logger.error(
-        `❌ Erro inesperado ao processar documentos da instância ${lastInstance.instance}: ${err.message}`,
+        `❌ Erro inesperado ao processar documentos da instância ${lastInstance.instance} no processo ${processNumber}: ${err.message}`,
       );
     }
 

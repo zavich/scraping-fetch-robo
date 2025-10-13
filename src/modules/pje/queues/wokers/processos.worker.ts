@@ -15,19 +15,49 @@ export class ProcessosWorker extends WorkerHost {
   }
 
   async process(job: Job<{ numero: string; origem: string }>) {
+    const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
+    const { numero, origem } = job.data;
     try {
-      const { numero, origem } = job.data;
       this.logger.log(`📄 Consultando processo ${numero}`);
       const instances = await this.processFindService.execute(numero, origem);
       const result = instances.slice(0, 2);
+      if (!instances || instances.length === 0) {
+        this.logger.warn(
+          `⚠️ Nenhum resultado encontrado para o processo ${numero}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Nenhum resultado encontrado para o processo, verifique o número e tente novamente mais tarde',
+          true,
+          origem,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+        return response;
+      }
       const response = normalizeResponse(numero, result, '', false, origem);
 
-      const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
       await axios.post(webhookUrl, response, {
         headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
       });
     } catch (error) {
-      this.logger.error(`Error processing job ${job.id}: ${error.message}`);
+      if (axios.isAxiosError(error) && error.status === 503) {
+        console.log('ERROR DOCUMENTOS WORKER', error);
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Error ao consultar documentos, tente novamente mais tarde',
+          true,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+      }
+      this.logger.error(
+        `Error processing job ${job.id}: ${axios.isAxiosError(error) && error.message}`,
+      );
     }
   }
 }

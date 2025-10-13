@@ -75,7 +75,7 @@ export class PjeLoginService {
         });
 
         const page = await browser.newPage();
-        page.setDefaultNavigationTimeout(30000);
+        page.setDefaultNavigationTimeout(45000);
 
         // 🔹 User-Agent e viewport aleatórios
         const randomUA =

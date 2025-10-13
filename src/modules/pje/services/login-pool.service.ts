@@ -1,5 +1,9 @@
 // login-pool.service.ts
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { PjeLoginService } from './login.service';
 import axios from 'axios';
@@ -12,129 +16,9 @@ export class LoginPoolService {
     host: process.env.REDIS_HOST || 'redis',
     port: Number(process.env.REDIS_PORT) || 6379,
   });
+
   constructor(private readonly loginService: PjeLoginService) {}
 
-  async getCookies(trt: number): Promise<string> {
-    const redisKey = `pje:session:${trt}`;
-    try {
-      let cookies = await this.redis.get(redisKey);
-
-      if (!cookies) {
-        const lockKey = `pje:lock:${trt}`;
-        const lockAcquired = await (this.redis as any).set(
-          lockKey,
-          '1',
-          'NX',
-          'PX',
-          10000,
-        ); // lock 10s
-
-        if (lockAcquired) {
-          try {
-            let loginSuccess = false;
-            let lastError: any = null;
-
-            for (let i = 0; i < this.contas.length; i++) {
-              const { username, password } = this.getConta(true); // força alternância
-              this.logger.debug(
-                `🔒 Tentativa de login TRT ${trt} com ${username}...`,
-              );
-              try {
-                const loginResult = await this.loginService.execute(
-                  trt,
-                  username,
-                  password,
-                );
-                cookies = loginResult.cookies;
-                loginSuccess = true;
-                break; // saiu do loop se logou
-              } catch (error) {
-                lastError = error;
-                this.logger.warn(`Conta ${username} falhou: ${error.message}`);
-              }
-            }
-
-            if (!loginSuccess) {
-              throw new Error(
-                `Não foi possível acessar o PJe. Último erro: ${lastError?.message}`,
-              );
-            }
-
-            // ✅ garante que foi salvo antes de liberar o lock
-            if (cookies !== null) {
-              await this.redis.set(redisKey, cookies, 'EX', 3600);
-            } else {
-              throw new Error('Cookies is null, cannot save to Redis');
-            }
-            await this.redis.set(`${redisKey}:ready`, '1', 'EX', 15);
-          } finally {
-            await this.redis.del(lockKey);
-          }
-        } else {
-          // outro worker está logando, espera até cookie estar disponível
-          let retries = 50;
-          while (retries > 0 && !cookies) {
-            await new Promise((r) => setTimeout(r, 500)); // espera 200ms
-            cookies = await this.redis.get(redisKey);
-            retries--;
-          }
-
-          if (!cookies) {
-            throw new Error(`Não foi possível obter cookie para TRT ${trt}`);
-          }
-        }
-      }
-      const response = await axios.get(
-        `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
-        {
-          headers: {
-            accept: 'application/json, text/plain, */*',
-            'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-            'content-type': 'application/json',
-            referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
-            'user-agent':
-              userAgents[Math.floor(Math.random() * userAgents.length)],
-            'x-grau-instancia': '1',
-            Cookie: cookies,
-          },
-        },
-      );
-
-      const cookieObj: Record<string, string> = {};
-
-      // Converte string de cookie para objeto
-      cookies.split(';').forEach((cookie) => {
-        const [key, value] = cookie.split('=').map((c) => c.trim());
-        if (key && value) cookieObj[key] = value;
-      });
-
-      // Atualiza token
-      cookieObj.access_token_1g = response.data.access_token;
-
-      // Converte de volta para string
-      const updatedCookies = Object.entries(cookieObj)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('; ');
-
-      // Salva no Redis novamente
-      await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
-      cookies = updatedCookies;
-
-      return cookies;
-    } catch (error) {
-      if (error.response?.data?.codigoErro === 'ARQ-028') {
-        this.logger.debug(`❌ Cookie expirado para TRT ${trt}, renovando...`);
-        await this.redis.del(redisKey);
-        return this.getCookies(trt); // força nova conta
-      }
-      this.logger.error(
-        `Erro ao obter cookies para TRT ${trt}: ${error.message}`,
-      );
-
-      // ✅ Garante retorno consistente (evita erro de tipo)
-      throw new Error(`Falha ao obter cookies para TRT ${trt}`);
-    }
-  }
   private contas = [
     {
       username: process.env.PJE_USER_FIRST as string,
@@ -151,6 +35,7 @@ export class LoginPoolService {
   ];
   private contaIndex = 0;
   private contadorProcessos = 0;
+
   private getConta(force = false): { username: string; password: string } {
     if (force || this.contadorProcessos >= 5) {
       this.contaIndex = (this.contaIndex + 1) % this.contas.length;
@@ -161,5 +46,179 @@ export class LoginPoolService {
     }
     this.contadorProcessos++;
     return this.contas[this.contaIndex];
+  }
+
+  // Adicione um parâmetro opcional "simulateDown" para testes
+  private async checkSiteAvailability(trt: number, simulateDown = false) {
+    if (simulateDown) {
+      this.logger.warn(`Simulando TRT-${trt} fora do ar`);
+      throw new ServiceUnavailableException(
+        `TRT-${trt} fora do ar (simulação)`,
+      );
+    }
+
+    const loginUrl = `https://pje.trt${trt}.jus.br/primeirograu/login.seam`;
+    try {
+      const res = await axios.get(loginUrl, {
+        timeout: 10000,
+        validateStatus: () => true,
+      });
+      if (res.status >= 500) {
+        throw new ServiceUnavailableException(
+          `TRT-${trt} fora do ar (status ${res.status})`,
+        );
+      }
+    } catch (err) {
+      throw new ServiceUnavailableException(
+        `Não foi possível acessar TRT-${trt}: ${err}`,
+      );
+    }
+  }
+
+  async getCookies(trt: number): Promise<string> {
+    const redisKey = `pje:session:${trt}`;
+    const readyKey = `${redisKey}:ready`;
+    const lockKey = `pje:lock:${trt}`;
+    const lockTTL = 15000;
+    const waitInterval = 500;
+    const maxWait = 60000;
+
+    let cookies = await this.redis.get(redisKey);
+    if (cookies) return this.refreshToken(trt, cookies);
+
+    // Checa disponibilidade do site antes de gastar contas
+    await this.checkSiteAvailability(trt);
+
+    // Tenta adquirir lock
+    const lockAcquired = await (this.redis as any).set(
+      lockKey,
+      '1',
+      'NX',
+      'PX',
+      lockTTL,
+    );
+    if (lockAcquired) {
+      try {
+        let success = false;
+        let attempts = 0;
+
+        while (!success && attempts < this.contas.length) {
+          const { username, password } = this.getConta(attempts > 0);
+          this.logger.debug(
+            `🔒 Tentando login TRT ${trt} com conta ${username}...`,
+          );
+
+          try {
+            const loginResult = await this.loginService.execute(
+              trt,
+              username,
+              password,
+            );
+            cookies = loginResult.cookies;
+
+            await this.redis.set(redisKey, cookies, 'EX', 3600);
+            await this.redis.set(readyKey, '1', 'EX', 30);
+
+            success = true;
+          } catch (err: any) {
+            // Se for erro de site (503), não tenta outra conta
+            if (
+              err instanceof ServiceUnavailableException &&
+              /fora do ar/.test(err.message)
+            ) {
+              this.logger.warn(
+                `❌ Site TRT-${trt} fora do ar, abortando login.`,
+              );
+              throw err;
+            }
+
+            this.logger.warn(
+              `❌ Falha ao logar com conta ${username}, tentando próxima...`,
+            );
+            attempts++;
+          }
+        }
+
+        if (!success) {
+          throw new Error(
+            `Não foi possível logar no TRT ${trt} com nenhuma conta.`,
+          );
+        }
+      } finally {
+        await this.redis.del(lockKey);
+      }
+
+      return this.refreshToken(trt, cookies as string);
+    }
+
+    // Espera outro worker finalizar login
+    const start = Date.now();
+    while (!cookies && Date.now() - start < maxWait) {
+      const ready = await this.redis.get(readyKey);
+      if (ready) {
+        cookies = await this.redis.get(redisKey);
+        if (cookies) break;
+      }
+      await new Promise((r) => setTimeout(r, waitInterval));
+    }
+
+    if (!cookies) {
+      // Nenhum cookie disponível após espera, tenta nova conta
+      this.logger.warn(
+        `⚠️ Timeout esperando cookie TRT ${trt}, forçando nova conta.`,
+      );
+      const { username, password } = this.getConta(true);
+      const loginResult = await this.loginService.execute(
+        trt,
+        username,
+        password,
+      );
+      cookies = loginResult.cookies;
+      await this.redis.set(redisKey, cookies, 'EX', 3600);
+      await this.redis.set(readyKey, '1', 'EX', 30);
+    }
+
+    return this.refreshToken(trt, cookies);
+  }
+
+  private async refreshToken(trt: number, cookies: string): Promise<string> {
+    const redisKey = `pje:session:${trt}`;
+    try {
+      const response = await axios.get(
+        `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
+        {
+          headers: {
+            accept: 'application/json, text/plain, */*',
+            'accept-language': 'pt-BR,pt;q=0.9',
+            'content-type': 'application/json',
+            referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
+            'user-agent':
+              userAgents[Math.floor(Math.random() * userAgents.length)],
+            'x-grau-instancia': '1',
+            Cookie: cookies,
+          },
+        },
+      );
+
+      const cookieObj: Record<string, string> = {};
+      cookies.split(';').forEach((c) => {
+        const [key, value] = c.split('=').map((x) => x.trim());
+        if (key && value) cookieObj[key] = value;
+      });
+
+      cookieObj.access_token_1g = response.data.access_token;
+
+      const updatedCookies = Object.entries(cookieObj)
+        .map(([k, v]) => `${k}=${v}`)
+        .join('; ');
+
+      await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
+      return updatedCookies;
+    } catch (err) {
+      this.logger.warn(
+        `❌ Não foi possível atualizar access_token TRT ${trt}, usando cookie existente.`,
+      );
+      return cookies;
+    }
   }
 }

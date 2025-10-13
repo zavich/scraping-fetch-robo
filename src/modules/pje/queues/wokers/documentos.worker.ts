@@ -22,6 +22,7 @@ export class DocumentosWorker extends WorkerHost {
   async process(job: Job<{ numero: string }>) {
     const { numero } = job.data;
     const regionTRT = Number(numero.split('.')[3]);
+    const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
     try {
       const cookies = await this.loginPool.getCookies(Number(regionTRT));
       this.logger.log(`🔎 CONSULTANDO ${numero}`);
@@ -31,7 +32,6 @@ export class DocumentosWorker extends WorkerHost {
       );
       const result = instances.slice(0, 2);
 
-      const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
       this.logger.log(`🔎 CONSULTA FINALIZADA PARA ${numero}`);
       if (!instances || instances.length === 0) {
         const response = normalizeResponse(
@@ -52,9 +52,19 @@ export class DocumentosWorker extends WorkerHost {
       });
       return response;
     } catch (error) {
-      console.log(error);
-
-      throw error;
+      if (error.status === 503) {
+        this.logger.warn(`⚠️ TRT-${regionTRT} está fora do ar`);
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Error ao consultar documentos, tente novamente mais tarde',
+          true,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+      }
+      this.logger.error(`Error processing job ${job.id}: ${error.message}`);
     }
   }
 }

@@ -68,11 +68,7 @@ export class ProcessFindService {
               'imagem' in processoResponse &&
               'tokenDesafio' in processoResponse
             ) {
-              const resposta = await this.fetchCaptcha(
-                processoResponse.imagem,
-                processoResponse.tokenDesafio,
-                numeroDoProcesso,
-              );
+              const resposta = await this.fetchCaptcha(processoResponse.imagem);
 
               processoResponse = await this.fetchProcess(
                 numeroDoProcesso,
@@ -126,11 +122,7 @@ export class ProcessFindService {
               'imagem' in processoResponse &&
               'tokenDesafio' in processoResponse
             ) {
-              const resposta = await this.fetchCaptcha(
-                processoResponse.imagem,
-                processoResponse.tokenDesafio,
-                numeroDoProcesso,
-              );
+              const resposta = await this.fetchCaptcha(processoResponse.imagem);
 
               processoResponse = await this.fetchProcess(
                 numeroDoProcesso,
@@ -227,24 +219,9 @@ export class ProcessFindService {
     }
   }
 
-  async fetchCaptcha(
-    imagem: string,
-    tokenDesafio: string,
-    numeroDoProcesso: string,
-  ): Promise<string> {
+  async fetchCaptcha(imagem: string): Promise<string> {
     try {
-      const redisCaptchaKey = `pje:captcha:${numeroDoProcesso}`;
-
       const captcha = await this.captchaService.resolveCaptcha(imagem);
-      const captchaDetalheProcesso = {
-        resposta: captcha.resposta,
-        tokenDesafio: tokenDesafio,
-      };
-      // Salva no Redis por 5 minutos
-      await this.redis.set(
-        redisCaptchaKey,
-        JSON.stringify(captchaDetalheProcesso),
-      );
       return captcha.resposta;
     } catch (error) {
       console.error('Erro ao buscar captcha:', error.message);
