@@ -10,18 +10,21 @@ RUN apk add --no-cache \
     ca-certificates \
     ttf-freefont \
     dumb-init \
+    udev \
+    xvfb \
     && rm -rf /var/cache/apk/*
 
 # Define variáveis para o Puppeteer usar o Chromium instalado
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV NODE_ENV=production
 
 # Step 2: Set working directory
 WORKDIR /usr/src/app
 
 # Step 3: Install app dependencies
 COPY package*.json ./
-RUN npm install
+RUN npm ci --omit=dev
 
 # Step 4: Copy source code
 COPY . .
