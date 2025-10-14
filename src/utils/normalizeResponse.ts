@@ -113,9 +113,8 @@ export function normalizeResponse(
         });
       });
     });
-    if (!isDocument) {
-      partes = atualizarNomesPartes(instance.itensProcesso, partes);
-    }
+
+    partes = atualizarNomesPartes(instance.itensProcesso, partes);
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
       const partesConteudo = [
