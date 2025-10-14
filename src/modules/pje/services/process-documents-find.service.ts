@@ -57,7 +57,9 @@ export class ProcessDocumentsFindService {
       }));
       return newInstances;
     } catch (error) {
-      console.log(error);
+      this.logger.error(
+        `Error uploading restricted documents: ${error.message}`,
+      );
       return [];
     }
   }
@@ -199,10 +201,10 @@ export class ProcessDocumentsFindService {
         // continue; // ignora esse PDF e vai pro próximo
       }
     } catch (err) {
-      console.log(err);
       this.logger.error(
         `❌ Erro inesperado ao processar documentos da instância ${lastInstance.instance} no processo ${processNumber}: ${err.message}`,
       );
+      throw err;
     }
     const captchaKey = `pje:token:captcha:${processNumber}`;
     const keys = await this.redis.keys(`${captchaKey}*`);

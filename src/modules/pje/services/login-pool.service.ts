@@ -114,6 +114,10 @@ export class LoginPoolService {
               username,
               password,
             );
+            if (!loginResult?.cookies) {
+              throw new Error(`Login TRT ${trt} não retornou cookies.`);
+            }
+
             cookies = loginResult.cookies;
 
             await this.redis.set(redisKey, cookies, 'EX', 3600);
@@ -144,11 +148,14 @@ export class LoginPoolService {
             `Não foi possível logar no TRT ${trt} com nenhuma conta.`,
           );
         }
-      } finally {
+        // ✅ Só depois que refreshToken terminar, libera o lock
+        const refreshed = await this.refreshToken(trt, cookies as string);
         await this.redis.del(lockKey);
+        return refreshed;
+      } catch (err) {
+        await this.redis.del(lockKey);
+        throw err;
       }
-
-      return this.refreshToken(trt, cookies as string);
     }
 
     // Espera outro worker finalizar login
@@ -215,10 +222,12 @@ export class LoginPoolService {
       await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
       return updatedCookies;
     } catch (err) {
-      this.logger.warn(
-        `❌ Não foi possível atualizar access_token TRT ${trt}, usando cookie existente.`,
-      );
-      return cookies;
+      if (err.response?.data.codigoErro === 'ARQ-028') {
+        this.logger.warn(`⚠️ Cookie TRT ${trt} expirado.`);
+        await this.redis.del(redisKey);
+        return await this.getCookies(trt); // ✅ retorna o novo cookie
+      }
+      throw new Error(`Erro ao validar cookie TRT ${trt}: ${err.message}`);
     }
   }
 }

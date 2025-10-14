@@ -142,13 +142,6 @@ export class ProcessFindService {
           }
         }
       }
-
-      const erroIndex = instances.findIndex(
-        (instance) => 'mensagemErro' in instance && instance.mensagemErro,
-      );
-      if (erroIndex !== -1) {
-        return [];
-      }
       return instances;
     } catch (error) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);

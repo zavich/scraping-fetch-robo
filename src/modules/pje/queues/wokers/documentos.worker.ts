@@ -8,7 +8,7 @@ import { ProcessDocumentsFindService } from '../../services/process-documents-fi
 import { LoginPoolService } from '../../services/login-pool.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
-@Processor('pje-documentos', { concurrency: 3, lockDuration: 120000 }) // 3 por vez
+@Processor('pje-documentos', { concurrency: 10, lockDuration: 120000 }) // 3 por vez
 export class DocumentosWorker extends WorkerHost {
   private readonly logger = new Logger(DocumentosWorker.name);
 
@@ -67,19 +67,17 @@ export class DocumentosWorker extends WorkerHost {
       });
       return response;
     } catch (error) {
-      if (error.status === 503) {
-        this.logger.warn(`⚠️ TRT-${regionTRT} está fora do ar`);
-        const response = normalizeResponse(
-          numero,
-          [],
-          'Error ao consultar documentos, tente novamente mais tarde',
-          true,
-        );
-        await axios.post(webhookUrl, response, {
-          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
-        });
-      }
       this.logger.error(`Error processing job ${job.id}: ${error.message}`);
+      this.logger.warn(`⚠️ TRT-${regionTRT} está fora do ar`);
+      const response = normalizeResponse(
+        numero,
+        [],
+        'Error ao consultar documentos, tente novamente mais tarde',
+        true,
+      );
+      await axios.post(webhookUrl, response, {
+        headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+      });
     }
   }
 }
