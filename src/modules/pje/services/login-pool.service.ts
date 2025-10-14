@@ -222,7 +222,10 @@ export class LoginPoolService {
       await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
       return updatedCookies;
     } catch (err) {
-      if (err.response?.data.codigoErro === 'ARQ-028') {
+      if (
+        err.response?.status === 403 ||
+        err.response?.data.codigoErro === 'ARQ-028'
+      ) {
         this.logger.warn(`⚠️ Cookie TRT ${trt} expirado.`);
         await this.redis.del(redisKey);
         return await this.getCookies(trt); // ✅ retorna o novo cookie
