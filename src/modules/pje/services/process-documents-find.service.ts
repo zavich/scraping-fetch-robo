@@ -182,9 +182,6 @@ export class ProcessDocumentsFindService {
           });
 
           processedDocumentIds.add(bookmark.id);
-          await this.redis.del(
-            `pje:token:captcha:${processNumber}:${lastInstance.instance}`,
-          ); // limpa tokenCaptcha usado
         }
       } catch (pdfError: any) {
         // Captura erros específicos do pdfjs-dist
@@ -205,6 +202,19 @@ export class ProcessDocumentsFindService {
       console.log(err);
       this.logger.error(
         `❌ Erro inesperado ao processar documentos da instância ${lastInstance.instance} no processo ${processNumber}: ${err.message}`,
+      );
+    }
+    const captchaKey = `pje:token:captcha:${processNumber}`;
+    const keys = await this.redis.keys(`${captchaKey}*`);
+
+    if (keys.length) {
+      const deleted = await this.redis.del(...keys);
+      this.logger.debug(
+        `🧹 ${deleted} tokenCaptcha(s) removidos para ${processNumber}`,
+      );
+    } else {
+      this.logger.warn(
+        `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber}`,
       );
     }
 

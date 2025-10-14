@@ -8,7 +8,7 @@ import { ProcessDocumentsFindService } from '../../services/process-documents-fi
 import { LoginPoolService } from '../../services/login-pool.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
-@Processor('pje-documentos', { concurrency: 4, lockDuration: 120000 }) // 1 por vez
+@Processor('pje-documentos', { concurrency: 3, lockDuration: 120000 }) // 3 por vez
 export class DocumentosWorker extends WorkerHost {
   private readonly logger = new Logger(DocumentosWorker.name);
 
@@ -25,6 +25,21 @@ export class DocumentosWorker extends WorkerHost {
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
     try {
       const cookies = await this.loginPool.getCookies(Number(regionTRT));
+      if (!cookies) {
+        this.logger.warn(
+          `⚠️ Não foi possível obter cookies para TRT-${regionTRT}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Error ao consultar documentos, tente novamente mais tarde',
+          true,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+        return response;
+      }
       this.logger.log(`🔎 CONSULTANDO ${numero}`);
       const instances = await this.processDocumentsFindService.execute(
         numero,
