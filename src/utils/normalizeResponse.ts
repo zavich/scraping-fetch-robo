@@ -231,7 +231,12 @@ function gerarSiglas(nome: string): string {
     .replace(/[()]/g, '') // remove parênteses
     .split(/\s+/)
     .filter(Boolean)
-    .filter((word) => !stopwords.has(word.toUpperCase())) // 🔹 ignora stopwords
+    .filter((word) => {
+      // 🔹 mantém se for inicial tipo "E." mesmo sendo stopword
+      if (/^[A-Z]\.?$/i.test(word)) return true;
+      // 🔹 ignora stopwords para palavras normais
+      return !stopwords.has(word.toUpperCase());
+    })
     .map((word) => {
       // se for sigla tipo "S." → pega a letra
       if (/^[A-Z]\.?$/.test(word)) return word[0];
@@ -241,6 +246,7 @@ function gerarSiglas(nome: string): string {
     .join('')
     .toUpperCase();
 }
+
 export function atualizarNomesPartes(
   titulos: ItensProcesso[],
   partes: Partes[],
