@@ -1,4 +1,17 @@
-# Step 1: Base image with Node.js
+# ---------- STAGE 1: BUILD ----------
+FROM node:18-alpine AS build
+
+WORKDIR /app
+
+# Instala dependências necessárias para o build
+COPY package*.json ./
+RUN npm install
+
+# Copia o código-fonte e compila o projeto
+COPY . .
+RUN npm run build
+
+# ---------- STAGE 2: RUN ----------
 FROM node:18-alpine
 
 # Instala Chromium e dependências necessárias para Puppeteer
@@ -19,21 +32,13 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV NODE_ENV=production
 
-# Step 2: Set working directory
 WORKDIR /usr/src/app
 
-# Step 3: Install app dependencies
+# Copia apenas o build e as dependências necessárias
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Step 4: Copy source code
-COPY . .
+COPY --from=build /app/dist ./dist
 
-# Step 5: Build the app (transpile TypeScript)
-RUN npm run build
-
-# Step 6: Expose the port NestJS runs on
 EXPOSE 8081
-
-# Step 7: Start the app
 CMD ["dumb-init", "node", "dist/main"]
