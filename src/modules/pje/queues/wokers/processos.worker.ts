@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import axios from 'axios';
 import { ProcessFindService } from '../../services/process-find.service';
+import { normalizeResponse } from 'src/utils/normalizeResponse';
 
 @Processor('pje-processos', { concurrency: 10, lockDuration: 600000 }) // paralelo
 export class ProcessosWorker extends WorkerHost {
@@ -14,14 +15,49 @@ export class ProcessosWorker extends WorkerHost {
   }
 
   async process(job: Job<{ numero: string; origem: string }>) {
-    const { numero, origem } = job.data;
-    this.logger.log(`📄 Consultando processo ${numero}`);
-    const response = await this.processFindService.execute(numero, origem);
-    console.log('response', response);
-
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
-    await axios.post(webhookUrl, response, {
-      headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
-    });
+    const { numero, origem } = job.data;
+    try {
+      this.logger.log(`📄 Consultando processo ${numero}`);
+      const instances = await this.processFindService.execute(numero, origem);
+      const result = instances.slice(0, 2);
+      if (!instances || instances.length === 0) {
+        this.logger.warn(
+          `⚠️ Nenhum resultado encontrado para o processo ${numero}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Nenhum resultado encontrado para o processo, verifique o número e tente novamente mais tarde',
+          true,
+          origem,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+        return response;
+      }
+      const response = normalizeResponse(numero, result, '', false, origem);
+
+      await axios.post(webhookUrl, response, {
+        headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+      });
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.status === 503) {
+        console.log('ERROR DOCUMENTOS WORKER', error);
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Error ao consultar documentos, tente novamente mais tarde',
+          true,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+      }
+      this.logger.error(
+        `Error processing job ${job.id}: ${axios.isAxiosError(error) && error.message}`,
+      );
+    }
   }
 }

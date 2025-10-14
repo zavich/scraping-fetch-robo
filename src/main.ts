@@ -4,12 +4,22 @@ import { ExpressAdapter } from '@bull-board/express';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { Queue } from 'bullmq';
+import { BrowserManager } from './utils/browser.manager';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const port = process.env.PORT || 8081;
   app.enableCors({
     origin: ['https://api.analisesprosolutti.com'],
     credentials: true, // Permite o envio de cookies
+  });
+
+  process.on('SIGINT', () => {
+    (async () => {
+      console.log('🧹 Encerrando browser...');
+      const browser = await BrowserManager.getBrowser();
+      await browser.close().catch(() => {});
+      process.exit(0);
+    })();
   });
   if (process.env?.ENVIRONMENT !== 'production') {
     const serverAdapter = new ExpressAdapter();
