@@ -17,7 +17,25 @@ export class ProcessosWorker extends WorkerHost {
   async process(job: Job<{ numero: string; origem: string }>) {
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
     const { numero, origem } = job.data;
+    const regionTRT = numero?.includes('.')
+      ? Number(numero.split('.')[3])
+      : null;
     try {
+      if (regionTRT === null) {
+        this.logger.log(
+          `📄 Error ao consultar documentos para o processo ${numero} ${regionTRT}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Error ao consultar documentos, verifique o número e tente novamente mais tarde',
+          true,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+        return;
+      }
       this.logger.log(`📄 Consultando processo ${numero}`);
       const instances = await this.processFindService.execute(numero, origem);
       const result = instances.slice(0, 2);
@@ -37,6 +55,28 @@ export class ProcessosWorker extends WorkerHost {
         });
         return response;
       }
+      const segredoJustica = instances.some(
+        (instance) =>
+          'mensagemErro' in instance && instance.juizoDigital === false,
+      );
+
+      if (result && segredoJustica) {
+        this.logger.warn(
+          `⚠️ O processo ${numero} se encontra em segredo de justiça`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          `O processo ${numero} se encontra em segredo de justiça`,
+          true,
+          origem,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+        return;
+      }
+
       const response = normalizeResponse(numero, result, '', false, origem);
 
       await axios.post(webhookUrl, response, {
@@ -55,15 +95,6 @@ export class ProcessosWorker extends WorkerHost {
           headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
         });
       }
-      const response = normalizeResponse(
-        numero,
-        [],
-        'Error ao consultar documentos, verifique o número e tente novamente mais tarde',
-        true,
-      );
-      await axios.post(webhookUrl, response, {
-        headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
-      });
       this.logger.error(`Error processing job ${job.id}: ${error}`);
     }
   }
