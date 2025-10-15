@@ -23,7 +23,7 @@ export class ProcessosWorker extends WorkerHost {
       const result = instances.slice(0, 2);
       if (!instances || instances.length === 0) {
         this.logger.warn(
-          `⚠️ Nenhum resultado encontrado para o processo ${numero}`,
+          `⚠️ Nenhum resultado encontrado para o processo ${numero} (origem: ${origem})`,
         );
         const response = normalizeResponse(
           numero,
@@ -55,7 +55,7 @@ export class ProcessosWorker extends WorkerHost {
           headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
         });
       }
-      this.logger.error(`Error processing job ${job.id}: ${error.message}`);
+      this.logger.error(`Error processing job ${job.id}: ${error}`);
     }
   }
 }

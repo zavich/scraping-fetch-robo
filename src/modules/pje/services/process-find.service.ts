@@ -22,7 +22,9 @@ export class ProcessFindService {
     numeroDoProcesso: string,
     origem?: string,
   ): Promise<ProcessosResponse[]> {
-    const regionTRT = Number(numeroDoProcesso.split('.')[3]);
+    const regionTRT = numeroDoProcesso?.includes('.')
+      ? Number(numeroDoProcesso.split('.')[3])
+      : null;
 
     try {
       const tokenCaptcha = await this.redis.get('pje:token:captcha');
@@ -167,7 +169,12 @@ export class ProcessFindService {
     tokenDesafio?: string,
     resposta?: string,
   ): Promise<ProcessosResponse> {
-    const regionTRT = Number(numeroDoProcesso.split('.')[3]);
+    const regionTRT = numeroDoProcesso?.includes('.')
+      ? Number(numeroDoProcesso.split('.')[3])
+      : null;
+    if (regionTRT === null) {
+      throw new Error(`Invalid process number format: ${numeroDoProcesso}`);
+    }
     const typeUrl = instance === '3' ? 'tst' : `trt${regionTRT}`; // --- IGNORE ---
     try {
       let url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${detalheProcessoId}`;
