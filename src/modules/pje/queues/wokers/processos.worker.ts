@@ -55,9 +55,7 @@ export class ProcessosWorker extends WorkerHost {
           headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
         });
       }
-      this.logger.error(
-        `Error processing job ${job.id}: ${axios.isAxiosError(error) && error.message}`,
-      );
+      this.logger.error(`Error processing job ${job.id}: ${error.message}`);
     }
   }
 }
