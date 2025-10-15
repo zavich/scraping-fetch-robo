@@ -1,6 +1,6 @@
 // src/modules/pje/services/process-find.service.ts
 
-import { Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
@@ -204,7 +204,9 @@ export class ProcessDocumentsFindService {
       this.logger.error(
         `❌ Erro inesperado ao processar documentos da instância ${lastInstance.instance} no processo ${processNumber}: ${err.message}`,
       );
-      throw err;
+      throw new BadGatewayException(
+        'Erro ao processar documentos restritos, tente novamente mais tarde',
+      );
     }
     const captchaKey = `pje:token:captcha:${processNumber}`;
     const keys = await this.redis.keys(`${captchaKey}*`);
