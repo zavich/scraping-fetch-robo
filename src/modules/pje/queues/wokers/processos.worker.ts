@@ -55,6 +55,15 @@ export class ProcessosWorker extends WorkerHost {
           headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
         });
       }
+      const response = normalizeResponse(
+        numero,
+        [],
+        'Error ao consultar documentos, verifique o número e tente novamente mais tarde',
+        true,
+      );
+      await axios.post(webhookUrl, response, {
+        headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+      });
       this.logger.error(`Error processing job ${job.id}: ${error}`);
     }
   }
