@@ -222,74 +222,94 @@ function gerarSiglas(nome: string): string {
     'OS',
     'POR',
     'COM',
+    'LTDA',
+    'S/A',
+    'ME',
+    'EPP',
+    'EIRELI',
+    'SA',
   ]);
 
-  return nome
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // remove acentos
-    .replace(/[.,]/g, ' ') // trata pontos e vírgulas como separadores
-    .replace(/[()]/g, '') // remove parênteses
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter((word) => {
-      // 🔹 mantém se for inicial tipo "E." mesmo sendo stopword
-      if (/^[A-Z]\.?$/i.test(word)) return true;
-      // 🔹 ignora stopwords para palavras normais
-      return !stopwords.has(word.toUpperCase());
-    })
-    .map((word) => {
-      // se for sigla tipo "S." → pega a letra
-      if (/^[A-Z]\.?$/.test(word)) return word[0];
-      // se for palavra tipo "SANTANDER" → primeira letra
-      return word[0];
-    })
-    .join('')
-    .toUpperCase();
+  return (
+    nome
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // remove acentos
+      .replace(/[(),.]/g, ' ') // remove pontuação irrelevante
+      .replace(/-/g, ' ') // trata hífen como separador
+      // 🔹 protege sufixos empresariais antes do split
+      .replace(/\bS\/A\b/gi, '') // remove S/A
+      .replace(/\bLTDA\b/gi, '')
+      .replace(/\bEIRELI\b/gi, '')
+      .replace(/\bME\b/gi, '')
+      .replace(/\bEPP\b/gi, '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter((word) => !stopwords.has(word.toUpperCase()))
+      .map((word) => word[0].toUpperCase())
+      .join('. ')
+      .concat('.')
+  );
 }
 
 export function atualizarNomesPartes(
   titulos: ItensProcesso[],
   partes: Partes[],
 ): Partes[] {
+  // aceita agora / e - dentro das palavras (mas vamos normalizar antes)
   const regexNomeCompleto =
-    /([A-Z][A-Z0-9&\.\(\)-]*(?:\s+[A-Z0-9&\.\(\)-]+)+)/g;
+    /([A-Z][A-Z0-9&\.\(\)\/-]*(?:\s+[A-Z0-9&\.\(\)\/-]+)+)/g;
 
-  // 🔹 Função para gerar siglas corretamente
+  // 🔹 Função que normaliza o título para facilitar a extração
+  function normalizeTitleForRegex(t: string): string {
+    return (
+      String(t)
+        // Normaliza espaços, trata - e / como separadores e remove duplicações estranhas
+        .replace(/\u00A0/g, ' ') // non-breaking space -> normal space
+        .replace(/\s*[-/]\s*/g, ' ') // transforma '-' e '/' (com espaços) em espaço único
+        .replace(/[.,]/g, ' ') // opcional: trata pontos e vírgulas como separadores
+        .replace(/\s+/g, ' ') // colapsa múltiplos espaços
+        .trim()
+    );
+  }
 
-  // 🔹 Extrair nomes completos dos títulos com siglas
   const nomesExtraidos: { nome: string; siglas: string }[] = [];
 
   titulos.forEach(({ titulo }) => {
+    // normaliza o título antes de aplicar o regex
+    const normalized = normalizeTitleForRegex(titulo);
     let match: RegExpExecArray | null;
-    while ((match = regexNomeCompleto.exec(titulo)) !== null) {
+    // executa o regex na versão normalizada
+    while ((match = regexNomeCompleto.exec(normalized)) !== null) {
       const nome = String(match[1]).trim();
+      // filtra nomes curtos (pelo menos 2 palavras)
       if (nome.split(/\s+/).length >= 2) {
         nomesExtraidos.push({ nome, siglas: gerarSiglas(nome) });
       }
     }
   });
 
-  // 🔹 Remover duplicatas
+  // 🔹 Remover duplicatas usando o nome normalizado como chave (evita pequenas variações)
   const nomesUnicos = Array.from(
-    new Map(nomesExtraidos.map((n) => [n.nome, n])).values(),
+    new Map(
+      nomesExtraidos.map((n) => {
+        // chave: nome sem pontuação extra e com espaços normalizados
+        const key = n.nome
+          .replace(/[.,()\/-]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        return [key, n];
+      }),
+    ).values(),
   );
 
   return partes.map((parte) => {
-    // ⚠️ Não altera nomes de advogados
     if (parte.tipo === 'ADVOGADO') return parte;
 
     const sigParte = gerarSiglas(parte.nome);
     let melhorNome = parte.nome;
     for (const { nome: nomeTitulo, siglas: sigTituloRaw } of nomesUnicos) {
-      // Empresa só se CNPJ
       const sigTitulo = sigTituloRaw.replace(/[^A-Z0-9]/g, '')?.trim();
       const sigParteClean = sigParte.replace(/[^A-Z0-9]/g, '')?.trim();
-      // if (
-      //   parte.documento?.tipo === 'CNPJ' &&
-      //   !/[A-Z]{1,}\s*(?:S\/A|LTDA|ME|EIRELI)/i.test(nomeTitulo)
-      // ) {
-      //   continue;
-      // }
 
       // Número do documento bate → assume direto
       if (
@@ -300,8 +320,7 @@ export function atualizarNomesPartes(
         break;
       }
 
-      // Correspondência mínima de siglas → pega primeiro match
-      // Correspondência mínima de siglas → pega primeiro match aproximado
+      // Comparador simples e robusto
       if (matchSiglas(sigParteClean, sigTitulo)) {
         melhorNome = nomeTitulo;
         break;
@@ -311,14 +330,23 @@ export function atualizarNomesPartes(
     return { ...parte, nome: melhorNome };
   });
 }
-function matchSiglas(sigParte: string, sigTitulo: string): boolean {
-  sigParte = sigParte.replace(/[^A-Z0-9]/g, '').slice(0, 4); // 🔹 apenas 4 primeiras letras
-  sigTitulo = sigTitulo.replace(/[^A-Z0-9]/g, '');
 
+function matchSiglas(sigParte: string, sigTitulo: string): boolean {
+  const a = sigParte.replace(/[^A-Z0-9]/g, '');
+  const b = sigTitulo.replace(/[^A-Z0-9]/g, '');
+
+  // Match exato → sucesso imediato
+  if (a === b) return true;
+
+  // Prefixo igual → ex: PBTVS começa com PBTV
+  if (b.startsWith(a) || a.startsWith(b)) return true;
+
+  // Tolerância mínima: todas as letras de a aparecem em ordem em b
   let i = 0;
-  for (const c of sigTitulo) {
-    if (c === sigParte[i]) i++;
-    if (i === sigParte.length) return true;
+  for (const c of b) {
+    if (c === a[i]) i++;
+    if (i === a.length) return true;
   }
+
   return false;
 }
