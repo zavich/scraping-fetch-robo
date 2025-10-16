@@ -103,6 +103,36 @@ export class ProcessDocumentsFindService {
       /.*despachos.*/i,
       /.*intimacoes.*/i,
       /.*prevencao.*/i,
+      // CTPS / TRCT
+      /.*carteira.*trabalho.*/i,
+      /.*trct.*/i,
+
+      // Demonstrativos de Pagamento
+      /.*holerite.*/i,
+      /.*contracheque.*/i,
+      /.*ficha.*financeira.*/i,
+      /.*recibo.*salario.*/i,
+
+      // Ficha Registro
+      /.*ficha.*registro.*/i,
+
+      // Contrato de Trabalho
+      /.*contrato.*trabalho.*/i,
+
+      // Cartão de Ponto / Frequência
+      /.*demonstrativo.*frequencia.*/i,
+      /.*relatorio.*ponto.*/i,
+      /.*relatorio.*frequencia.*/i,
+
+      // Acórdão de Embargos
+      /.*acordao.*embargos.*/i,
+
+      // Acórdão TST
+      /.*acordao.*tst.*/i,
+
+      // Decisão Monocrática mais específica
+      /.*decisao.*individual.*/i,
+      /.*decisao.*relator.*/i,
     ];
 
     const buffersPorInstancia: Record<string, Buffer> = {};
