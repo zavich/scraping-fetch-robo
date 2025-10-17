@@ -136,24 +136,57 @@ export class ProcessDocumentsFindService {
     ];
 
     const buffersPorInstancia: Record<string, Buffer> = {};
-    const lastInstance = instances[instances.length - 1];
 
+    const movimentsInstances = instances.map((inst) => {
+      // garante que há movimentações
+      if (!inst.itensProcesso?.length) return null;
+
+      // encontra a movimentação mais recente
+      const ultimaMovimentacao = inst.itensProcesso.reduce(
+        (maisRecente, atual) => {
+          const dataMaisRecente = new Date(maisRecente.data);
+          const dataAtual = new Date(atual.data);
+          return dataAtual > dataMaisRecente ? atual : maisRecente;
+        },
+      );
+
+      return {
+        id: inst.id,
+        instance: inst.instance,
+        ultimaMovimentacao,
+      };
+    });
+    const ultimaInstancia = movimentsInstances.reduce((maisRecente, atual) => {
+      if (!maisRecente) return atual;
+      if (!atual) return maisRecente;
+
+      const dataMaisRecente = new Date(maisRecente.ultimaMovimentacao.data);
+      const dataAtual = new Date(atual.ultimaMovimentacao.data);
+
+      // se a data atual for mais recente, retorna ela
+      if (dataAtual > dataMaisRecente) return atual;
+
+      // se for igual ou menor, mantém a maisRecente
+      return maisRecente;
+    }, null);
+    const lastInstance = ultimaInstancia;
+    //caso haja mais de uma instancia com a mesma data de moviemntação, pegar a primeira instancia
     try {
       this.logger.debug(
-        `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${lastInstance.instance}ª instância`,
+        `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${ultimaInstancia?.instance}ª instância`,
       );
       await this.delay(this.delayMs);
 
       const filePath = await this.documentoService.execute(
-        lastInstance.id,
+        ultimaInstancia?.id as number,
         regionTRT,
-        lastInstance.instance,
+        ultimaInstancia?.instance as string,
         cookies,
         processNumber,
       );
 
       const fileBuffer = fs.readFileSync(filePath);
-      buffersPorInstancia[lastInstance.id] = fileBuffer;
+      buffersPorInstancia[ultimaInstancia?.id as number] = fileBuffer;
 
       // remove o arquivo temporário
       try {
@@ -221,18 +254,18 @@ export class ProcessDocumentsFindService {
           pdfError?.message || pdfError?.toString() || 'Erro desconhecido';
         if (msg.includes('PasswordException') || msg.includes('Encryption')) {
           this.logger.error(
-            `🔐 PDF protegido por senha na instância ${lastInstance.instance}`,
+            `🔐 PDF protegido por senha na instância ${ultimaInstancia?.instance}`,
           );
         } else {
           this.logger.error(
-            `❌ Erro ao processar PDF da instância ${lastInstance.instance}: ${msg}`,
+            `❌ Erro ao processar PDF da instância ${ultimaInstancia?.instance}: ${msg}`,
           );
         }
         // continue; // ignora esse PDF e vai pro próximo
       }
     } catch (err) {
       this.logger.error(
-        `❌ Erro inesperado ao processar documentos da instância ${lastInstance.instance} no processo ${processNumber}: ${err.message}`,
+        `❌ Erro inesperado ao processar documentos da instância ${lastInstance?.instance} no processo ${processNumber}: ${err.message}`,
       );
       throw new BadGatewayException(
         'Erro ao processar documentos restritos, tente novamente mais tarde',

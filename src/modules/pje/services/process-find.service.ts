@@ -114,7 +114,7 @@ export class ProcessFindService {
                   'x-grau-instancia': i.toString(),
                   referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
                   'user-agent':
-                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
+                    userAgents[Math.floor(Math.random() * userAgents.length)],
                 },
               },
             );
@@ -149,6 +149,8 @@ export class ProcessFindService {
             }
             instances.push(processoResponse);
           } catch (err) {
+            console.log(err.response.data);
+
             this.logger.warn(
               `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
             );
