@@ -21,9 +21,26 @@ export class DocumentosWorker extends WorkerHost {
 
   async process(job: Job<{ numero: string }>) {
     const { numero } = job.data;
-    const regionTRT = Number(numero.split('.')[3]);
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
+    const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
+    const regionTRT = match ? Number(match[1]) : null;
+
     try {
+      if (regionTRT === null) {
+        this.logger.warn(
+          `⚠️ Error ao consultar documentos para o processo ${numero} ${regionTRT}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          'Error ao consultar documentos, verifique o número e tente novamente mais tarde',
+          true,
+        );
+        await axios.post(webhookUrl, response, {
+          headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
+        });
+        return;
+      }
       const cookies = await this.loginPool.getCookies(Number(regionTRT));
       if (!cookies) {
         this.logger.warn(

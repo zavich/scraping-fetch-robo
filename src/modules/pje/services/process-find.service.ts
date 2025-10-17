@@ -17,7 +17,10 @@ export class ProcessFindService {
     port: Number(process.env.REDIS_PORT) || 6379,
   });
   constructor(private readonly captchaService: CaptchaService) {}
-
+  private async delay(ms: number) {
+    return new Promise((res) => setTimeout(res, ms));
+  }
+  delayMs = Math.floor(Math.random() * (5000 - 1000 + 1)) + 5000; // 5 a 10s
   async execute(
     numeroDoProcesso: string,
     origem?: string,
@@ -27,7 +30,6 @@ export class ProcessFindService {
       : null;
 
     try {
-      const tokenCaptcha = await this.redis.get('pje:token:captcha');
       // 🔹 Escolhe a conta atual
       const balance = await this.captchaService.getBalance();
       if (balance < 0.001) {
@@ -41,6 +43,9 @@ export class ProcessFindService {
         // Apenas grau 3 para TST
         try {
           const grau = 3;
+          const tokenCaptcha = await this.redis.get(
+            `pje:token:captcha:${numeroDoProcesso}:${grau}`,
+          );
           const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
             `https://pje.tst.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
             {
@@ -93,6 +98,13 @@ export class ProcessFindService {
         // 1ª e 2ª instância para outros casos
         for (let i = 1; i <= 3; i++) {
           try {
+            this.logger.debug(
+              `⏱ Delay de ${this.delayMs}ms antes de buscar a ${i}ª instância`,
+            );
+            await this.delay(this.delayMs);
+            const tokenCaptcha = await this.redis.get(
+              `pje:token:captcha:${numeroDoProcesso}:${i}`,
+            );
             const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
               `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
               {
@@ -168,6 +180,7 @@ export class ProcessFindService {
     tockenCaptcha?: string,
     tokenDesafio?: string,
     resposta?: string,
+    attempt = 1,
   ): Promise<ProcessosResponse> {
     const regionTRT = numeroDoProcesso?.includes('.')
       ? Number(numeroDoProcesso.split('.')[3])
@@ -203,15 +216,20 @@ export class ProcessFindService {
       }
       return response.data;
     } catch (error: any) {
-      if (error.response?.status === 429) {
-        // 🔹 Retry exponencial: 1s, 2s, 4s, 8s, 16s
-        return await this.fetchProcess(
+      if (error.response?.status === 429 && attempt < 5) {
+        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s, 8s, 16s
+        this.logger.warn(
+          `Rate limit detectado (tentativa ${attempt}), aguardando ${delay / 1000}s...`,
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        return this.fetchProcess(
           numeroDoProcesso,
           detalheProcessoId,
           instance,
           tockenCaptcha,
           tokenDesafio,
           resposta,
+          attempt + 1,
         );
       }
       console.error('Erro fetching process:', error.message);
