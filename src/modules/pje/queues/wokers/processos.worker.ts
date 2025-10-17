@@ -6,7 +6,7 @@ import axios from 'axios';
 import { ProcessFindService } from '../../services/process-find.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
-@Processor('pje-processos', { concurrency: 10, lockDuration: 600000 }) // paralelo
+@Processor('pje-processos', { concurrency: 5 }) // paralelo
 export class ProcessosWorker extends WorkerHost {
   private readonly logger = new Logger(ProcessosWorker.name);
 
