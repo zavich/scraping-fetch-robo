@@ -80,7 +80,12 @@ export class ProcessFindService {
             baseConfig,
           );
           const detalheProcesso = detalheProcessos[0];
-
+          if (!detalheProcesso) {
+            this.logger.warn(
+              `Instância ${grau} não encontrada para o processo ${numeroDoProcesso}`,
+            );
+            return instances;
+          }
           if (detalheProcesso) {
             let processoResponse: ProcessosResponse = await this.fetchProcess(
               numeroDoProcesso,
@@ -144,7 +149,12 @@ export class ProcessFindService {
               );
             const detalheProcesso = detalheProcessos[0];
 
-            if (!detalheProcesso) continue;
+            if (!detalheProcesso) {
+              this.logger.warn(
+                `Instância ${i} não encontrada para o processo ${numeroDoProcesso}`,
+              );
+              continue;
+            }
 
             let processoResponse: ProcessosResponse = await this.fetchProcess(
               numeroDoProcesso,
@@ -173,8 +183,6 @@ export class ProcessFindService {
             }
             instances.push(processoResponse);
           } catch (err) {
-            console.log(err.response.data);
-
             this.logger.warn(
               `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
             );
