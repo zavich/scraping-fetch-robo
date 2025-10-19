@@ -8,7 +8,11 @@ import { ProcessDocumentsFindService } from '../../services/process-documents-fi
 import { LoginPoolService } from '../../services/login-pool.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
-@Processor('pje-documentos', { concurrency: 10, lockDuration: 120000 }) // 3 por vez
+@Processor('pje-documentos', {
+  concurrency: 10,
+  lockDuration: 120000,
+  limiter: { max: 1, duration: 3000 },
+}) // 3 por vez
 export class DocumentosWorker extends WorkerHost {
   private readonly logger = new Logger(DocumentosWorker.name);
 
