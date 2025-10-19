@@ -47,40 +47,21 @@ export class ProcessFindService {
           const tokenCaptcha = await this.redis.get(
             `pje:token:captcha:${numeroDoProcesso}:${grau}`,
           );
-          // const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
-          //   `https://pje.tst.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-          //   {
-          //     headers: {
-          //       accept: 'application/json, text/plain, */*',
-          //       'content-type': 'application/json',
-          //       'x-grau-instancia': grau.toString(),
-          //       referer: `https://pje.tst.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${grau}`,
-          //       'user-agent':
-          //         userAgents[Math.floor(Math.random() * userAgents.length)],
-          //     },
-          //   },
-          // );
-
-          // const detalheProcesso = responseDadosBasicos.data[0];
-          const baseConfig = {
-            headers: {
-              accept: 'application/json, text/plain, */*',
-              'content-type': 'application/json',
-              'x-grau-instancia': grau.toString(),
-              referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${grau}`,
-              'user-agent':
-                userAgents[Math.floor(Math.random() * userAgents.length)],
+          const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
+            `https://pje.tst.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+            {
+              headers: {
+                accept: 'application/json, text/plain, */*',
+                'content-type': 'application/json',
+                'x-grau-instancia': grau.toString(),
+                referer: `https://pje.tst.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${grau}`,
+                'user-agent':
+                  userAgents[Math.floor(Math.random() * userAgents.length)],
+              },
             },
-            timeout: 10000,
-          };
-
-          const { data: detalheProcessos } = await this.axiosGetWithScraperApi<
-            DetalheProcesso[]
-          >(
-            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            baseConfig,
           );
-          const detalheProcesso = detalheProcessos[0];
+
+          const detalheProcesso = responseDadosBasicos.data[0];
           if (!detalheProcesso) {
             this.logger.warn(
               `Instância ${grau} não encontrada para o processo ${numeroDoProcesso}`,
@@ -131,31 +112,22 @@ export class ProcessFindService {
             const tokenCaptcha = await this.redis.get(
               `pje:token:captcha:${numeroDoProcesso}:${i}`,
             );
-            const baseConfig = {
-              headers: {
-                accept: 'application/json, text/plain, */*',
-                'content-type': 'application/json',
-                'x-grau-instancia': i.toString(),
-                referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
-                'user-agent':
-                  userAgents[Math.floor(Math.random() * userAgents.length)],
+            const responseDadosBasicos = await axios.get<DetalheProcesso[]>(
+              `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+              {
+                headers: {
+                  accept: 'application/json, text/plain, */*',
+                  'content-type': 'application/json',
+                  'x-grau-instancia': i.toString(),
+                  referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
+                  'user-agent':
+                    userAgents[Math.floor(Math.random() * userAgents.length)],
+                },
               },
-              timeout: 10000,
-            };
+            );
 
-            const { data: detalheProcessos } =
-              await this.axiosGetWithScraperApi<DetalheProcesso[]>(
-                `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-                baseConfig,
-              );
-            const detalheProcesso = detalheProcessos[0];
-
-            if (!detalheProcesso) {
-              this.logger.warn(
-                `Instância ${i} não encontrada para o processo ${numeroDoProcesso}`,
-              );
-              continue;
-            }
+            const detalheProcesso = responseDadosBasicos.data[0];
+            if (!detalheProcesso) continue;
 
             let processoResponse: ProcessosResponse = await this.fetchProcess(
               numeroDoProcesso,
