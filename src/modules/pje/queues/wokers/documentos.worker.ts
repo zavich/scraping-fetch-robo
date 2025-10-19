@@ -7,12 +7,13 @@ import axios from 'axios';
 import { ProcessDocumentsFindService } from '../../services/process-documents-find.service';
 import { LoginPoolService } from '../../services/login-pool.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
+import { ProcessosResponse } from 'src/interfaces';
 
 @Processor('pje-documentos', {
-  lockDuration: 120000,
-  concurrency: 1,
-  limiter: { max: 10, duration: 5 * 60 * 1000 },
-}) // 3 por vez
+  concurrency: 5, // processa até 5 jobs de documentos ao mesmo tempo
+  lockDuration: 120000, // 2 minutos, evita duplicidade de processamento
+  limiter: { max: 20, duration: 5 * 60 * 1000 }, // no máximo 20 requests a cada 5 min
+})
 export class DocumentosWorker extends WorkerHost {
   private readonly logger = new Logger(DocumentosWorker.name);
 
@@ -23,8 +24,8 @@ export class DocumentosWorker extends WorkerHost {
     super();
   }
 
-  async process(job: Job<{ numero: string }>) {
-    const { numero } = job.data;
+  async process(job: Job<{ numero: string; instances: ProcessosResponse[] }>) {
+    const { numero, instances } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
     const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
     const regionTRT = match ? Number(match[1]) : null;
@@ -61,14 +62,17 @@ export class DocumentosWorker extends WorkerHost {
         });
         return response;
       }
-      this.logger.log(`🔎 CONSULTANDO ${numero}`);
-      const instances = await this.processDocumentsFindService.execute(
+      this.logger.log(`🔎 CONSULTANDO DOCUMENTOS DO PROCESSO ${numero}`);
+      const instanceResult = await this.processDocumentsFindService.execute(
         numero,
         cookies,
+        instances,
       );
-      const result = instances.slice(0, 2);
+      const result = instanceResult.slice(0, 2);
 
-      this.logger.log(`🔎 CONSULTA FINALIZADA PARA ${numero}`);
+      this.logger.log(
+        `🔎 CONSULTA DE DOCUMENTOS DO PROCESSO ${numero} FINALIZADA`,
+      );
       if (!instances || instances.length === 0) {
         const response = normalizeResponse(
           numero,

@@ -1,6 +1,6 @@
 // pje.service.ts
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 
 @Injectable()
@@ -9,12 +9,16 @@ export class ConsultarProcessoQueue {
 
   constructor(@InjectQueue('pje-processos') private readonly pjeQueue: Queue) {}
 
-  async execute(numero: string, origem: string) {
+  async execute(numero: string, origem?: string, documents = false) {
     this.logger.log(`Enfileirando processo ${numero} (origem: ${origem})`);
-
+    if (documents && origem) {
+      throw new BadRequestException(
+        'Parâmetro documents não pode ser usado junto com origem',
+      );
+    }
     await this.pjeQueue.add(
       'consulta-processo',
-      { numero, origem },
+      { numero, origem, documents },
       {
         jobId: numero,
         attempts: 3, // até 3 tentativas

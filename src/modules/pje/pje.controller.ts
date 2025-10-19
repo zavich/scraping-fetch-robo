@@ -1,4 +1,4 @@
-import { Controller, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Param, Post, Query } from '@nestjs/common';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { ConsultarProcessoDocumentoQueue } from './queues/service/consultar-processo-documento';
 @Controller('processos')
@@ -10,12 +10,13 @@ export class PjeController {
   @Post('/:numero')
   async getFindProcess(
     @Param('numero') numero: string,
-    @Query('origem') origem: string,
+    @Body() body: { documents?: boolean; origem?: string },
   ): Promise<any> {
-    return this.consultarProcessoQueue.execute(numero, origem);
+    const { documents, origem } = body;
+    return this.consultarProcessoQueue.execute(numero, origem, documents);
   }
-  @Post('/:numero/documentos')
-  async getFindProcessDocuments(@Param('numero') numero: string): Promise<any> {
-    return this.consultarProcessoDocumentoQueue.execute(numero);
-  }
+  // @Post('/:numero/documentos')
+  // async getFindProcessDocuments(@Param('numero') numero: string): Promise<any> {
+  //   return this.consultarProcessoDocumentoQueue.execute(numero);
+  // }
 }

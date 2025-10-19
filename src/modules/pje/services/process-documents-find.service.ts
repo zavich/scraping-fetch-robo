@@ -30,12 +30,11 @@ export class ProcessDocumentsFindService {
   async execute(
     numeroDoProcesso: string,
     cookies: string,
+    instances: ProcessosResponse[],
   ): Promise<ProcessosResponse[]> {
     const regionTRT = Number(numeroDoProcesso.split('.')[3]);
     try {
-      const instances = (
-        await this.processFindService.execute(numeroDoProcesso)
-      ).map((instance, i) => {
+      const instancesWithGrau = instances.map((instance, i) => {
         const instanceNumber = i + 1;
         return {
           ...instance,
@@ -43,15 +42,15 @@ export class ProcessDocumentsFindService {
           instance: instanceNumber.toString(),
         };
       });
-      if (!instances || instances.length === 0) return [];
+      if (!instancesWithGrau || instancesWithGrau.length === 0) return [];
       const documentosRestritos = await this.uploadDocumentosRestritos(
         regionTRT,
-        instances,
+        instancesWithGrau,
         numeroDoProcesso,
         cookies,
       );
 
-      const newInstances = instances.map((instance) => ({
+      const newInstances = instancesWithGrau.map((instance) => ({
         ...instance,
         documentos: documentosRestritos,
       }));
