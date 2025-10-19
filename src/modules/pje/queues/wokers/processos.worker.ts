@@ -7,8 +7,8 @@ import { ProcessFindService } from '../../services/process-find.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
 @Processor('pje-processos', {
-  concurrency: 5,
-  limiter: { max: 1, duration: 3000 },
+  concurrency: 1,
+  limiter: { max: 10, duration: 5 * 60 * 1000 },
 }) // paralelo
 export class ProcessosWorker extends WorkerHost {
   private readonly logger = new Logger(ProcessosWorker.name);
