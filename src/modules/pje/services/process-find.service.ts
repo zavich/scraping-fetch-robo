@@ -7,6 +7,7 @@ import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 
 import { CaptchaService } from 'src/services/captcha.service';
+import { applyScraperApiProxy } from 'src/utils/proxy.helper';
 import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
@@ -324,7 +325,6 @@ export class ProcessFindService {
       );
 
       // Tenta novamente via ScraperAPI
-      const { applyScraperApiProxy } = await import('src/utils/proxy.helper');
       const cfgWithProxy = applyScraperApiProxy({
         ...baseConfig,
         url,
