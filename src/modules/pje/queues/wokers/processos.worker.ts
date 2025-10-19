@@ -51,6 +51,7 @@ export class ProcessosWorker extends WorkerHost {
       );
       const instances = await this.processFindService.execute(numero, origem);
       const result = instances.slice(0, 2);
+      this.logger.log(`🔍 Resultados encontrados para o processo ${numero}`);
       if (!instances || instances.length === 0) {
         this.logger.warn(
           `⚠️ Nenhum resultado encontrado para o processo ${numero} (origem: ${origem})`,
