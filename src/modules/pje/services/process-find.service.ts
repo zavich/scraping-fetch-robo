@@ -54,6 +54,7 @@ export class ProcessFindService {
                 accept: 'application/json, text/plain, */*',
                 'content-type': 'application/json',
                 'x-grau-instancia': grau.toString(),
+                cookie: ['ASSINADOR_PJE=PJEOFFICE', 'MO=PJEOFFICE'].join('; '),
                 referer: `https://pje.tst.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${grau}`,
                 'user-agent':
                   userAgents[Math.floor(Math.random() * userAgents.length)],
@@ -119,6 +120,9 @@ export class ProcessFindService {
                   accept: 'application/json, text/plain, */*',
                   'content-type': 'application/json',
                   'x-grau-instancia': i.toString(),
+                  cookie: ['ASSINADOR_PJE=PJEOFFICE', 'MO=PJEOFFICE'].join(
+                    '; ',
+                  ),
                   referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
                   'user-agent':
                     userAgents[Math.floor(Math.random() * userAgents.length)],
@@ -204,7 +208,26 @@ export class ProcessFindService {
         url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
       }
 
-      // const response = await axios.get<ProcessosResponse>(url, {
+      const response = await axios.get<ProcessosResponse>(url, {
+        headers: {
+          accept: 'application/json, text/plain, */*',
+          'content-type': 'application/json',
+          'x-grau-instancia': instance,
+          cookie: ['ASSINADOR_PJE=PJEOFFICE', 'MO=PJEOFFICE'].join('; '),
+          referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
+          'user-agent':
+            userAgents[Math.floor(Math.random() * userAgents.length)],
+        },
+      });
+
+      const tokenCaptcha: string = response.headers['captchatoken'] as string;
+      if (tokenCaptcha) {
+        const captchaKey = `pje:token:captcha:${numeroDoProcesso}:${instance}`;
+
+        await this.redis.set(captchaKey, tokenCaptcha);
+      }
+      return response.data;
+      // const baseConfig = {
       //   headers: {
       //     accept: 'application/json, text/plain, */*',
       //     'content-type': 'application/json',
@@ -213,36 +236,18 @@ export class ProcessFindService {
       //     'user-agent':
       //       userAgents[Math.floor(Math.random() * userAgents.length)],
       //   },
-      // });
+      //   timeout: 12000,
+      // };
 
-      // const tokenCaptcha: string = response.headers['captchatoken'] as string;
+      // const { data: responseData, headers } =
+      //   await this.axiosGetWithScraperApi<ProcessosResponse>(url, baseConfig);
+
+      // const tokenCaptcha: string = headers['captchatoken'] as string;
       // if (tokenCaptcha) {
       //   const captchaKey = `pje:token:captcha:${numeroDoProcesso}:${instance}`;
-
       //   await this.redis.set(captchaKey, tokenCaptcha);
       // }
-      // return response.data;
-      const baseConfig = {
-        headers: {
-          accept: 'application/json, text/plain, */*',
-          'content-type': 'application/json',
-          'x-grau-instancia': instance,
-          referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
-          'user-agent':
-            userAgents[Math.floor(Math.random() * userAgents.length)],
-        },
-        timeout: 12000,
-      };
-
-      const { data: responseData, headers } =
-        await this.axiosGetWithScraperApi<ProcessosResponse>(url, baseConfig);
-
-      const tokenCaptcha: string = headers['captchatoken'] as string;
-      if (tokenCaptcha) {
-        const captchaKey = `pje:token:captcha:${numeroDoProcesso}:${instance}`;
-        await this.redis.set(captchaKey, tokenCaptcha);
-      }
-      return responseData;
+      // return responseData;
     } catch (error: any) {
       if (error.response?.status === 429 && attempt < 5) {
         const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s, 8s, 16s
@@ -276,37 +281,37 @@ export class ProcessFindService {
   }
 
   // dentro da class ProcessFindService
-  private async axiosGetWithScraperApi<T>(
-    url: string,
-    baseConfig: any,
-    maxAttempts = 2,
-  ): Promise<{ data: T; headers: any }> {
-    try {
-      const res = await axios.get<T>(url, baseConfig);
-      return { data: res.data, headers: res.headers };
-    } catch (err: any) {
-      const isCloudFront =
-        err?.response?.status === 403 ||
-        (typeof err?.response?.data === 'string' &&
-          err.response.data?.includes?.('CloudFront'));
+  // private async axiosGetWithScraperApi<T>(
+  //   url: string,
+  //   baseConfig: any,
+  //   maxAttempts = 2,
+  // ): Promise<{ data: T; headers: any }> {
+  //   try {
+  //     const res = await axios.get<T>(url, baseConfig);
+  //     return { data: res.data, headers: res.headers };
+  //   } catch (err: any) {
+  //     const isCloudFront =
+  //       err?.response?.status === 403 ||
+  //       (typeof err?.response?.data === 'string' &&
+  //         err.response.data?.includes?.('CloudFront'));
 
-      if (!isCloudFront) throw err;
+  //     if (!isCloudFront) throw err;
 
-      this.logger.warn(
-        `🔁 Requisição bloqueada (CloudFront). Reenviando via ScraperAPI...`,
-      );
+  //     this.logger.warn(
+  //       `🔁 Requisição bloqueada (CloudFront). Reenviando via ScraperAPI...`,
+  //     );
 
-      // Tenta novamente via ScraperAPI
-      const cfgWithProxy = applyScraperApiProxy({
-        ...baseConfig,
-        url,
-      });
+  //     // Tenta novamente via ScraperAPI
+  //     const cfgWithProxy = applyScraperApiProxy({
+  //       ...baseConfig,
+  //       url,
+  //     });
 
-      const proxiedUrl = (cfgWithProxy as any).url;
-      delete (cfgWithProxy as any).url;
+  //     const proxiedUrl = (cfgWithProxy as any).url;
+  //     delete (cfgWithProxy as any).url;
 
-      const res = await axios.get<T>(proxiedUrl, cfgWithProxy);
-      return { data: res.data, headers: res.headers };
-    }
-  }
+  //     const res = await axios.get<T>(proxiedUrl, cfgWithProxy);
+  //     return { data: res.data, headers: res.headers };
+  //   }
+  // }
 }
