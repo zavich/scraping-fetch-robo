@@ -9,7 +9,12 @@ export class ConsultarProcessoQueue {
 
   constructor(@InjectQueue('pje-processos') private readonly pjeQueue: Queue) {}
 
-  async execute(numero: string, origem?: string, documents = false) {
+  async execute(
+    numero: string,
+    origem?: string,
+    documents = false,
+    webhook?: string,
+  ) {
     this.logger.log(`Enfileirando processo ${numero} (origem: ${origem})`);
     if (documents && origem) {
       throw new BadRequestException(
@@ -18,7 +23,7 @@ export class ConsultarProcessoQueue {
     }
     await this.pjeQueue.add(
       'consulta-processo',
-      { numero, origem, documents },
+      { numero, origem, documents, webhook },
       {
         jobId: numero,
         attempts: 3, // até 3 tentativas

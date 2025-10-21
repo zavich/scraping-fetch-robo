@@ -10,10 +10,15 @@ export class PjeController {
   @Post('/:numero')
   async getFindProcess(
     @Param('numero') numero: string,
-    @Body() body: { documents?: boolean; origem?: string },
+    @Body() body: { documents?: boolean; origem?: string; webhook?: string },
   ): Promise<any> {
-    const { documents, origem } = body;
-    return this.consultarProcessoQueue.execute(numero, origem, documents);
+    const { documents, origem, webhook } = body;
+    return this.consultarProcessoQueue.execute(
+      numero,
+      origem,
+      documents,
+      webhook,
+    );
   }
   // @Post('/:numero/documentos')
   // async getFindProcessDocuments(@Param('numero') numero: string): Promise<any> {

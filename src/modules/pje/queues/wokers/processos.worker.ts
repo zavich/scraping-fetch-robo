@@ -23,10 +23,17 @@ export class ProcessosWorker extends WorkerHost {
   }
 
   async process(
-    job: Job<{ numero: string; origem: string; documents: boolean }>,
+    job: Job<{
+      numero: string;
+      origem: string;
+      documents: boolean;
+      webhook: string;
+    }>,
   ) {
-    const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
-    const { numero, origem, documents = false } = job.data;
+    const { numero, origem, documents = false, webhook } = job.data;
+    const webhookUrl = webhook
+      ? webhook
+      : `${process.env.WEBHOOK_URL}/process/webhook`;
 
     const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
     const regionTRT = match ? Number(match[1]) : null;
