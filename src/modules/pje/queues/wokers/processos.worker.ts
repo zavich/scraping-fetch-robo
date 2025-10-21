@@ -7,7 +7,8 @@ import { ProcessFindService } from '../../services/process-find.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
 @Processor('pje-processos', {
-  concurrency: 2, // processa até 2 processos ao mesmo tempo
+  concurrency: 5, // processa até 5 processos ao mesmo tempo
+  lockDuration: 120000,
   limiter: { max: 10, duration: 5 * 60 * 1000 }, // no máximo 10 requests a cada 5 min
 })
 // paralelo
