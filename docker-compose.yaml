@@ -7,13 +7,15 @@ services:
     container_name: scraping-robo
     environment:
       - NODE_ENV=production
-      - REDIS_HOST=redis # nome do serviço Redis
+      - REDIS_HOST=redis
       - REDIS_PORT=6379
       - PORT=8081
     env_file:
       - .env
     command: node dist/main
     restart: always
+    depends_on:
+      - redis
     networks:
       - traefik-net
     labels:
@@ -24,6 +26,27 @@ services:
       - 'traefik.http.services.scrapingrobo.loadbalancer.server.port=8081'
     expose:
       - '8081'
+
+  redis:
+    image: redis:7
+    container_name: redis
+    command:
+      [
+        'redis-server',
+        '--save',
+        '900',
+        '1',
+        '--save',
+        '300',
+        '10',
+        '--stop-writes-on-bgsave-error',
+        'no',
+      ]
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks:
+      - traefik-net
 
 networks:
   traefik-net:
