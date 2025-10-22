@@ -47,17 +47,6 @@ services:
       - redis-data:/data
     networks:
       - traefik-net
-  redis-cleaner:
-    image: busybox
-    container_name: redis-cleaner-scraping
-    restart: always
-    depends_on:
-      - redis
-    volumes:
-      - redis-data:/data
-      - ./redis-scripts:/usr/local/bin/redis-scripts
-    command: /bin/sh -c "while true; do /usr/local/bin/redis-cleanup.sh /data; sleep 21600; done"
-
 networks:
   traefik-net:
     external: true
