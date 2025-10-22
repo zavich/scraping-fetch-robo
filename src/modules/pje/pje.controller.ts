@@ -12,7 +12,7 @@ export class PjeController {
     @Param('numero') numero: string,
     @Body() body: { documents?: boolean; origem?: string; webhook?: string },
   ): Promise<any> {
-    const { documents, origem, webhook } = body;
+    const { documents, origem, webhook } = body || {};
     return this.consultarProcessoQueue.execute(
       numero,
       origem,
