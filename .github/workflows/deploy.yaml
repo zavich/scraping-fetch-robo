@@ -28,19 +28,9 @@ jobs:
       # 5️⃣ Builda e sobe os containers no servidor
       - name: Build and run with Docker Compose
         run: |
-          sshpass -p "${{ secrets.SSH_PASSWORD }}" ssh -o StrictHostKeyChecking=no -p 22100 ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
+          sshpass -p "${{ secrets.SSH_PASSWORD }}" ssh -o StrictHostKeyChecking=no -p 22100 ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << 'EOF'
             cd ${{ secrets.SSH_APP_PATH }}
-            echo "Recriando container scraping-robo (mantendo Redis existente)..."
-
-            # Garante que as imagens e volumes estão sincronizados
-            docker compose pull scraping-robo || true
-
-            # Remove apenas o container da aplicação, mantendo Redis
+            echo "Recriando container scraping-robo..."
             docker rm -f scraping-robo || true
-
-            # Sobe apenas o serviço scraping-robo
-            docker compose up -d --build scraping-robo
-
-            echo "Containers em execução:"
-            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+            docker compose up -d --build
           EOF
