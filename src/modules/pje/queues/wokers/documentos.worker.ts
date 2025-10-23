@@ -12,7 +12,7 @@ import { ProcessosResponse } from 'src/interfaces';
 @Processor('pje-documentos', {
   concurrency: 5, // processa até 5 jobs de documentos ao mesmo tempo
   lockDuration: 120000, // 2 minutos, evita duplicidade de processamento
-  // limiter: { max: 20, duration: 5 * 60 * 1000 }, // no máximo 20 requests a cada 5 min
+  limiter: { max: 20, duration: 5 * 60 * 1000 }, // no máximo 20 requests a cada 5 min
 })
 export class DocumentosWorker extends WorkerHost {
   private readonly logger = new Logger(DocumentosWorker.name);
