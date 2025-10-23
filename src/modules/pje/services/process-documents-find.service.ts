@@ -102,6 +102,7 @@ export class ProcessDocumentsFindService {
       /.*despachos.*/i,
       /.*intimacoes.*/i,
       /.*prevencao.*/i,
+
       // CTPS / TRCT
       /.*carteira.*trabalho.*/i,
       /.*trct.*/i,
@@ -132,6 +133,15 @@ export class ProcessDocumentsFindService {
       // Decisão Monocrática mais específica
       /.*decisao.*individual.*/i,
       /.*decisao.*relator.*/i,
+
+      // 🧮 Documentos de Cálculo
+      /.*planilha(?:s)?.*c[aá]lculo(?:s)?.*/i,
+      /.*c[aá]lculo(?:s)?.*apresenta[cç][aã]o(?:ões)?.*/i,
+      /.*apresenta[cç][aã]o(?:ões)?.*c[aá]lculo(?:s)?.*/i,
+      /.*relat[oó]rio(?:s)?.*c[aá]lculo(?:s)?.*/i,
+
+      // Apenas "cálculo(s)"
+      /\bc[aá]lculo(?:s)?\b/i,
     ];
 
     const buffersPorInstancia: Record<string, Buffer> = {};
