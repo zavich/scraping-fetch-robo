@@ -72,49 +72,50 @@ export function normalizeResponse(
         )?.data
       : null;
     let partes: Partes[] = [];
-
-    ['poloAtivo', 'poloPassivo'].forEach((poloKey) => {
-      ((instance[poloKey] as Polo[]) ?? []).forEach((parte: Polo) => {
-        // Parte principal
-        partes.push({
-          id: parte.id,
-          tipo: parte.tipo,
-          nome: parte.nome.trim(),
-          principal: true,
-          polo: parte.polo,
-          documento: {
-            tipo:
-              parte?.login?.replace(/\D/g, '').length === 11 ? 'CPF' : 'CNPJ',
-            numero: parte?.login?.replace(/\D/g, ''),
-          },
-        });
-
-        // Representantes
-        (parte.representantes || []).forEach((rep: Polo) => {
+    if (index === 0) {
+      ['poloAtivo', 'poloPassivo'].forEach((poloKey) => {
+        ((instance[poloKey] as Polo[]) ?? []).forEach((parte: Polo) => {
+          // Parte principal
           partes.push({
-            id: rep.id,
-            tipo: rep.tipo,
-            nome: rep.nome.trim(),
-            principal: false,
-            polo: rep.polo,
+            id: parte.id,
+            tipo: parte.tipo,
+            nome: parte.nome.trim(),
+            principal: true,
+            polo: parte.polo,
             documento: {
               tipo:
-                rep.login?.replace(/\D/g, '').length === 11 ? 'CPF' : 'CNPJ',
-              numero: rep.login?.replace(/\D/g, ''),
+                parte?.login?.replace(/\D/g, '').length === 11 ? 'CPF' : 'CNPJ',
+              numero: parte?.login?.replace(/\D/g, ''),
             },
-            advogado_de: parte.id,
-            // oabs: (rep.papeis || [])
-            //   .filter((p: Papeis) => p.identificador === 'advogado')
-            //   .map((_: any) => ({
-            //     numero: '', // substituir pelo número real da OAB
-            //     uf: rep.endereco?.estado ?? '', // garantir que seja sempre string
-            //   })),
+          });
+
+          // Representantes
+          (parte.representantes || []).forEach((rep: Polo) => {
+            partes.push({
+              id: rep.id,
+              tipo: rep.tipo,
+              nome: rep.nome.trim(),
+              principal: false,
+              polo: rep.polo,
+              documento: {
+                tipo:
+                  rep.login?.replace(/\D/g, '').length === 11 ? 'CPF' : 'CNPJ',
+                numero: rep.login?.replace(/\D/g, ''),
+              },
+              advogado_de: parte.id,
+              // oabs: (rep.papeis || [])
+              //   .filter((p: Papeis) => p.identificador === 'advogado')
+              //   .map((_: any) => ({
+              //     numero: '', // substituir pelo número real da OAB
+              //     uf: rep.endereco?.estado ?? '', // garantir que seja sempre string
+              //   })),
+            });
           });
         });
       });
-    });
 
-    partes = atualizarNomesPartes(instance.itensProcesso, partes);
+      partes = atualizarNomesPartes(instance.itensProcesso, partes);
+    }
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
       const partesConteudo = [
@@ -163,7 +164,6 @@ export function normalizeResponse(
 
     return resposta;
   });
-  const instanciasComNomesCompletos = mergePartesCompletas(instancias);
   if (origem) {
     opcoes['origem'] = origem;
   }
@@ -175,7 +175,7 @@ export function normalizeResponse(
       ? {
           numero_unico: body[0]?.numero,
           origem: origem ? 'TST' : `TRT-${regionTRT}`,
-          instancias: instanciasComNomesCompletos,
+          instancias,
           id: generateId(),
         }
       : {
@@ -203,98 +203,6 @@ export function normalizeResponse(
     },
     valor: body[0]?.numero,
   } as Root;
-}
-
-function mergePartesCompletas(instancias: any[]) {
-  const mapaPartes = new Map<string, any>();
-
-  for (const inst of instancias) {
-    for (const parte of inst.partes || []) {
-      if (!parte || !parte.nome) continue;
-
-      const chave =
-        parte.documento?.numero ||
-        parte.id ||
-        parte.nome
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toUpperCase();
-
-      const existente = mapaPartes.get(chave);
-
-      if (!existente) {
-        // Adiciona novo
-        mapaPartes.set(chave, { ...parte });
-        continue;
-      }
-
-      // Atualiza nome mais completo
-      const nomeNovoLimpo = parte.nome.replace(/[.\s]/g, '').trim();
-      const nomeAntigoLimpo = existente.nome.replace(/[.\s]/g, '').trim();
-      const nomeMaisCompleto =
-        nomeNovoLimpo.length > nomeAntigoLimpo.length
-          ? parte.nome
-          : existente.nome;
-
-      if (nomeMaisCompleto !== existente.nome) {
-        console.log(
-          `🟢 Atualizando parte duplicada: "${existente.nome}" → "${nomeMaisCompleto}"`,
-        );
-      }
-
-      const tipoFinal =
-        existente.tipo === 'RECLAMANTE' ||
-        existente.tipo === 'RECLAMADO' ||
-        existente.tipo === 'AUTOR' ||
-        existente.tipo === 'RÉU'
-          ? existente.tipo
-          : parte.tipo || existente.tipo;
-
-      const poloFinal = existente.principal
-        ? existente.polo
-        : parte.polo || existente.polo;
-
-      const advogadoDe = existente.advogado_de || parte.advogado_de;
-
-      mapaPartes.set(chave, {
-        ...existente,
-        nome: nomeMaisCompleto,
-        tipo: tipoFinal,
-        polo: poloFinal,
-        advogado_de: advogadoDe,
-      });
-    }
-  }
-
-  // Substitui nas instâncias e adiciona novas partes que não existiam
-  const partesConsolidadas = Array.from(mapaPartes.values());
-
-  return instancias.map((inst) => ({
-    ...inst,
-    partes: partesConsolidadas.filter((parte) => {
-      // Mantém só partes que pertencem à instância ou são novas (não duplicadas)
-      return (
-        inst.partes?.some((p) => {
-          const chaveP =
-            p.documento?.numero ||
-            p.id ||
-            p.nome
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .toUpperCase();
-          return (
-            chaveP ===
-            (parte.documento?.numero ||
-              parte.id ||
-              parte.nome
-                .normalize('NFD')
-                .replace(/[\u0300-\u036f]/g, '')
-                .toUpperCase())
-          );
-        }) || !parte.id
-      );
-    }),
-  }));
 }
 
 function gerarSiglas(nome: string): string {
