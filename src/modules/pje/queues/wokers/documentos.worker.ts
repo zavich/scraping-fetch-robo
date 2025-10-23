@@ -10,7 +10,7 @@ import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { ProcessosResponse } from 'src/interfaces';
 
 @Processor('pje-documentos', {
-  concurrency: 2, // processa até 5 jobs de documentos ao mesmo tempo
+  concurrency: 3, // processa até 5 jobs de documentos ao mesmo tempo
   lockDuration: 120000, // 2 minutos, evita duplicidade de processamento
   // limiter: { max: 20, duration: 2 * 60 * 1000 }, // no máximo 20 requests a cada 2 min
 })
