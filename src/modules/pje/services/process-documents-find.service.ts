@@ -274,7 +274,7 @@ export class ProcessDocumentsFindService {
       }
     } catch (error) {
       this.logger.error(
-        `❌ Erro ao baixar PDF do processo ${processNumber} (instância ${instancia}): ${error.code || error.name} - ${error.message}`,
+        `❌ Erro ao baixar PDF do processo ${processNumber} (instância ${ultimaInstancia?.instance}): ${error.code || error.name} - ${error.message}`,
       );
       throw error;
     }
