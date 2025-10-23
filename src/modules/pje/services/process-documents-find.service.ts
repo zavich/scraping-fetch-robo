@@ -267,7 +267,7 @@ export class ProcessDocumentsFindService {
           );
         } else {
           this.logger.error(
-            `❌ Erro ao processar PDF da instância ${ultimaInstancia?.instance}: ${msg}`,
+            `❌ Erro ao processar PDF da instância ${ultimaInstancia?.instance}: ${pdfError}`,
           );
         }
         // continue; // ignora esse PDF e vai pro próximo
