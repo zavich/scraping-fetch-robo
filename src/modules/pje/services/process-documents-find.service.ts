@@ -272,13 +272,11 @@ export class ProcessDocumentsFindService {
         }
         // continue; // ignora esse PDF e vai pro próximo
       }
-    } catch (err) {
+    } catch (error) {
       this.logger.error(
-        `❌ Erro inesperado ao processar documentos da instância ${lastInstance?.instance} no processo ${processNumber}: ${err.message}`,
+        `❌ Erro ao baixar PDF do processo ${processNumber} (instância ${instancia}): ${error.code || error.name} - ${error.message}`,
       );
-      throw new BadGatewayException(
-        'Erro ao processar documentos restritos, tente novamente mais tarde',
-      );
+      throw error;
     }
     const captchaKey = `pje:token:captcha:${processNumber}`;
     const keys = await this.redis.keys(`${captchaKey}*`);
