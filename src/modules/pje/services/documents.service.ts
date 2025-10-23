@@ -46,7 +46,7 @@ export class DocumentoService {
           'user-agent':
             userAgents[Math.floor(Math.random() * userAgents.length)],
         },
-        timeout: 60000,
+        timeout: 0,
         responseType: 'arraybuffer',
         withCredentials: true,
       });
