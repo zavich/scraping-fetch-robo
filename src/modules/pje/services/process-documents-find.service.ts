@@ -99,7 +99,7 @@ export class ProcessDocumentsFindService {
       /.*transito.*em.*julgado.*/i,
       /.*peticionamentos.*avulsos.*/i,
       /.*decisoes.*/i,
-      /.*despachos.*/i,
+      /\bdespachos?\b/i,
       /.*intimacoes.*/i,
       /.*prevencao.*/i,
 
