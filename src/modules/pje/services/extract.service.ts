@@ -6,40 +6,61 @@ import { normalizeString } from 'src/utils/normalize-string';
 export class PdfExtractService {
   logger = new Logger(PdfExtractService.name);
 
-  /**
-   * Extrai páginas de um PDF baseado em índices
-   * @param fileBuffer Buffer do PDF
-   * @param startPage primeira página (1-based)
-   * @param endPage última página (1-based)
-   */
   async extractPagesByIndex(fileBuffer: Buffer, documentId: string) {
+    // Carrega bookmarks
     const bookmarks = await this.extractBookmarks(fileBuffer);
 
+    // Encontra o bookmark pelo id
     const bookmark = bookmarks.find(
       (b) => normalizeString(b.id) === normalizeString(documentId),
     );
 
     if (!bookmark) {
       this.logger.error(`Bookmark matching "${documentId}" not found.`);
-      return;
+      return null;
     }
+
     const { startPage, endPage } = bookmark;
 
+    // Carrega PDF com pdf-lib
     const pdfDoc = await PDFDocument.load(fileBuffer);
-    const totalPages = pdfDoc.getPageCount();
+    const pdfLibTotalPages = pdfDoc.getPageCount();
 
-    // validação de índices
-    const start = Math.max(startPage, 1);
-    const end = Math.min(endPage, totalPages);
+    // Carrega PDF com pdfjs apenas para calcular offset
+    const pdfjsDoc = await pdfjsLib.getDocument({
+      data: new Uint8Array(fileBuffer),
+    }).promise;
+    const pdfjsTotalPages = pdfjsDoc.numPages;
+
+    // Ajuste de offset entre pdfjs e pdf-lib
+    const pageOffset = pdfjsTotalPages - pdfLibTotalPages;
+
+    // Calcula índices corretos 0-based para pdf-lib
+    const startIndex = Math.max(startPage - 1 - pageOffset, 0);
+    const endIndex = Math.min(endPage - 1 - pageOffset, pdfLibTotalPages - 1);
+
+    if (startIndex > endIndex) {
+      this.logger.warn(
+        `Bookmark "${bookmark.title}" tem índices invertidos. Corrigindo para pelo menos 1 página.`,
+      );
+    }
 
     const newPdf = await PDFDocument.create();
-    const pages = await newPdf.copyPages(
-      pdfDoc,
-      Array.from({ length: end - start + 1 }, (_, i) => start - 1 + i),
+
+    // Copia páginas corretas para o novo PDF
+    const pagesToCopy = Array.from(
+      { length: Math.max(endIndex - startIndex + 1, 1) },
+      (_, i) => startIndex + i,
     );
+
+    const pages = await newPdf.copyPages(pdfDoc, pagesToCopy);
     pages.forEach((p) => newPdf.addPage(p));
 
     const pdfBytes = await newPdf.save();
+    this.logger.debug(
+      `✅ Documento "${bookmark.title}" extraído com sucesso (páginas ${startIndex + 1}-${endIndex + 1})`,
+    );
+
     return Buffer.from(pdfBytes);
   }
 
