@@ -126,11 +126,23 @@ export function normalizeResponse(
         .filter(Boolean)
         .join(' ');
 
-      return {
+      const mov: {
+        data: string;
+        conteudo: string;
+        id: number;
+        uniqueNameDocumento?: string;
+      } = {
         data: new Intl.DateTimeFormat('pt-BR').format(new Date(item.data)),
         conteudo: partesConteudo,
         id: generateId(),
       };
+
+      // adiciona uniqueNameDocumento apenas se existir e não for string vazia
+      if (item?.idUnicoDocumento != null && item.idUnicoDocumento !== '') {
+        mov.uniqueNameDocumento = String(item.idUnicoDocumento);
+      }
+
+      return mov;
     });
 
     const resposta = {
