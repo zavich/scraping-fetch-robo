@@ -100,6 +100,14 @@ export class ProcessosWorker extends WorkerHost {
 
       const response = normalizeResponse(numero, result, '', false, origem);
       if (documents) {
+        const existing = (await this.pjeQueue.getJob(numero)) as
+          | Job
+          | undefined;
+
+        if (existing && (await existing.isFailed())) {
+          await existing.remove();
+        }
+
         await this.pjeQueue.add(
           'consulta-processo-documento',
           { numero, instances },

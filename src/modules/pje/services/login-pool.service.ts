@@ -4,10 +4,9 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import axios from 'axios';
 import Redis from 'ioredis';
 import { PjeLoginService } from './login.service';
-import axios from 'axios';
-import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
 export class LoginPoolService {
@@ -84,7 +83,7 @@ export class LoginPoolService {
     const maxWait = 60000;
 
     let cookies = await this.redis.get(redisKey);
-    if (cookies) return this.refreshToken(trt, cookies);
+    // if (cookies) return this.refreshToken(trt, cookies);
 
     // Checa disponibilidade do site antes de gastar contas
     await this.checkSiteAvailability(trt);
@@ -149,9 +148,9 @@ export class LoginPoolService {
           );
         }
         // ✅ Só depois que refreshToken terminar, libera o lock
-        const refreshed = await this.refreshToken(trt, cookies as string);
+        // const refreshed = await this.refreshToken(trt, cookies as string);
         await this.redis.del(lockKey);
-        return refreshed;
+        // return refreshed;
       } catch (err) {
         await this.redis.del(lockKey);
         throw err;
@@ -184,53 +183,54 @@ export class LoginPoolService {
       await this.redis.set(redisKey, cookies, 'EX', 3600);
       await this.redis.set(readyKey, '1', 'EX', 30);
     }
-
-    return this.refreshToken(trt, cookies);
+    return cookies;
   }
 
-  private async refreshToken(trt: number, cookies: string): Promise<string> {
-    const redisKey = `pje:session:${trt}`;
-    try {
-      const response = await axios.get(
-        `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
-        {
-          headers: {
-            accept: 'application/json, text/plain, */*',
-            'accept-language': 'pt-BR,pt;q=0.9',
-            'content-type': 'application/json',
-            referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
-            'user-agent':
-              userAgents[Math.floor(Math.random() * userAgents.length)],
-            'x-grau-instancia': '1',
-            Cookie: cookies,
-          },
-        },
-      );
+  // private async refreshToken(trt: number, cookies: string): Promise<string> {
+  //   const redisKey = `pje:session:${trt}`;
+  //   try {
+  //     const response = await axios.get(
+  //       `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
+  //       {
+  //         headers: {
+  //           accept: 'application/json, text/plain, */*',
+  //           'accept-language': 'pt-BR,pt;q=0.9',
+  //           'content-type': 'application/json',
+  //           referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
+  //           'user-agent':
+  //             userAgents[Math.floor(Math.random() * userAgents.length)],
+  //           'x-grau-instancia': '1',
+  //           Cookie: cookies,
+  //         },
+  //       },
+  //     );
 
-      const cookieObj: Record<string, string> = {};
-      cookies.split(';').forEach((c) => {
-        const [key, value] = c.split('=').map((x) => x.trim());
-        if (key && value) cookieObj[key] = value;
-      });
+  //     const cookieObj: Record<string, string> = {};
+  //     cookies.split(';').forEach((c) => {
+  //       const [key, value] = c.split('=').map((x) => x.trim());
+  //       if (key && value) cookieObj[key] = value;
+  //     });
 
-      cookieObj.access_token_1g = response.data.access_token;
+  //     cookieObj.access_token_1g = response.data.access_token;
 
-      const updatedCookies = Object.entries(cookieObj)
-        .map(([k, v]) => `${k}=${v}`)
-        .join('; ');
+  //     const updatedCookies = Object.entries(cookieObj)
+  //       .map(([k, v]) => `${k}=${v}`)
+  //       .join('; ');
 
-      await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
-      return updatedCookies;
-    } catch (err) {
-      if (
-        err.response?.status === 403 ||
-        err.response?.data.codigoErro === 'ARQ-028'
-      ) {
-        this.logger.warn(`⚠️ Cookie TRT ${trt} expirado.`);
-        await this.redis.del(redisKey);
-        return await this.getCookies(trt); // ✅ retorna o novo cookie
-      }
-      throw new Error(`Erro ao validar cookie TRT ${trt}: ${err.message}`);
-    }
-  }
+  //     await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
+  //     return updatedCookies;
+  //   } catch (err) {
+  //     console.log(err);
+
+  //     if (
+  //       err.response?.status === 403 ||
+  //       err.response?.data.codigoErro === 'ARQ-028'
+  //     ) {
+  //       this.logger.warn(`⚠️ Cookie TRT ${trt} expirado.`);
+  //       await this.redis.del(redisKey);
+  //       return await this.getCookies(trt); // ✅ retorna o novo cookie
+  //     }
+  //     throw new Error(`Erro ao validar cookie TRT ${trt}: ${err.message}`);
+  //   }
+  // }
 }

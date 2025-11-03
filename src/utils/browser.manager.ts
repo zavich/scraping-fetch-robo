@@ -25,9 +25,6 @@ export class BrowserManager {
           '--disable-gpu',
           '--no-zygote',
           '--disable-software-rasterizer',
-          // ...(process.env.NODE_ENV === 'production'
-          //   ? ['--single-process', ]
-          //   : []),
         ],
       });
       console.log('✅ Browser inicializado');
