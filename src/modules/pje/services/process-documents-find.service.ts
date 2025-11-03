@@ -216,16 +216,20 @@ export class ProcessDocumentsFindService {
 
       // tenta extrair bookmarks e processar
       try {
-        const bookmarks =
+        interface Bookmark {
+          id: string;
+          index: number;
+          title: string;
+          data?: string;
+        }
+
+        const bookmarks: Bookmark[] =
           await this.pdfExtractService.extractBookmarks(fileBuffer);
 
-        const bookmarksFiltrados = bookmarks.filter((b) =>
+        const bookmarksFiltrados = bookmarks.filter((b: Bookmark) =>
           regexDocumentos.some((r) => r.test(normalizeString(b.title))),
         );
-
-        for (const bookmark of bookmarksFiltrados) {
-          if (processedDocumentIds.has(bookmark.id)) continue;
-
+        const processarBookmark = async (bookmark: Bookmark) => {
           const extractedPdfBuffer =
             await this.pdfExtractService.extractPagesByIndex(
               fileBuffer,
@@ -234,9 +238,9 @@ export class ProcessDocumentsFindService {
 
           if (!extractedPdfBuffer) {
             this.logger.warn(
-              `⚠️ Não foi possível extrair o buffer PDF para o bookmark "${bookmark.title}" (id: ${bookmark.id})`,
+              `⚠️ Não foi possível extrair PDF para o bookmark "${bookmark.title}" (id: ${bookmark.id})`,
             );
-            continue;
+            return;
           }
 
           const fileName = `${bookmark.title.replace(/\s+/g, '_')}_${bookmark.index}_${Date.now()}_${Math.random()
@@ -252,11 +256,31 @@ export class ProcessDocumentsFindService {
             title: bookmark.title,
             temp_link: url,
             uniqueName: bookmark.id,
-            date: bookmark.data,
+            date: bookmark.data ?? '',
           });
 
           processedDocumentIds.add(bookmark.id);
+        };
+        for (const bookmark of bookmarksFiltrados) {
+          if (processedDocumentIds.has(bookmark.id)) continue;
+
+          // ✅ 1. Encontrar índice real do bookmark na lista original
+          const index = bookmarks.findIndex((b) => b.id === bookmark.id);
+
+          // ✅ 2. Extrair o bookmark atual
+          await processarBookmark(bookmark);
+
+          // ✅ 3. Tentar pegar o próximo bookmark (se existir)
+          const proximo = bookmarks[index + 1];
+          if (proximo && !processedDocumentIds.has(proximo.id)) {
+            this.logger.debug(
+              `📎 Pegando também o documento seguinte a "${bookmark.title}": "${proximo.title}"`,
+            );
+            await processarBookmark(proximo);
+          }
         }
+
+        // ✅ Função auxiliar para evitar duplicação
       } catch (pdfError: any) {
         // Captura erros específicos do pdfjs-dist
         const msg =
