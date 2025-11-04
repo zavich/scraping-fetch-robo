@@ -73,8 +73,8 @@ export class ProcessFindService {
         throw new Error(`Saldo insuficiente no 2Captcha: ${balance}`);
 
       const grauMax = origem === 'TST' ? 3 : 2;
-
-      for (let i = 1; i <= grauMax; i++) {
+      const initialGrau = origem === 'TST' ? 3 : 1;
+      for (let i = initialGrau; i <= grauMax; i++) {
         try {
           const delayMs = this.getRandomDelay(regionTRT);
           this.logger.debug(
