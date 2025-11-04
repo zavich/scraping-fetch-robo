@@ -7,7 +7,6 @@ import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 
 import { CaptchaService } from 'src/services/captcha.service';
-import { applyScraperApiProxy } from 'src/utils/proxy.helper';
 import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
@@ -55,17 +54,24 @@ export class ProcessFindService {
                 'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                 'content-type': 'application/json',
                 'x-grau-instancia': grau.toString(),
-                cookie: ['ASSINADOR_PJE=PJEOFFICE', 'MO=PJEOFFICE'].join('; '),
+
+                // Cookies obrigatórios
+                cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
+
+                // Essenciais para CloudFront liberar
+                origin: `https://pje.trt${regionTRT}.jus.br`,
                 referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${grau}`,
+
                 'user-agent':
                   userAgents[Math.floor(Math.random() * userAgents.length)],
-                'sec-ch-ua': '"Not:A-Brand";v="99", "Chromium";v="115"',
-                'sec-ch-ua-mobile': '?0',
-                'sec-ch-ua-platform': '"Windows"',
-                origin: `https://pje.trt${regionTRT}.jus.br`,
+
+                // 🔥 CloudFront só libera se esses 6 headers existirem:
                 'sec-fetch-site': 'same-origin',
                 'sec-fetch-mode': 'cors',
                 'sec-fetch-dest': 'empty',
+                'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"',
               },
             },
           );
@@ -227,12 +233,27 @@ export class ProcessFindService {
       const response = await axios.get<ProcessosResponse>(url, {
         headers: {
           accept: 'application/json, text/plain, */*',
+          'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
           'content-type': 'application/json',
           'x-grau-instancia': instance,
-          cookie: ['ASSINADOR_PJE=PJEOFFICE', 'MO=PJEOFFICE'].join('; '),
-          referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
+
+          // Cookies obrigatórios
+          cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
+
+          // Essenciais para CloudFront liberar
+          origin: `https://pje.trt${regionTRT}.jus.br`,
+          referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
+
           'user-agent':
             userAgents[Math.floor(Math.random() * userAgents.length)],
+
+          // 🔥 CloudFront só libera se esses 6 headers existirem:
+          'sec-fetch-site': 'same-origin',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-dest': 'empty',
+          'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
         },
       });
 
