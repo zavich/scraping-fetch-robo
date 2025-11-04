@@ -66,7 +66,6 @@ export class GenericDocumentosWorker extends WorkerHost {
         'RESPONSE DOCUMENTS:',
         response.resposta?.instancias?.[0]?.documentos,
       );
-      return;
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
