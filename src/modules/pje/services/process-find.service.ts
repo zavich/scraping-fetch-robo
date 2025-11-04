@@ -82,9 +82,13 @@ export class ProcessFindService {
           );
           await this.delay(delayMs);
 
-          const tokenCaptcha = (await this.redis.get(
-            `pje:token:captcha:${numeroDoProcesso}:${i}`,
-          )) as string;
+          const tokenCaptcha =
+            regionTRT === 15
+              ? undefined
+              : ((await this.redis.get(
+                  `pje:token:captcha:${numeroDoProcesso}:${i}`,
+                )) as string);
+
           const headers = this.buildHeaders(
             numeroDoProcesso,
             i.toString(),
@@ -179,10 +183,21 @@ export class ProcessFindService {
 
       return response.data;
     } catch (error: any) {
-      if ([429, 403].includes(error.response?.status) && attempt < 5) {
-        const delay = Math.pow(2, attempt) * 1000;
+      const isTRT15 = regionTRT === 15;
+      const retryStatus = [429, 403];
+      const maxAttempts = isTRT15 ? 7 : 5; // TRT15 permite mais tentativas
+
+      if (
+        retryStatus.includes(error.response?.status) &&
+        attempt < maxAttempts
+      ) {
+        // Delay maior para TRT15
+        const baseDelay = isTRT15 ? 5000 : 1000;
+        const delay = Math.pow(2, attempt) * baseDelay; // exponencial: 5s, 10s, 20s, 40s...
         this.logger.warn(
-          `Rate limit ou bloqueio detectado (tentativa ${attempt}), aguardando ${delay / 1000}s...`,
+          `Rate limit ou bloqueio detectado (tentativa ${attempt}) ${
+            isTRT15 ? '[TRT15]' : ''
+          }, aguardando ${delay / 1000}s...`,
         );
         await this.delay(delay);
         return this.fetchProcess(
@@ -195,6 +210,7 @@ export class ProcessFindService {
           attempt + 1,
         );
       }
+
       throw error;
     }
   }
