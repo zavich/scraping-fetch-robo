@@ -7,7 +7,7 @@ export function createDynamicWorkers(): Provider[] {
   const queues = [...ALL_TRT_QUEUES, 'pje-tst'];
 
   return queues.map((queueName) => {
-    @Processor(queueName)
+    @Processor(queueName, { concurrency: 3 })
     class WorkerForQueue extends GenericProcessoWorker {}
 
     return {

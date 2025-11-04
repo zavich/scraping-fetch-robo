@@ -7,7 +7,7 @@ export function createDynamicDocumentsWorkers(): Provider[] {
   const queues = [...ALL_TRT_DOCUMENT_QUEUES];
 
   return queues.map((queueName) => {
-    @Processor(queueName, { lockDuration: 120000 })
+    @Processor(queueName, { concurrency: 2, lockDuration: 120000 })
     class WorkerForQueue extends GenericDocumentosWorker {}
 
     return {
