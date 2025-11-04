@@ -170,8 +170,19 @@ export class ProcessFindService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
+      // TROCAR USER-AGENT a cada tentativa TRT15
+      const userAgent =
+        regionTRT === 15
+          ? userAgents[Math.floor(Math.random() * userAgents.length)]
+          : undefined;
+
       const response = await axios.get<ProcessosResponse>(url, {
-        headers: this.buildHeaders(numeroDoProcesso, instance, regionTRT),
+        headers: this.buildHeaders(
+          numeroDoProcesso,
+          instance,
+          regionTRT,
+          userAgent,
+        ),
       });
 
       const tokenCaptcha = response.headers['captchatoken'] as string;
@@ -185,26 +196,32 @@ export class ProcessFindService {
     } catch (error: any) {
       const isTRT15 = regionTRT === 15;
       const retryStatus = [429, 403];
-      const maxAttempts = isTRT15 ? 7 : 5; // TRT15 permite mais tentativas
+      const maxAttempts = isTRT15 ? 7 : 5;
 
       if (
         retryStatus.includes(error.response?.status) &&
         attempt < maxAttempts
       ) {
-        // Delay maior para TRT15
-        const baseDelay = isTRT15 ? 5000 : 1000;
-        const delay = Math.pow(2, attempt) * baseDelay; // exponencial: 5s, 10s, 20s, 40s...
+        // Delay maior e randomizado para TRT15
+        const baseDelay = isTRT15 ? 10000 : 1000;
+        const delay =
+          Math.pow(2, attempt) * baseDelay + Math.floor(Math.random() * 3000);
         this.logger.warn(
           `Rate limit ou bloqueio detectado (tentativa ${attempt}) ${
             isTRT15 ? '[TRT15]' : ''
-          }, aguardando ${delay / 1000}s...`,
+          }, aguardando ${Math.round(delay / 1000)}s antes de tentar novamente...`,
         );
         await this.delay(delay);
+
+        // REFRESH token CAPTCHA a cada tentativa TRT15
+        const newTokenCaptcha =
+          isTRT15 && attempt > 1 ? undefined : tockenCaptcha;
+
         return this.fetchProcess(
           numeroDoProcesso,
           detalheProcessoId,
           instance,
-          tockenCaptcha,
+          newTokenCaptcha,
           tokenDesafio,
           resposta,
           attempt + 1,
