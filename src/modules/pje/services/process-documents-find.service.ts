@@ -9,6 +9,7 @@ import { normalizeString } from 'src/utils/normalize-string';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
 import { ProcessFindService } from './process-find.service';
+import { LoginPoolService } from './login-pool.service';
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
@@ -21,6 +22,7 @@ export class ProcessDocumentsFindService {
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
     private readonly processFindService: ProcessFindService,
+    private readonly loginPool: LoginPoolService,
   ) {}
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
@@ -70,7 +72,6 @@ export class ProcessDocumentsFindService {
     cookies: string,
   ): Promise<Documento[]> {
     this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
-
     const uploadedDocuments: Documento[] = [];
     const processedDocumentIds = new Set<string>();
 
@@ -178,7 +179,6 @@ export class ProcessDocumentsFindService {
       // se for igual ou menor, mantém a maisRecente
       return maisRecente;
     }, null);
-    const lastInstance = ultimaInstancia;
     //caso haja mais de uma instancia com a mesma data de moviemntação, pegar a primeira instancia
     try {
       this.logger.debug(
@@ -300,7 +300,25 @@ export class ProcessDocumentsFindService {
       this.logger.error(
         `❌ Erro ao baixar PDF do processo ${processNumber} (instância ${ultimaInstancia?.instance}): ${error.code || error.name} - ${error.message}`,
       );
-      throw error;
+      // Solicita novo cookie
+      const newCookies = await this.loginPool.forceRefreshCookies(regionTRT);
+
+      // Tenta novamente apenas UMA VEZ
+      try {
+        return await this.uploadDocumentosRestritos(
+          regionTRT,
+          instances,
+          processNumber,
+          newCookies,
+        );
+      } catch (err) {
+        this.logger.error(
+          `❌ Segunda tentativa falhou para processo ${processNumber}: ${err.message}`,
+        );
+        throw new BadGatewayException(
+          `Não foi possível baixar documentos restritos para o processo ${processNumber}`,
+        );
+      }
     }
     const captchaKey = `pje:token:captcha:${processNumber}`;
     const keys = await this.redis.keys(`${captchaKey}*`);

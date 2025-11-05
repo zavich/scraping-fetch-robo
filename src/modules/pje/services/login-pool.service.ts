@@ -185,52 +185,10 @@ export class LoginPoolService {
     }
     return cookies;
   }
-
-  // private async refreshToken(trt: number, cookies: string): Promise<string> {
-  //   const redisKey = `pje:session:${trt}`;
-  //   try {
-  //     const response = await axios.get(
-  //       `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
-  //       {
-  //         headers: {
-  //           accept: 'application/json, text/plain, */*',
-  //           'accept-language': 'pt-BR,pt;q=0.9',
-  //           'content-type': 'application/json',
-  //           referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
-  //           'user-agent':
-  //             userAgents[Math.floor(Math.random() * userAgents.length)],
-  //           'x-grau-instancia': '1',
-  //           Cookie: cookies,
-  //         },
-  //       },
-  //     );
-
-  //     const cookieObj: Record<string, string> = {};
-  //     cookies.split(';').forEach((c) => {
-  //       const [key, value] = c.split('=').map((x) => x.trim());
-  //       if (key && value) cookieObj[key] = value;
-  //     });
-
-  //     cookieObj.access_token_1g = response.data.access_token;
-
-  //     const updatedCookies = Object.entries(cookieObj)
-  //       .map(([k, v]) => `${k}=${v}`)
-  //       .join('; ');
-
-  //     await this.redis.set(redisKey, updatedCookies, 'EX', 3600);
-  //     return updatedCookies;
-  //   } catch (err) {
-  //     console.log(err);
-
-  //     if (
-  //       err.response?.status === 403 ||
-  //       err.response?.data.codigoErro === 'ARQ-028'
-  //     ) {
-  //       this.logger.warn(`⚠️ Cookie TRT ${trt} expirado.`);
-  //       await this.redis.del(redisKey);
-  //       return await this.getCookies(trt); // ✅ retorna o novo cookie
-  //     }
-  //     throw new Error(`Erro ao validar cookie TRT ${trt}: ${err.message}`);
-  //   }
-  // }
+  async forceRefreshCookies(trt: number): Promise<string> {
+    const redisKey = `pje:session:${trt}`;
+    const readyKey = `${redisKey}:ready`;
+    await this.redis.del(redisKey, readyKey);
+    return this.getCookies(trt); // Isso vai gerar um novo login
+  }
 }

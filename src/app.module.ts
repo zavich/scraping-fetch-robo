@@ -18,10 +18,6 @@ import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.
         port: Number(process.env.REDIS_PORT),
       },
     }),
-    BullModule.registerQueue(
-      { name: 'pje-documentos' },
-      { name: 'pje-processos' },
-    ),
     ScheduleModule.forRoot(),
     ReceitaFederalModule,
   ],
