@@ -3,7 +3,7 @@ name: Deploy Scraping Service
 on:
   push:
     branches:
-      - feat/job-by-trt-queues
+      - main
 
 jobs:
   deploy:
