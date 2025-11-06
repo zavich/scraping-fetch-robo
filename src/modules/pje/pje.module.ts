@@ -17,8 +17,10 @@ import { DocumentoService } from './services/documents.service';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
-import { ProcessFindService } from './services/process-find.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
+import { ScrapingService } from '../../helpers/scraping.service';
+import { WebScrapingMovimentService } from './services/web-scraping-moviment.service';
+import { FetchUrlMovimentService } from './services/fetch-url.service';
 
 @Module({
   imports: [
@@ -40,14 +42,15 @@ import { ProcessDocumentsFindService } from './services/process-documents-find.s
   providers: [
     PjeLoginService,
     CaptchaService,
-    ProcessFindService,
+    WebScrapingMovimentService,
+    FetchUrlMovimentService,
     DocumentoService,
     ConsultarProcessoQueue,
     AwsS3Service,
     PdfExtractService,
     // DocumentosWorker,
     LoginPoolService,
-
+    ScrapingService,
     // ✅ queue-service ANTES dos geradores de workers
     ConsultarProcessoDocumentoQueue,
     ProcessDocumentsFindService,

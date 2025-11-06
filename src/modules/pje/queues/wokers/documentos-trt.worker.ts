@@ -6,6 +6,7 @@ import { normalizeResponse } from 'src/utils/normalizeResponse';
 
 import { LoginPoolService } from '../../services/login-pool.service';
 import { ProcessDocumentsFindService } from '../../services/process-documents-find.service';
+import { ProcessosResponse } from 'src/interfaces';
 
 export class GenericDocumentosWorker extends WorkerHost {
   protected readonly logger = new Logger(GenericDocumentosWorker.name);
@@ -16,7 +17,7 @@ export class GenericDocumentosWorker extends WorkerHost {
   @Inject(ProcessDocumentsFindService)
   protected readonly processDocsService!: ProcessDocumentsFindService;
 
-  async process(job: Job<{ numero: string; instances: any[] }>) {
+  async process(job: Job<{ numero: string; instances: ProcessosResponse[] }>) {
     const { numero, instances } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
 
@@ -39,30 +40,29 @@ export class GenericDocumentosWorker extends WorkerHost {
       }
 
       // Tenta obter cookies
-      const cookies = await this.loginPool.getCookies(regionTRT);
+      // const cookies = await this.loginPool.getCookies(regionTRT);
 
-      if (!cookies) {
-        const resp = normalizeResponse(
-          numero,
-          [],
-          `TRT-${regionTRT} indisponível para consulta de documentos`,
-          true,
-        );
-        await axios.post(webhookUrl, resp);
-        return;
-      }
+      // if (!cookies) {
+      //   const resp = normalizeResponse(
+      //     numero,
+      //     [],
+      //     `TRT-${regionTRT} indisponível para consulta de documentos`,
+      //     true,
+      //   );
+      //   await axios.post(webhookUrl, resp);
+      //   return;
+      // }
 
       // Executa consulta via serviço principal
       const documentos = await this.processDocsService.execute(
         numero,
-        cookies,
         instances,
       );
 
       const result = documentos.slice(0, 2);
 
       const response = normalizeResponse(numero, result, '', true);
-
+      return;
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ Documentos finalizados → ${numero}`);

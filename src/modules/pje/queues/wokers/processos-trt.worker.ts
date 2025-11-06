@@ -3,14 +3,17 @@ import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Job, Queue } from 'bullmq';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
-import { ProcessFindService } from '../../services/process-find.service';
+import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
+import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
   private readonly documentosQueues: Record<string, Queue> = {};
   constructor(
-    @Inject(ProcessFindService)
-    private readonly processFindService: ProcessFindService,
+    @Inject(WebScrapingMovimentService)
+    private readonly webScrapingMovimentService: WebScrapingMovimentService,
+    @Inject(FetchUrlMovimentService)
+    private readonly fetchUrlMovimentService: FetchUrlMovimentService,
 
     // ✅ injeta todas as filas TRT
     @Inject(getQueueToken('pje-documentos-trt1')) trt1: Queue,
@@ -107,7 +110,16 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
-      const instances = await this.processFindService.execute(numero, origem);
+      const service =
+        regionTRT === 3
+          ? this.fetchUrlMovimentService
+          : this.webScrapingMovimentService;
+
+      const instances = await service.execute(numero, origem);
+      // const instances = await this.webScrapingMovimentService.execute(
+      //   numero,
+      //   origem,
+      // );
       const result = instances.slice(0, 2);
 
       if (!instances || instances.length === 0) {
@@ -189,6 +201,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // ✅ POST final
       // --------------------------
       console.log('RESPONSE', response);
+      return;
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);

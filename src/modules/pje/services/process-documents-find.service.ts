@@ -8,7 +8,7 @@ import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
-import { ProcessFindService } from './process-find.service';
+
 import { LoginPoolService } from './login-pool.service';
 @Injectable()
 export class ProcessDocumentsFindService {
@@ -21,7 +21,6 @@ export class ProcessDocumentsFindService {
     private readonly documentoService: DocumentoService,
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
-    private readonly processFindService: ProcessFindService,
     private readonly loginPool: LoginPoolService,
   ) {}
   private async delay(ms: number) {
@@ -31,7 +30,6 @@ export class ProcessDocumentsFindService {
 
   async execute(
     numeroDoProcesso: string,
-    cookies: string,
     instances: ProcessosResponse[],
   ): Promise<ProcessosResponse[]> {
     const regionTRT = Number(numeroDoProcesso.split('.')[3]);
@@ -49,7 +47,6 @@ export class ProcessDocumentsFindService {
         regionTRT,
         instancesWithGrau,
         numeroDoProcesso,
-        cookies,
       );
 
       const newInstances = instancesWithGrau.map((instance) => ({
@@ -69,7 +66,6 @@ export class ProcessDocumentsFindService {
     regionTRT: number,
     instances: ProcessosResponse[],
     processNumber: string,
-    cookies: string,
   ): Promise<Documento[]> {
     this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
     const uploadedDocuments: Documento[] = [];
@@ -187,11 +183,9 @@ export class ProcessDocumentsFindService {
       await this.delay(this.delayMs);
 
       const filePath = await this.documentoService.execute(
-        ultimaInstancia?.id as number,
-        regionTRT,
-        ultimaInstancia?.instance as string,
-        cookies,
         processNumber,
+        regionTRT,
+        Number(ultimaInstancia?.instance),
       );
 
       const fileBuffer = fs.readFileSync(filePath);
@@ -301,7 +295,6 @@ export class ProcessDocumentsFindService {
         `❌ Erro ao baixar PDF do processo ${processNumber} (instância ${ultimaInstancia?.instance}): ${error.code || error.name} - ${error.message}`,
       );
       // Solicita novo cookie
-      const newCookies = await this.loginPool.forceRefreshCookies(regionTRT);
 
       // Tenta novamente apenas UMA VEZ
       try {
@@ -309,7 +302,6 @@ export class ProcessDocumentsFindService {
           regionTRT,
           instances,
           processNumber,
-          newCookies,
         );
       } catch (err) {
         this.logger.error(

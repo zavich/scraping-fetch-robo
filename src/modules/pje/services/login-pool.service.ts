@@ -35,7 +35,7 @@ export class LoginPoolService {
   private contaIndex = 0;
   private contadorProcessos = 0;
 
-  private getConta(force = false): { username: string; password: string } {
+  getConta(force = false): { username: string; password: string } {
     if (force || this.contadorProcessos >= 5) {
       this.contaIndex = (this.contaIndex + 1) % this.contas.length;
       this.contadorProcessos = 0;
