@@ -22,10 +22,21 @@ export class BrowserManager {
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-gpu',
-          '--no-zygote',
           '--disable-software-rasterizer',
+          '--disable-gpu',
+          '--disable-extensions',
+          '--no-zygote',
+          '--single-process',
+          '--window-size=1920,1080',
         ],
+        // args: [
+        //   '--no-sandbox',
+        //   '--disable-setuid-sandbox',
+        //   '--disable-dev-shm-usage',
+        //   '--disable-gpu',
+        //   '--no-zygote',
+        //   '--disable-software-rasterizer',
+        // ],
       });
       console.log('✅ Browser inicializado');
     }
@@ -52,8 +63,7 @@ export class BrowserManager {
 
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType()))
-        req.abort();
+      if (req.resourceType() === 'image') req.abort();
       else req.continue();
     });
 
