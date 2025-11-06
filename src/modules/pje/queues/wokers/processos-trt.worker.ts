@@ -141,7 +141,19 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔐 Segredo de Justiça
       // --------------------------
-      const segredo = instances.some((i) => 'mensagemErro' in i);
+      const segredo = instances.some((i) => {
+        const maybeMsg = (i as any).mensagemErro as unknown;
+        if (typeof maybeMsg !== 'string') return false;
+        const msg = maybeMsg;
+        if (!msg) return false;
+        // Normalize and remove diacritics to match "segredo de justiça" robustly
+        const normalized = msg
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+        // Match "segredo" optionally followed by "justica" (handles "segredo de justiça", "segredo", etc.)
+        return /segredo(?:.*justica)?/.test(normalized);
+      });
 
       if (segredo) {
         this.logger.warn(`⚠️ Segredo de justiça ${numero}`);
