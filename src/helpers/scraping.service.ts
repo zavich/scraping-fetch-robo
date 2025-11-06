@@ -24,7 +24,7 @@ export class ScrapingService {
     downloadIntegra = false,
     username?: string,
     password?: string,
-    maxWaitMs = 180_000, // timeout configurável em ms
+    maxWaitMs = 180_000,
   ) {
     const POLL_INTERVAL_MS = 500;
     const context = await this.pool.acquire();
@@ -35,7 +35,6 @@ export class ScrapingService {
     let processCaptured = false;
     const requestMap = new Map<string, string>();
 
-    // ===== Função de retry genérica =====
     const retry = async <T>(
       fn: () => Promise<T>,
       retries = 3,
@@ -58,15 +57,13 @@ export class ScrapingService {
       throw lastError;
     };
 
-    // ===== Inicializa CDP para capturar respostas =====
     const initCDP = async (pg: typeof page) => {
       const client = await pg.target().createCDPSession();
       await client.send('Network.enable');
 
       client.on('Network.requestWillBeSent', (event) => {
-        const reqId = event.requestId;
-        const url = event.request?.url ?? '';
-        if (reqId && url) requestMap.set(reqId, url);
+        if (event.requestId && event.request?.url)
+          requestMap.set(event.requestId, event.request.url);
       });
 
       client.on('Network.responseReceived', async (event) => {
@@ -75,12 +72,9 @@ export class ScrapingService {
           const reqId = event.requestId;
           const url = resp?.url ?? requestMap.get(reqId) ?? '';
 
-          // Filtra apenas URLs de processos (ignora /documentos e /integra)
           if (
             !processCaptured &&
-            url.match(
-              /\/pje-consulta-api\/api\/processos\/\d+\?(?:tokenCaptcha=.*|.*&resposta=.*)/,
-            ) &&
+            url.match(/\/pje-consulta-api\/api\/processos\/\d+/) &&
             !url.includes('/documentos') &&
             !url.includes('/integra')
           ) {
@@ -89,38 +83,33 @@ export class ScrapingService {
                 const body = await client.send('Network.getResponseBody', {
                   requestId: reqId,
                 });
+
                 const text = body.base64Encoded
                   ? Buffer.from(body.body, 'base64').toString('utf8')
                   : body.body;
 
-                let jsonData;
+                let json;
                 try {
-                  jsonData = JSON.parse(text);
+                  json = JSON.parse(text);
                 } catch {
-                  this.logger.warn(`[CDP] ❌ JSON inválido na URL: ${url}`);
                   continue;
                 }
 
-                // ✅ Validação do response genérica
-                const isValidResponse =
-                  (Array.isArray(jsonData) && jsonData.length > 0) ||
-                  (jsonData && jsonData.id && jsonData.numero);
+                const valid =
+                  (Array.isArray(json) && json.length > 0) ||
+                  (json?.id && json?.numero);
 
-                if (isValidResponse) {
-                  capturedResponseData = jsonData;
+                if (valid) {
+                  capturedResponseData = json;
                   processCaptured = true;
                   break;
                 }
-              } catch (err) {
-                await new Promise((r) => setTimeout(r, 300));
+              } catch {
+                await new Promise((r) => setTimeout(r, 250));
               }
             }
           }
-        } catch (err) {
-          this.logger.warn(
-            `Erro ao processar resposta CDP: ${err?.message ?? err}`,
-          );
-        }
+        } catch {}
       });
 
       return client;
@@ -129,33 +118,24 @@ export class ScrapingService {
     let client = await initCDP(page);
 
     try {
-      // ===== Login / restauração de cookies =====
+      // LOGIN / COOKIES
       const cacheKey = `pje:session:${regionTRT}`;
       const savedCookies = usedCookies ? await this.redis.get(cacheKey) : null;
 
       if (savedCookies) {
-        const cookiesMap = new Map<string, string>();
-        (savedCookies as string).split(';').forEach((c) => {
+        const mapCookies = new Map<string, string>();
+        savedCookies.split(';').forEach((c) => {
           const [name, ...rest] = c.trim().split('=');
-          if (name && rest.length) cookiesMap.set(name, rest.join('='));
+          if (name && rest.length) mapCookies.set(name, rest.join('='));
         });
 
-        const requiredTokens = ['access_token_1g', 'access_token_2g'];
-        const hasAllTokens = requiredTokens.every((token) =>
-          cookiesMap.has(token),
+        const hasTokens = ['access_token_1g', 'access_token_2g'].every((t) =>
+          mapCookies.has(t),
         );
 
-        if (!hasAllTokens) {
-          this.logger.warn(
-            '⚠ Tokens essenciais não encontrados — removendo cache para forçar login',
-          );
-          try {
-            await this.redis.del(cacheKey);
-          } catch {}
-          usedCookies = false;
-        } else {
-          const cookiesArray = Array.from(cookiesMap.entries()).map(
-            ([name, value]) => ({
+        if (hasTokens) {
+          await page.setCookie(
+            ...Array.from(mapCookies.entries()).map(([name, value]) => ({
               name,
               value,
               domain:
@@ -163,12 +143,14 @@ export class ScrapingService {
                   ? '.pje.tst.jus.br'
                   : `.pje.trt${regionTRT}.jus.br`,
               path: '/',
-              httpOnly: false,
               secure: true,
-            }),
+            })),
           );
-          await page.setCookie(...cookiesArray);
-          this.logger.debug(`✅ Cookies restaurados (${cookiesArray.length})`);
+
+          this.logger.debug('✅ Cookies restaurados');
+        } else {
+          await this.redis.del(cacheKey);
+          usedCookies = false;
         }
       }
 
@@ -179,7 +161,7 @@ export class ScrapingService {
             : `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`;
 
         await page.goto(loginUrl, { waitUntil: 'networkidle0' });
-        await page.waitForSelector('input[name="usuario"]', { visible: true });
+
         await page.type('input[name="usuario"]', username);
         await page.type('input[name="senha"]', password);
 
@@ -189,27 +171,26 @@ export class ScrapingService {
         ]);
 
         const cookies = await page.cookies();
-        const cookieString = cookies
-          .map((c) => `${c.name}=${c.value}`)
-          .join(';');
-        await this.redis.set(cacheKey, cookieString, 'EX', 60 * 30);
-        this.logger.debug(`✅ Cookies salvos em ${cacheKey}`);
+        await this.redis.set(
+          cacheKey,
+          cookies.map((c) => `${c.name}=${c.value}`).join(';'),
+          'EX',
+          1800,
+        );
       }
 
-      // Página inicial
-      const processUrl =
+      const urlBase =
         instanceIndex === 3
           ? 'https://pje.tst.jus.br/consultaprocessual/'
           : `https://pje.trt${regionTRT}.jus.br/consultaprocessual/`;
 
       await retry(
-        () => page.goto(processUrl, { waitUntil: 'networkidle0' }),
+        () => page.goto(urlBase, { waitUntil: 'networkidle0' }),
         3,
         1000,
-        'Página de processo',
+        'Abrir consulta',
       );
 
-      // Preencher número do processo
       await retry(
         async () => {
           await page.waitForSelector('#nrProcessoInput', { visible: true });
@@ -218,135 +199,122 @@ export class ScrapingService {
               document.querySelector<HTMLInputElement>('#nrProcessoInput');
             if (input) input.value = '';
           });
-          await page.type('#nrProcessoInput', processNumber, { delay: 50 });
+          await page.type('#nrProcessoInput', processNumber, { delay: 45 });
           await page.click('#btnPesquisar');
         },
         3,
         1000,
-        'Preencher número do processo',
+        'Preencher processo',
       );
 
-      // ===== Seleção de instância (sem retry se não existir) =====
-      await page.waitForSelector('#painel-escolha-processo', { visible: true });
-      const processos = await page.$$(
-        '#painel-escolha-processo .selecao-processo',
-      );
-
-      if (!processos.length)
-        throw new Error('Nenhuma instância encontrada na página de seleção');
-
-      const targetIndex = instanceIndex - 1;
-      if (targetIndex < 0 || targetIndex >= processos.length) {
-        this.logger.error(
-          `Instância solicitada (${instanceIndex}) não está disponível. Instâncias encontradas: ${processos.length}`,
-        );
-        throw new Error(`Instância ${instanceIndex} não encontrada`);
-      }
-
-      // Click na instância (retry apenas para falhas temporárias)
-      await retry(
-        async () => {
-          let newPage: any = null;
-          const onTargetCreated = async (target: any) => {
-            try {
-              const pg = await target.page();
-              if (pg) newPage = pg;
-            } catch {}
-          };
-          page.browser().on('targetcreated', onTargetCreated);
-
-          await processos[targetIndex].click();
-          await new Promise((r) => setTimeout(r, 1200));
-
-          if (newPage) {
-            if (typeof newPage.bringToFront === 'function')
-              await newPage.bringToFront();
-            page = newPage;
-            client = await initCDP(page);
-          }
-
-          page.browser().off('targetcreated', onTargetCreated);
-        },
-        3,
-        1000,
-        'Clicar na instância',
-      );
-
-      // CAPTCHA
-      const captchaVisible = await page.$('#imagemCaptcha');
-      if (captchaVisible) {
-        await retry(
+      // ✅ RACE ENTRE PAINEL E CAPTCHA
+      const waitForPainelOuCaptcha = async () => {
+        return await retry(
           async () => {
-            const base64 = await page.$eval(
-              '#imagemCaptcha',
-              (img: HTMLImageElement) => img.src,
-            );
-            const solved = await this.captchaService.resolveCaptcha(base64);
-            if (!solved?.resposta) throw new Error('Captcha falhou');
+            const painel = await page.$('#painel-escolha-processo');
+            if (painel) return 'painel';
 
-            await page.evaluate((value) => {
-              const input =
-                document.querySelector<HTMLInputElement>('#captchaInput');
-              if (input) {
-                input.value = value;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-            }, solved.resposta);
+            const captcha = await page.$('#imagemCaptcha');
+            if (captcha) return 'captcha';
 
-            await page.click('#btnEnviar');
-            await new Promise((r) => setTimeout(r, 1500));
+            throw new Error('Nem painel nem captcha renderizaram');
           },
           3,
           1000,
-          'Resolver CAPTCHA',
+          'Esperar painel ou captcha',
         );
+      };
+
+      const resultado = await waitForPainelOuCaptcha();
+
+      if (resultado === 'painel') {
+        this.logger.log('✅ Múltiplas instâncias — painel exibido');
+
+        const processos = await page.$$(
+          '#painel-escolha-processo .selecao-processo',
+        );
+        if (!processos.length) throw new Error('Nenhuma instância encontrada');
+
+        const target = instanceIndex - 1;
+        if (target < 0 || target >= processos.length)
+          throw new Error(`Instância ${instanceIndex} não encontrada`);
+
+        await Promise.all([
+          page
+            .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
+            .catch(() => null),
+          processos[target].click(),
+        ]);
+
+        this.logger.log('✅ Instância selecionada, aguardando captcha...');
       }
 
-      // Captura PDF / integra
+      // ✅ AGUARDA explicitamente o CAPTCHA aparecer
+      const captchaVisible = await page
+        .waitForSelector('#imagemCaptcha', { visible: true, timeout: 5000 })
+        .catch(() => null);
+
+      if (captchaVisible) {
+        this.logger.log('⏳ Resolvendo CAPTCHA…');
+
+        await retry(async () => {
+          let base64 = await page.$eval(
+            '#imagemCaptcha',
+            (img: HTMLImageElement) => img.src,
+          );
+
+          // Remove o prefixo se existir
+          base64 = base64.replace(/^data:image\/\w+;base64,/, '');
+
+          const solved = await this.captchaService.resolveCaptcha(base64);
+          if (!solved?.resposta) throw new Error('Captcha falhou');
+
+          // Limpa o input antes de digitar
+          await page.evaluate(() => {
+            const input =
+              document.querySelector<HTMLInputElement>('#captchaInput');
+            if (input) input.value = '';
+          });
+
+          await page.type('#captchaInput', solved.resposta, { delay: 50 });
+          await page.click('#btnEnviar');
+
+          // Pequena espera para garantir que a resposta seja processada
+          await new Promise((r) => setTimeout(r, 500));
+        }, 3);
+
+        this.logger.log('✅ CAPTCHA resolvido!');
+      }
+
       if (downloadIntegra) {
-        const integraPromise = page.waitForResponse(
+        const integraResp = page.waitForResponse(
           (resp) => resp.url().includes('/integra') && resp.status() === 200,
           { timeout: maxWaitMs },
         );
-
-        const btnIntegra = await page.$('#btnDownloadIntegra');
-        if (btnIntegra) await btnIntegra.click();
+        const btn = await page.$('#btnDownloadIntegra');
+        if (btn) btn.click();
 
         try {
-          const integraResponse = await integraPromise;
-          integraBuffer = await integraResponse.buffer();
-          this.logger.log(
-            `[PDF] ✅ Integra capturada na URL: ${integraResponse.url()}`,
-          );
-        } catch {
-          this.logger.warn(
-            '⚠ PDF /integra não foi capturado dentro do tempo limite',
-          );
-        }
+          const r = await integraResp;
+          integraBuffer = await r.buffer();
+        } catch {}
       }
 
-      // Espera response JSON do processo
-      const startProcess = Date.now();
-      while (!processCaptured && Date.now() - startProcess < maxWaitMs) {
+      const start = Date.now();
+      while (!processCaptured && Date.now() - start < maxWaitMs)
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-      }
 
-      if (!processCaptured)
-        throw new Error('Não foi possível capturar a response do processo');
-      if (integraBuffer && downloadIntegra) return { integra: integraBuffer };
+      if (!processCaptured) throw new Error('Processo não foi capturado');
+
+      if (downloadIntegra && integraBuffer) return { integra: integraBuffer };
       return { process: capturedResponseData };
     } finally {
-      // ===== Cleanup =====
       try {
         await client?.send('Network.disable');
       } catch {}
       try {
         if (page && !page.isClosed()) await page.close();
-        this.logger.debug('✅ Aba do Puppeteer fechada');
-      } catch (err) {
-        this.logger.warn(`Falha ao fechar aba: ${err?.message ?? err}`);
-      }
+      } catch {}
       this.pool.release(context);
     }
   }
