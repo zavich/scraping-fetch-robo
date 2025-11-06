@@ -150,84 +150,6 @@ export class ScrapingService {
           usedCookies = false;
         }
       }
-
-      // if ((!savedCookies || !usedCookies) && username && password) {
-      //   const baseUrl =
-      //     instanceIndex === 3
-      //       ? 'https://pje.tst.jus.br/consultaprocessual'
-      //       : `https://pje.trt${regionTRT}.jus.br/consultaprocessual`;
-
-      //   await page.goto(baseUrl, { waitUntil: 'networkidle0' });
-
-      //   const acessoBtn = await page.waitForSelector(
-      //     'a[routerlink="/login"][mattooltip="Acesso restrito"]',
-      //     { visible: true, timeout: 5000 },
-      //   );
-      //   if (!acessoBtn)
-      //     throw new Error(
-      //       `Botão "Acesso restrito" não encontrado para TRT-${regionTRT}`,
-      //     );
-      //   await acessoBtn.click();
-
-      //   const usuarioInput = await page.waitForSelector(
-      //     'input[name="usuario"]',
-      //     { visible: true, timeout: 10000 },
-      //   );
-      //   const senhaInput = await page.waitForSelector('input[name="senha"]', {
-      //     visible: true,
-      //     timeout: 10000,
-      //   });
-      //   if (!usuarioInput || !senhaInput)
-      //     throw new Error(
-      //       `Campos de login não encontrados para TRT-${regionTRT}`,
-      //     );
-
-      //   await usuarioInput.type(username, { delay: 50 });
-      //   await senhaInput.type(password, { delay: 50 });
-
-      //   const btnEntrar = await page.waitForSelector('#btnEntrar', {
-      //     visible: true,
-      //     timeout: 5000,
-      //   });
-      //   if (!btnEntrar)
-      //     throw new Error(
-      //       `Botão "Entrar" não encontrado para TRT-${regionTRT}`,
-      //     );
-      //   await btnEntrar.click();
-
-      //   const cookies = await page.cookies();
-      //   const hasAccessToken = cookies.some((c) =>
-      //     c.name.includes('access_token'),
-      //   );
-
-      //   if (hasAccessToken) {
-      //     const cookiesString = cookies
-      //       .map((c) => `${c.name}=${c.value}`)
-      //       .join(';');
-      //     await this.redis.set(cacheKey, cookiesString, 'EX', 1800);
-      //     this.logger.log(
-      //       `✅ Login realizado e cookies salvos para TRT-${regionTRT}`,
-      //     );
-      //   } else {
-      //     const blockedKey = `blocked:${regionTRT}:${username}`;
-      //     await this.redis.set(
-      //       blockedKey,
-      //       JSON.stringify({
-      //         username,
-      //         regionTRT,
-      //         blockedAt: new Date(),
-      //         cookies,
-      //       }),
-      //       'EX',
-      //       3600,
-      //     );
-      //     this.logger.warn(
-      //       `⚠️ Usuário ${username} no TRT-${regionTRT} está bloqueado ou login falhou.`,
-      //     );
-      //     return { process: null, integra: null, blocked: true };
-      //   }
-      // }
-
       const urlBase =
         instanceIndex === 3
           ? 'https://pje.tst.jus.br/consultaprocessual/'
@@ -268,6 +190,8 @@ export class ScrapingService {
         .catch(() => null);
       const resultado = await Promise.race([painelProm, captchaProm]);
 
+      let singleInstance = false; // <-- nova flag
+
       if (resultado === 'painel') {
         this.logger.log('✅ Múltiplas instâncias — painel exibido');
         const processos = await page.$$(
@@ -287,6 +211,9 @@ export class ScrapingService {
         ]);
 
         this.logger.log('✅ Instância selecionada, aguardando captcha...');
+      } else if (resultado === 'captcha') {
+        this.logger.log('⚠️ Apenas uma instância — direto para CAPTCHA');
+        singleInstance = true; // marca que só existe uma instância
       }
 
       // CAPTCHA
@@ -348,7 +275,7 @@ export class ScrapingService {
       if (!processCaptured) throw new Error('Processo não foi capturado');
 
       if (downloadIntegra && integraBuffer) return { integra: integraBuffer };
-      return { process: capturedResponseData };
+      return { process: capturedResponseData, singleInstance };
     } finally {
       try {
         await client?.send('Network.disable');

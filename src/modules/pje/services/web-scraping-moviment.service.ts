@@ -39,7 +39,7 @@ export class WebScrapingMovimentService {
         await this.delay(delayMs);
 
         // Chama o ScrapingService para capturar o processo via Puppeteer
-        const { process } = await this.scrapingService.execute(
+        const { process, singleInstance } = await this.scrapingService.execute(
           numeroDoProcesso,
           regionTRT,
           i,
@@ -55,6 +55,12 @@ export class WebScrapingMovimentService {
         }
         if (process) {
           instances.push(process as unknown as ProcessosResponse);
+        }
+        if (singleInstance) {
+          this.logger.log(
+            `✅ Processo ${numeroDoProcesso} é de instância única. Finalizando buscas.`,
+          );
+          break;
         }
       } catch (err: any) {
         this.logger.warn(

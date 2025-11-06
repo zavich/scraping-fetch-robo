@@ -167,6 +167,32 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
+      function hasMensagemErroString(
+        obj: unknown,
+      ): obj is { mensagemErro: string } {
+        if (obj && typeof obj === 'object') {
+          const v = (obj as Record<string, unknown>)['mensagemErro'];
+          return typeof v === 'string' && v.length > 0;
+        }
+        return false;
+      }
+
+      const erroMensagem = instances.find(hasMensagemErroString);
+
+      if (erroMensagem) {
+        this.logger.warn(
+          `⚠️ Mensagem de erro para o processo ${numero}: ${erroMensagem.mensagemErro}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          erroMensagem.mensagemErro,
+          true,
+          origem,
+        );
+        await axios.post(webhookUrl, response);
+        return;
+      }
 
       // --------------------------
       // ✅ Resposta final
