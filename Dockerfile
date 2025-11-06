@@ -47,33 +47,52 @@ FROM node:18-slim AS build
 
 WORKDIR /app
 
+# Copia arquivos do Node
 COPY package*.json ./
+
+# Instala dependências incluindo canvas
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN npm install
+
+# Copia código
 COPY . .
+
+# Compila Nest
 RUN npm run build
+
 
 # ---------- STAGE 2: RUN ----------
 FROM node:18-slim
 
+# Instala Chromium e libs para Puppeteer
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-common \
     chromium-driver \
+    libx11-6 \
     libx11-xcb1 \
+    libxcb1 \
     libxcomposite1 \
+    libxcursor1 \
     libxdamage1 \
     libxrandr2 \
     libgbm1 \
-    libgtk-3-0 \
     libasound2 \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libpangocairo-1.0-0 \
     libcups2 \
-    libxss1 \
-    libxtst6 \
-    dumb-init \
+    libnss3 \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
@@ -82,10 +101,13 @@ ENV NODE_ENV=production
 
 WORKDIR /usr/src/app
 
-COPY package*.json ./
-RUN npm ci --omit=dev
+# Copia node_modules já compilado (incluindo canvas)
+COPY --from=build /app/node_modules ./node_modules
 
+# Copia os arquivos compilados
 COPY --from=build /app/dist ./dist
 
+COPY package*.json ./
+
 EXPOSE 8081
-CMD ["dumb-init", "node", "dist/main"]
+CMD ["node", "dist/main"]
