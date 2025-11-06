@@ -23,21 +23,9 @@ export class BrowserManager {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--disable-extensions',
-          '--disable-software-rasterizer',
-          '--single-process',
           '--no-zygote',
-          '--ignore-certificate-errors',
-          '--window-size=1920,1080',
+          '--disable-software-rasterizer',
         ],
-        // args: [
-        //   '--no-sandbox',
-        //   '--disable-setuid-sandbox',
-        //   '--disable-dev-shm-usage',
-        //   '--disable-gpu',
-        //   '--no-zygote',
-        //   '--disable-software-rasterizer',
-        // ],
       });
       console.log('✅ Browser inicializado');
     }
