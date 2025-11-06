@@ -62,7 +62,7 @@ export class GenericDocumentosWorker extends WorkerHost {
       const result = documentos.slice(0, 2);
 
       const response = normalizeResponse(numero, result, '', true);
-      return;
+
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
