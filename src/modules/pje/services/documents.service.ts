@@ -4,7 +4,6 @@ import * as fs from 'fs';
 import Redis from 'ioredis';
 import * as path from 'path';
 import { ScrapingService } from 'src/helpers/scraping.service';
-import { LoginPoolService } from './login-pool.service';
 
 @Injectable()
 export class DocumentoService {
@@ -13,17 +12,12 @@ export class DocumentoService {
     port: Number(process.env.REDIS_PORT) || 6379,
   });
   private readonly logger = new Logger(DocumentoService.name);
-  constructor(
-    private readonly scrapingService: ScrapingService,
-    private readonly loginPoolService: LoginPoolService,
-  ) {}
+  constructor(private readonly scrapingService: ScrapingService) {}
   async execute(
     processNumber: string,
     regionTRT: number,
     instanceIndex: number,
   ): Promise<string> {
-    const { username, password } = this.loginPoolService.getConta();
-
     try {
       // chama o ScrapingService
       const { integra } = await this.scrapingService.execute(
@@ -32,8 +26,6 @@ export class DocumentoService {
         instanceIndex,
         true,
         true,
-        username,
-        password,
       );
 
       if (!integra) {

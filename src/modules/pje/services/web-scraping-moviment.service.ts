@@ -45,6 +45,14 @@ export class WebScrapingMovimentService {
           i,
         );
 
+        const mensagemErro = (process as any)?.mensagemErro;
+        if (mensagemErro) {
+          this.logger.warn(
+            `Processo ${numeroDoProcesso} retornou mensagemErro na instância ${i}: ${mensagemErro}`,
+          );
+          instances.push(process as unknown as ProcessosResponse);
+          break;
+        }
         if (process) {
           instances.push(process as unknown as ProcessosResponse);
         }

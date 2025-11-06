@@ -98,13 +98,11 @@ export class PjeController {
   @Post('/teste/trt')
   async teste(): Promise<any> {
     return await this.scrapingService.execute(
-      '0010029-43.2024.5.15.0126',
+      '0010065-68.2022.5.15.0122',
       15,
       2,
-      false,
-      false,
-      // '09934500400',
-      // 'Pro@!230',
+      true,
+      true,
     );
   }
 }

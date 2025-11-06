@@ -141,9 +141,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔐 Segredo de Justiça
       // --------------------------
-      const segredo = instances.some(
-        (i) => 'mensagemErro' in i && i.juizoDigital === false,
-      );
+      const segredo = instances.some((i) => 'mensagemErro' in i);
 
       if (segredo) {
         this.logger.warn(`⚠️ Segredo de justiça ${numero}`);
@@ -154,7 +152,6 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
           origem,
         );
-
         await axios.post(webhookUrl, response);
         return;
       }
@@ -201,6 +198,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // ✅ POST final
       // --------------------------
       console.log('RESPONSE', response);
+      return;
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);

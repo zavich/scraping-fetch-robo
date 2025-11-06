@@ -2,6 +2,7 @@ import { WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Job } from 'bullmq';
+import Redis from 'ioredis';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
 import { LoginPoolService } from '../../services/login-pool.service';
@@ -16,7 +17,12 @@ export class GenericDocumentosWorker extends WorkerHost {
 
   @Inject(ProcessDocumentsFindService)
   protected readonly processDocsService!: ProcessDocumentsFindService;
-
+  @Inject(LoginPoolService)
+  protected readonly loginPoolService!: LoginPoolService;
+  private readonly redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: Number(process.env.REDIS_PORT) || 6379,
+  });
   async process(job: Job<{ numero: string; instances: ProcessosResponse[] }>) {
     const { numero, instances } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
@@ -39,32 +45,31 @@ export class GenericDocumentosWorker extends WorkerHost {
         return;
       }
 
-      // Tenta obter cookies
-      // const cookies = await this.loginPool.getCookies(regionTRT);
+      // Obtém cookies e conta usada
+      const { cookies, account } = await this.loginPool.getCookies(regionTRT);
 
-      // if (!cookies) {
-      //   const resp = normalizeResponse(
-      //     numero,
-      //     [],
-      //     `TRT-${regionTRT} indisponível para consulta de documentos`,
-      //     true,
-      //   );
-      //   await axios.post(webhookUrl, resp);
-      //   return;
-      // }
+      // Se não tiver cookies, significa que nenhuma conta está disponível
+      if (!cookies || !account) {
+        const resp = normalizeResponse(
+          numero,
+          [],
+          `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+          true,
+        );
+        await axios.post(webhookUrl, resp);
+        return;
+      }
 
-      // Executa consulta via serviço principal
+      // Executa consulta de documentos
       const documentos = await this.processDocsService.execute(
         numero,
         instances,
       );
 
       const result = documentos.slice(0, 2);
-
       const response = normalizeResponse(numero, result, '', true);
 
       await axios.post(webhookUrl, response);
-
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
     } catch (error: any) {
       this.logger.error(error);

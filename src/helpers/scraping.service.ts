@@ -22,8 +22,6 @@ export class ScrapingService {
     instanceIndex: number,
     usedCookies = false,
     downloadIntegra = false,
-    username?: string,
-    password?: string,
     maxWaitMs = 180_000,
   ) {
     const POLL_INTERVAL_MS = 500;
@@ -83,7 +81,6 @@ export class ScrapingService {
                 const body = await client.send('Network.getResponseBody', {
                   requestId: reqId,
                 });
-
                 const text = body.base64Encoded
                   ? Buffer.from(body.body, 'base64').toString('utf8')
                   : body.body;
@@ -115,7 +112,7 @@ export class ScrapingService {
       return client;
     };
 
-    let client = await initCDP(page);
+    const client = await initCDP(page);
 
     try {
       // LOGIN / COOKIES
@@ -154,30 +151,82 @@ export class ScrapingService {
         }
       }
 
-      if ((!savedCookies || !usedCookies) && username && password) {
-        const loginUrl =
-          instanceIndex === 3
-            ? 'https://pje.tst.jus.br/consultaprocessual/login'
-            : `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`;
+      // if ((!savedCookies || !usedCookies) && username && password) {
+      //   const baseUrl =
+      //     instanceIndex === 3
+      //       ? 'https://pje.tst.jus.br/consultaprocessual'
+      //       : `https://pje.trt${regionTRT}.jus.br/consultaprocessual`;
 
-        await page.goto(loginUrl, { waitUntil: 'networkidle0' });
+      //   await page.goto(baseUrl, { waitUntil: 'networkidle0' });
 
-        await page.type('input[name="usuario"]', username);
-        await page.type('input[name="senha"]', password);
+      //   const acessoBtn = await page.waitForSelector(
+      //     'a[routerlink="/login"][mattooltip="Acesso restrito"]',
+      //     { visible: true, timeout: 5000 },
+      //   );
+      //   if (!acessoBtn)
+      //     throw new Error(
+      //       `Botão "Acesso restrito" não encontrado para TRT-${regionTRT}`,
+      //     );
+      //   await acessoBtn.click();
 
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle0' }),
-          page.click('#btnEntrar'),
-        ]);
+      //   const usuarioInput = await page.waitForSelector(
+      //     'input[name="usuario"]',
+      //     { visible: true, timeout: 10000 },
+      //   );
+      //   const senhaInput = await page.waitForSelector('input[name="senha"]', {
+      //     visible: true,
+      //     timeout: 10000,
+      //   });
+      //   if (!usuarioInput || !senhaInput)
+      //     throw new Error(
+      //       `Campos de login não encontrados para TRT-${regionTRT}`,
+      //     );
 
-        const cookies = await page.cookies();
-        await this.redis.set(
-          cacheKey,
-          cookies.map((c) => `${c.name}=${c.value}`).join(';'),
-          'EX',
-          1800,
-        );
-      }
+      //   await usuarioInput.type(username, { delay: 50 });
+      //   await senhaInput.type(password, { delay: 50 });
+
+      //   const btnEntrar = await page.waitForSelector('#btnEntrar', {
+      //     visible: true,
+      //     timeout: 5000,
+      //   });
+      //   if (!btnEntrar)
+      //     throw new Error(
+      //       `Botão "Entrar" não encontrado para TRT-${regionTRT}`,
+      //     );
+      //   await btnEntrar.click();
+
+      //   const cookies = await page.cookies();
+      //   const hasAccessToken = cookies.some((c) =>
+      //     c.name.includes('access_token'),
+      //   );
+
+      //   if (hasAccessToken) {
+      //     const cookiesString = cookies
+      //       .map((c) => `${c.name}=${c.value}`)
+      //       .join(';');
+      //     await this.redis.set(cacheKey, cookiesString, 'EX', 1800);
+      //     this.logger.log(
+      //       `✅ Login realizado e cookies salvos para TRT-${regionTRT}`,
+      //     );
+      //   } else {
+      //     const blockedKey = `blocked:${regionTRT}:${username}`;
+      //     await this.redis.set(
+      //       blockedKey,
+      //       JSON.stringify({
+      //         username,
+      //         regionTRT,
+      //         blockedAt: new Date(),
+      //         cookies,
+      //       }),
+      //       'EX',
+      //       3600,
+      //     );
+      //     this.logger.warn(
+      //       `⚠️ Usuário ${username} no TRT-${regionTRT} está bloqueado ou login falhou.`,
+      //     );
+      //     return { process: null, integra: null, blocked: true };
+      //   }
+      // }
 
       const urlBase =
         instanceIndex === 3
@@ -191,6 +240,7 @@ export class ScrapingService {
         'Abrir consulta',
       );
 
+      // Preenche processo
       await retry(
         async () => {
           await page.waitForSelector('#nrProcessoInput', { visible: true });
@@ -207,23 +257,19 @@ export class ScrapingService {
         'Preencher processo',
       );
 
-      // ✅ RACE ENTRE PAINEL E CAPTCHA
+      // Seleção de instância
       const painelProm = page
         .waitForSelector('#painel-escolha-processo', { visible: true })
         .then(() => 'painel')
         .catch(() => null);
-
       const captchaProm = page
         .waitForSelector('#imagemCaptcha', { visible: true })
         .then(() => 'captcha')
         .catch(() => null);
-
       const resultado = await Promise.race([painelProm, captchaProm]);
 
-      // ✅ SE TIVER PAINEL → CLICA NA INSTÂNCIA
       if (resultado === 'painel') {
         this.logger.log('✅ Múltiplas instâncias — painel exibido');
-
         const processos = await page.$$(
           '#painel-escolha-processo .selecao-processo',
         );
@@ -233,7 +279,6 @@ export class ScrapingService {
         if (target < 0 || target >= processos.length)
           throw new Error(`Instância ${instanceIndex} não encontrada`);
 
-        // clique e espera navegação ou render do CAPTCHA
         await Promise.all([
           page
             .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
@@ -244,57 +289,58 @@ export class ScrapingService {
         this.logger.log('✅ Instância selecionada, aguardando captcha...');
       }
 
-      // ✅ AGUARDA explicitamente o CAPTCHA aparecer
+      // CAPTCHA
       const captchaVisible = await page
         .waitForSelector('#imagemCaptcha', { visible: true, timeout: 5000 })
         .catch(() => null);
-
       if (captchaVisible) {
         this.logger.log('⏳ Resolvendo CAPTCHA…');
-
         await retry(async () => {
           let base64 = await page.$eval(
             '#imagemCaptcha',
             (img: HTMLImageElement) => img.src,
           );
-
-          // Remove o prefixo se existir
           base64 = base64.replace(/^data:image\/\w+;base64,/, '');
-
           const solved = await this.captchaService.resolveCaptcha(base64);
           if (!solved?.resposta) throw new Error('Captcha falhou');
 
-          // Limpa o input antes de digitar
           await page.evaluate(() => {
             const input =
               document.querySelector<HTMLInputElement>('#captchaInput');
             if (input) input.value = '';
           });
-
           await page.type('#captchaInput', solved.resposta, { delay: 50 });
           await page.click('#btnEnviar');
-
-          // Pequena espera para garantir que a resposta seja processada
           await new Promise((r) => setTimeout(r, 500));
         }, 3);
-
         this.logger.log('✅ CAPTCHA resolvido!');
       }
 
-      if (downloadIntegra) {
-        const integraResp = page.waitForResponse(
-          (resp) => resp.url().includes('/integra') && resp.status() === 200,
-          { timeout: maxWaitMs },
-        );
-        const btn = await page.$('#btnDownloadIntegra');
-        if (btn) btn.click();
+      // ✅ CHECK IMEDIATO DO PAINEL DE ERRO
+      await new Promise((r) => setTimeout(r, 700));
 
+      const painelErro = await page.$('#painel-erro');
+
+      if (painelErro) {
         try {
-          const r = await integraResp;
-          integraBuffer = await r.buffer();
-        } catch {}
+          const spanErro = await painelErro.waitForSelector('span', {
+            visible: true,
+            timeout: 2000,
+          });
+          if (spanErro) {
+            const mensagemErro = await spanErro.evaluate(
+              (el) => el.textContent?.trim() || '',
+            );
+            if (mensagemErro) {
+              return { process: { mensagemErro }, integra: null };
+            }
+          }
+        } catch (err) {
+          // span não apareceu, continua normalmente
+        }
       }
 
+      // Captura do processo normalmente
       const start = Date.now();
       while (!processCaptured && Date.now() - start < maxWaitMs)
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
