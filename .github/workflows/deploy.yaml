@@ -3,7 +3,7 @@ name: Deploy Scraping Service
 on:
   push:
     branches:
-      - main
+      - refactor/method-of-extracting-process
 
 jobs:
   deploy:
