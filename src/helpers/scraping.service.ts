@@ -208,25 +208,19 @@ export class ScrapingService {
       );
 
       // ✅ RACE ENTRE PAINEL E CAPTCHA
-      const waitForPainelOuCaptcha = async () => {
-        return await retry(
-          async () => {
-            const painel = await page.$('#painel-escolha-processo');
-            if (painel) return 'painel';
+      const painelProm = page
+        .waitForSelector('#painel-escolha-processo', { visible: true })
+        .then(() => 'painel')
+        .catch(() => null);
 
-            const captcha = await page.$('#imagemCaptcha');
-            if (captcha) return 'captcha';
+      const captchaProm = page
+        .waitForSelector('#imagemCaptcha', { visible: true })
+        .then(() => 'captcha')
+        .catch(() => null);
 
-            throw new Error('Nem painel nem captcha renderizaram');
-          },
-          3,
-          1000,
-          'Esperar painel ou captcha',
-        );
-      };
+      const resultado = await Promise.race([painelProm, captchaProm]);
 
-      const resultado = await waitForPainelOuCaptcha();
-
+      // ✅ SE TIVER PAINEL → CLICA NA INSTÂNCIA
       if (resultado === 'painel') {
         this.logger.log('✅ Múltiplas instâncias — painel exibido');
 
@@ -239,6 +233,7 @@ export class ScrapingService {
         if (target < 0 || target >= processos.length)
           throw new Error(`Instância ${instanceIndex} não encontrada`);
 
+        // clique e espera navegação ou render do CAPTCHA
         await Promise.all([
           page
             .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
