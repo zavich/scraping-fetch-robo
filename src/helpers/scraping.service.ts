@@ -23,16 +23,21 @@ export class ScrapingService {
     usedCookies = false,
     downloadIntegra = false,
     maxWaitMs = 180_000,
-  ) {
+  ): Promise<{
+    process?: any;
+    integra?: Buffer | null;
+    singleInstance?: boolean;
+  }> {
     const POLL_INTERVAL_MS = 500;
     const context = await this.pool.acquire();
-    let page = await context.newPage();
+    const page = await context.newPage();
 
     let capturedResponseData: any = null;
     let integraBuffer: Buffer | null = null;
     let processCaptured = false;
     const requestMap = new Map<string, string>();
 
+    // Função de retry genérica
     const retry = async <T>(
       fn: () => Promise<T>,
       retries = 3,
@@ -55,6 +60,7 @@ export class ScrapingService {
       throw lastError;
     };
 
+    // Inicializa CDP para monitorar respostas
     const initCDP = async (pg: typeof page) => {
       const client = await pg.target().createCDPSession();
       await client.send('Network.enable');
@@ -70,6 +76,7 @@ export class ScrapingService {
           const reqId = event.requestId;
           const url = resp?.url ?? requestMap.get(reqId) ?? '';
 
+          // Captura do JSON do processo
           if (
             !processCaptured &&
             url.match(/\/pje-consulta-api\/api\/processos\/\d+/) &&
@@ -95,7 +102,6 @@ export class ScrapingService {
                 const valid =
                   (Array.isArray(json) && json.length > 0) ||
                   (json?.id && json?.numero);
-
                 if (valid) {
                   capturedResponseData = json;
                   processCaptured = true;
@@ -126,30 +132,22 @@ export class ScrapingService {
           if (name && rest.length) mapCookies.set(name, rest.join('='));
         });
 
-        const hasTokens = ['access_token_1g', 'access_token_2g'].every((t) =>
-          mapCookies.has(t),
+        await page.setCookie(
+          ...Array.from(mapCookies.entries()).map(([name, value]) => ({
+            name,
+            value,
+            domain:
+              instanceIndex === 3
+                ? '.pje.tst.jus.br'
+                : `.pje.trt${regionTRT}.jus.br`,
+            path: '/',
+            secure: true,
+          })),
         );
 
-        if (hasTokens) {
-          await page.setCookie(
-            ...Array.from(mapCookies.entries()).map(([name, value]) => ({
-              name,
-              value,
-              domain:
-                instanceIndex === 3
-                  ? '.pje.tst.jus.br'
-                  : `.pje.trt${regionTRT}.jus.br`,
-              path: '/',
-              secure: true,
-            })),
-          );
-
-          this.logger.debug('✅ Cookies restaurados');
-        } else {
-          await this.redis.del(cacheKey);
-          usedCookies = false;
-        }
+        this.logger.debug('✅ Cookies restaurados');
       }
+
       const urlBase =
         instanceIndex === 3
           ? 'https://pje.tst.jus.br/consultaprocessual/'
@@ -162,7 +160,7 @@ export class ScrapingService {
         'Abrir consulta',
       );
 
-      // Preenche processo
+      // Preenche o número do processo
       await retry(
         async () => {
           await page.waitForSelector('#nrProcessoInput', { visible: true });
@@ -190,7 +188,7 @@ export class ScrapingService {
         .catch(() => null);
       const resultado = await Promise.race([painelProm, captchaProm]);
 
-      let singleInstance = false; // <-- nova flag
+      let singleInstance = false;
 
       if (resultado === 'painel') {
         this.logger.log('✅ Múltiplas instâncias — painel exibido');
@@ -213,7 +211,7 @@ export class ScrapingService {
         this.logger.log('✅ Instância selecionada, aguardando captcha...');
       } else if (resultado === 'captcha') {
         this.logger.log('⚠️ Apenas uma instância — direto para CAPTCHA');
-        singleInstance = true; // marca que só existe uma instância
+        singleInstance = true;
       }
 
       // CAPTCHA
@@ -243,11 +241,9 @@ export class ScrapingService {
         this.logger.log('✅ CAPTCHA resolvido!');
       }
 
-      // ✅ CHECK IMEDIATO DO PAINEL DE ERRO
+      // Verifica erros imediatos
       await new Promise((r) => setTimeout(r, 700));
-
       const painelErro = await page.$('#painel-erro');
-
       if (painelErro) {
         try {
           const spanErro = await painelErro.waitForSelector('span', {
@@ -258,24 +254,53 @@ export class ScrapingService {
             const mensagemErro = await spanErro.evaluate(
               (el) => el.textContent?.trim() || '',
             );
-            if (mensagemErro) {
-              return { process: { mensagemErro }, integra: null };
-            }
+            if (mensagemErro)
+              return {
+                process: { mensagemErro },
+                integra: null,
+                singleInstance,
+              };
           }
-        } catch (err) {
-          // span não apareceu, continua normalmente
-        }
+        } catch {}
       }
 
-      // Captura do processo normalmente
+      // Espera captura do processo
       const start = Date.now();
       while (!processCaptured && Date.now() - start < maxWaitMs)
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
 
       if (!processCaptured) throw new Error('Processo não foi capturado');
 
-      if (downloadIntegra && integraBuffer) return { integra: integraBuffer };
-      return { process: capturedResponseData, singleInstance };
+      // Captura do PDF /integra
+      if (downloadIntegra) {
+        // Espera a requisição /integra ser feita
+        const integraRespPromise = page.waitForResponse(
+          (resp) => resp.url().includes('/integra') && resp.status() === 200,
+          { timeout: maxWaitMs },
+        );
+
+        // Clica no botão de download da integra, se existir
+        const btnIntegra = await page.$('#btnDownloadIntegra');
+        if (btnIntegra) await btnIntegra.click();
+
+        try {
+          const r = await integraRespPromise;
+          integraBuffer = await r.buffer();
+          this.logger.log(
+            `✅ PDF /integra capturado (${integraBuffer.length} bytes)`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `⚠ Falha ao capturar PDF /integra: ${err?.message}`,
+          );
+        }
+      }
+
+      return {
+        process: !downloadIntegra ? capturedResponseData : undefined,
+        integra: integraBuffer ?? undefined,
+        singleInstance,
+      };
     } finally {
       try {
         await client?.send('Network.disable');
