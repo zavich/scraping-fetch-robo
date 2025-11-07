@@ -32,7 +32,7 @@ export class ScrapingService {
     const context = await this.pool.acquire();
     const page = await context.newPage();
 
-    let capturedResponseData: any = null;
+    let capturedResponseData: unknown = null;
     let integraBuffer: Buffer | null = null;
     let processCaptured = false;
     const requestMap = new Map<string, string>();
@@ -44,14 +44,16 @@ export class ScrapingService {
       delayMs = 1000,
       stepName?: string,
     ) => {
-      let lastError: any;
+      let lastError: unknown;
       for (let attempt = 1; attempt <= retries; attempt++) {
         try {
           return await fn();
-        } catch (err) {
+        } catch (err: unknown) {
           lastError = err;
+          const msg =
+            err instanceof Error ? err.message : String(err ?? 'Unknown error');
           this.logger.warn(
-            `Tentativa ${attempt}/${retries} falhou${stepName ? ` (${stepName})` : ''}: ${err?.message ?? err}`,
+            `Tentativa ${attempt}/${retries} falhou${stepName ? ` (${stepName})` : ''}: ${msg}`,
           );
           if (attempt < retries)
             await new Promise((r) => setTimeout(r, delayMs));
@@ -70,49 +72,65 @@ export class ScrapingService {
           requestMap.set(event.requestId, event.request.url);
       });
 
-      client.on('Network.responseReceived', async (event) => {
-        try {
-          const resp = event.response;
-          const reqId = event.requestId;
-          const url = resp?.url ?? requestMap.get(reqId) ?? '';
+      client.on('Network.responseReceived', (event) => {
+        // Do not return a Promise from the event handler; run async work in an IIFE.
+        void (async () => {
+          try {
+            const resp = event.response;
+            const reqId = event.requestId;
+            const url = resp?.url ?? requestMap.get(reqId) ?? '';
 
-          // Captura do JSON do processo
-          if (
-            !processCaptured &&
-            url.match(/\/pje-consulta-api\/api\/processos\/\d+/) &&
-            !url.includes('/documentos') &&
-            !url.includes('/integra')
-          ) {
-            for (let attempt = 0; attempt < 6; attempt++) {
-              try {
-                const body = await client.send('Network.getResponseBody', {
-                  requestId: reqId,
-                });
-                const text = body.base64Encoded
-                  ? Buffer.from(body.body, 'base64').toString('utf8')
-                  : body.body;
-
-                let json;
+            // Captura do JSON do processo
+            if (
+              !processCaptured &&
+              url.match(/\/pje-consulta-api\/api\/processos\/\d+/) &&
+              !url.includes('/documentos') &&
+              !url.includes('/integra')
+            ) {
+              for (let attempt = 0; attempt < 6; attempt++) {
                 try {
-                  json = JSON.parse(text);
-                } catch {
-                  continue;
-                }
+                  const body = await client.send('Network.getResponseBody', {
+                    requestId: reqId,
+                  });
+                  const text = body.base64Encoded
+                    ? Buffer.from(body.body, 'base64').toString('utf8')
+                    : body.body;
 
-                const valid =
-                  (Array.isArray(json) && json.length > 0) ||
-                  (json?.id && json?.numero);
-                if (valid) {
-                  capturedResponseData = json;
-                  processCaptured = true;
-                  break;
+                  let json: unknown;
+                  try {
+                    json = JSON.parse(text) as unknown;
+                  } catch (parseErr) {
+                    // Invalid JSON, retry
+                    continue;
+                  }
+
+                  const isArrayWithItems =
+                    Array.isArray(json) && (json as unknown[]).length > 0;
+
+                  const isProcessObject =
+                    typeof json === 'object' &&
+                    json !== null &&
+                    'id' in (json as Record<string, unknown>) &&
+                    'numero' in (json as Record<string, unknown>);
+
+                  if (isArrayWithItems || isProcessObject) {
+                    capturedResponseData = json;
+                    processCaptured = true;
+                    break;
+                  }
+                } catch (err) {
+                  // wait briefly before next attempt
+                  await new Promise((r) => setTimeout(r, 250));
                 }
-              } catch {
-                await new Promise((r) => setTimeout(r, 250));
               }
             }
+          } catch (err) {
+            // surface handler errors for debugging
+            this.logger.debug(
+              `Network.responseReceived handler error: ${err?.message ?? err}`,
+            );
           }
-        } catch {}
+        })();
       });
 
       return client;
