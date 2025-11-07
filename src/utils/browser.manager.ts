@@ -52,8 +52,7 @@ export class BrowserManager {
 
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      if (['image', 'stylesheet', 'font', 'media'].includes(req.resourceType()))
-        req.abort();
+      if (req.resourceType() === 'image') req.abort();
       else req.continue();
     });
 

@@ -53,6 +53,7 @@ export function normalizeResponse(
       },
     };
   }
+  console.log('body: ', body);
 
   const regionTRT = Number(body[0]?.numero.split('.')[3]);
   const isTrabalhista = Number(body[0]?.numero.split('.')[2]);
@@ -147,8 +148,7 @@ export function normalizeResponse(
 
     const resposta = {
       id: instance.id,
-      assunto: instance.assuntos.find((item: Assunto) => item.principal)
-        ?.descricao,
+      assunto: instance.assuntos,
       sistema: 'PJE',
       instancia: grauInstanciaMap[index],
       segredo: instance.segredoJustica,

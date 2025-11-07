@@ -3,14 +3,17 @@ import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Job, Queue } from 'bullmq';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
-import { ProcessFindService } from '../../services/process-find.service';
+import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
+import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
   private readonly documentosQueues: Record<string, Queue> = {};
   constructor(
-    @Inject(ProcessFindService)
-    private readonly processFindService: ProcessFindService,
+    @Inject(WebScrapingMovimentService)
+    private readonly webScrapingMovimentService: WebScrapingMovimentService,
+    @Inject(FetchUrlMovimentService)
+    private readonly fetchUrlMovimentService: FetchUrlMovimentService,
 
     // ✅ injeta todas as filas TRT
     @Inject(getQueueToken('pje-documentos-trt1')) trt1: Queue,
@@ -107,7 +110,16 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
-      const instances = await this.processFindService.execute(numero, origem);
+      const service =
+        regionTRT === 3
+          ? this.fetchUrlMovimentService
+          : this.webScrapingMovimentService;
+
+      const instances = await service.execute(numero, origem);
+      // const instances = await this.webScrapingMovimentService.execute(
+      //   numero,
+      //   origem,
+      // );
       const result = instances.slice(0, 2);
 
       if (!instances || instances.length === 0) {
@@ -129,9 +141,19 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔐 Segredo de Justiça
       // --------------------------
-      const segredo = instances.some(
-        (i) => 'mensagemErro' in i && i.juizoDigital === false,
-      );
+      const segredo = instances.some((i) => {
+        const maybeMsg = (i as any).mensagemErro as unknown;
+        if (typeof maybeMsg !== 'string') return false;
+        const msg = maybeMsg;
+        if (!msg) return false;
+        // Normalize and remove diacritics to match "segredo de justiça" robustly
+        const normalized = msg
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+        // Match "segredo" optionally followed by "justica" (handles "segredo de justiça", "segredo", etc.)
+        return /segredo(?:.*justica)?/.test(normalized);
+      });
 
       if (segredo) {
         this.logger.warn(`⚠️ Segredo de justiça ${numero}`);
@@ -142,7 +164,32 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
           origem,
         );
+        await axios.post(webhookUrl, response);
+        return;
+      }
+      function hasMensagemErroString(
+        obj: unknown,
+      ): obj is { mensagemErro: string } {
+        if (obj && typeof obj === 'object') {
+          const v = (obj as Record<string, unknown>)['mensagemErro'];
+          return typeof v === 'string' && v.length > 0;
+        }
+        return false;
+      }
 
+      const erroMensagem = instances.find(hasMensagemErroString);
+
+      if (erroMensagem) {
+        this.logger.warn(
+          `⚠️ Mensagem de erro para o processo ${numero}: ${erroMensagem.mensagemErro}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          erroMensagem.mensagemErro,
+          true,
+          origem,
+        );
         await axios.post(webhookUrl, response);
         return;
       }

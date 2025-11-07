@@ -1,0 +1,332 @@
+import { Injectable, Logger } from '@nestjs/common';
+import Redis from 'ioredis';
+import { CaptchaService } from 'src/services/captcha.service';
+import { BrowserPool } from 'src/utils/browser-pool';
+
+@Injectable()
+export class ScrapingService {
+  private readonly logger = new Logger(ScrapingService.name);
+  private readonly redis = new Redis({
+    host: process.env.REDIS_HOST || 'redis',
+    port: Number(process.env.REDIS_PORT) || 6379,
+  });
+
+  private readonly pool = new BrowserPool(5); // exemplo: 5 contexts simultâneos
+
+  constructor(private readonly captchaService: CaptchaService) {
+    this.pool.init(); // inicializa o pool
+  }
+  async execute(
+    processNumber: string,
+    regionTRT: number,
+    instanceIndex: number,
+    usedCookies = false,
+    downloadIntegra = false,
+    maxWaitMs = 180_000,
+  ): Promise<{
+    process?: any;
+    integra?: Buffer | null;
+    singleInstance?: boolean;
+  }> {
+    const POLL_INTERVAL_MS = 500;
+    const context = await this.pool.acquire();
+    const page = await context.newPage();
+
+    let capturedResponseData: unknown = null;
+    let integraBuffer: Buffer | null = null;
+    let processCaptured = false;
+    const requestMap = new Map<string, string>();
+
+    // Função de retry genérica
+    const retry = async <T>(
+      fn: () => Promise<T>,
+      retries = 3,
+      delayMs = 1000,
+      stepName?: string,
+    ) => {
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          return await fn();
+        } catch (err: unknown) {
+          lastError = err;
+          const msg =
+            err instanceof Error ? err.message : String(err ?? 'Unknown error');
+          this.logger.warn(
+            `Tentativa ${attempt}/${retries} falhou${stepName ? ` (${stepName})` : ''}: ${msg}`,
+          );
+          if (attempt < retries)
+            await new Promise((r) => setTimeout(r, delayMs));
+        }
+      }
+      throw lastError;
+    };
+
+    // Inicializa CDP para monitorar respostas
+    const initCDP = async (pg: typeof page) => {
+      const client = await pg.target().createCDPSession();
+      await client.send('Network.enable');
+
+      client.on('Network.requestWillBeSent', (event) => {
+        if (event.requestId && event.request?.url)
+          requestMap.set(event.requestId, event.request.url);
+      });
+
+      client.on('Network.responseReceived', (event) => {
+        // Do not return a Promise from the event handler; run async work in an IIFE.
+        void (async () => {
+          try {
+            const resp = event.response;
+            const reqId = event.requestId;
+            const url = resp?.url ?? requestMap.get(reqId) ?? '';
+
+            // Captura do JSON do processo
+            if (
+              !processCaptured &&
+              url.match(/\/pje-consulta-api\/api\/processos\/\d+/) &&
+              !url.includes('/documentos') &&
+              !url.includes('/integra')
+            ) {
+              for (let attempt = 0; attempt < 6; attempt++) {
+                try {
+                  const body = await client.send('Network.getResponseBody', {
+                    requestId: reqId,
+                  });
+                  const text = body.base64Encoded
+                    ? Buffer.from(body.body, 'base64').toString('utf8')
+                    : body.body;
+
+                  let json: unknown;
+                  try {
+                    json = JSON.parse(text) as unknown;
+                  } catch (parseErr) {
+                    // Invalid JSON, retry
+                    continue;
+                  }
+
+                  const isArrayWithItems =
+                    Array.isArray(json) && (json as unknown[]).length > 0;
+
+                  const isProcessObject =
+                    typeof json === 'object' &&
+                    json !== null &&
+                    'id' in (json as Record<string, unknown>) &&
+                    'numero' in (json as Record<string, unknown>);
+
+                  if (isArrayWithItems || isProcessObject) {
+                    capturedResponseData = json;
+                    processCaptured = true;
+                    break;
+                  }
+                } catch (err) {
+                  // wait briefly before next attempt
+                  await new Promise((r) => setTimeout(r, 250));
+                }
+              }
+            }
+          } catch (err) {
+            // surface handler errors for debugging
+            this.logger.debug(
+              `Network.responseReceived handler error: ${err?.message ?? err}`,
+            );
+          }
+        })();
+      });
+
+      return client;
+    };
+
+    const client = await initCDP(page);
+
+    try {
+      // LOGIN / COOKIES
+      const cacheKey = `pje:session:${regionTRT}`;
+      const savedCookies = usedCookies ? await this.redis.get(cacheKey) : null;
+
+      if (savedCookies) {
+        const mapCookies = new Map<string, string>();
+        savedCookies.split(';').forEach((c) => {
+          const [name, ...rest] = c.trim().split('=');
+          if (name && rest.length) mapCookies.set(name, rest.join('='));
+        });
+
+        await page.setCookie(
+          ...Array.from(mapCookies.entries()).map(([name, value]) => ({
+            name,
+            value,
+            domain:
+              instanceIndex === 3
+                ? '.pje.tst.jus.br'
+                : `.pje.trt${regionTRT}.jus.br`,
+            path: '/',
+            secure: true,
+          })),
+        );
+
+        this.logger.debug('✅ Cookies restaurados');
+      }
+
+      const urlBase =
+        instanceIndex === 3
+          ? 'https://pje.tst.jus.br/consultaprocessual/'
+          : `https://pje.trt${regionTRT}.jus.br/consultaprocessual/`;
+
+      await retry(
+        () => page.goto(urlBase, { waitUntil: 'networkidle0' }),
+        3,
+        1000,
+        'Abrir consulta',
+      );
+
+      // Preenche o número do processo
+      await retry(
+        async () => {
+          await page.waitForSelector('#nrProcessoInput', { visible: true });
+          await page.evaluate(() => {
+            const input =
+              document.querySelector<HTMLInputElement>('#nrProcessoInput');
+            if (input) input.value = '';
+          });
+          await page.type('#nrProcessoInput', processNumber, { delay: 45 });
+          await page.click('#btnPesquisar');
+        },
+        3,
+        1000,
+        'Preencher processo',
+      );
+
+      // Seleção de instância
+      const painelProm = page
+        .waitForSelector('#painel-escolha-processo', { visible: true })
+        .then(() => 'painel')
+        .catch(() => null);
+      const captchaProm = page
+        .waitForSelector('#imagemCaptcha', { visible: true })
+        .then(() => 'captcha')
+        .catch(() => null);
+      const resultado = await Promise.race([painelProm, captchaProm]);
+
+      let singleInstance = false;
+
+      if (resultado === 'painel') {
+        this.logger.log('✅ Múltiplas instâncias — painel exibido');
+        const processos = await page.$$(
+          '#painel-escolha-processo .selecao-processo',
+        );
+        if (!processos.length) throw new Error('Nenhuma instância encontrada');
+
+        const target = instanceIndex - 1;
+        if (target < 0 || target >= processos.length)
+          throw new Error(`Instância ${instanceIndex} não encontrada`);
+
+        await Promise.all([
+          page
+            .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
+            .catch(() => null),
+          processos[target].click(),
+        ]);
+
+        this.logger.log('✅ Instância selecionada, aguardando captcha...');
+      } else if (resultado === 'captcha') {
+        this.logger.log('⚠️ Apenas uma instância — direto para CAPTCHA');
+        singleInstance = true;
+      }
+
+      // CAPTCHA
+      const captchaVisible = await page
+        .waitForSelector('#imagemCaptcha', { visible: true, timeout: 5000 })
+        .catch(() => null);
+      if (captchaVisible) {
+        this.logger.log('⏳ Resolvendo CAPTCHA…');
+        await retry(async () => {
+          let base64 = await page.$eval(
+            '#imagemCaptcha',
+            (img: HTMLImageElement) => img.src,
+          );
+          base64 = base64.replace(/^data:image\/\w+;base64,/, '');
+          const solved = await this.captchaService.resolveCaptcha(base64);
+          if (!solved?.resposta) throw new Error('Captcha falhou');
+
+          await page.evaluate(() => {
+            const input =
+              document.querySelector<HTMLInputElement>('#captchaInput');
+            if (input) input.value = '';
+          });
+          await page.type('#captchaInput', solved.resposta, { delay: 50 });
+          await page.click('#btnEnviar');
+          await new Promise((r) => setTimeout(r, 500));
+        }, 3);
+        this.logger.log('✅ CAPTCHA resolvido!');
+      }
+
+      // Verifica erros imediatos
+      await new Promise((r) => setTimeout(r, 700));
+      const painelErro = await page.$('#painel-erro');
+      if (painelErro) {
+        try {
+          const spanErro = await painelErro.waitForSelector('span', {
+            visible: true,
+            timeout: 2000,
+          });
+          if (spanErro) {
+            const mensagemErro = await spanErro.evaluate(
+              (el) => el.textContent?.trim() || '',
+            );
+            if (mensagemErro)
+              return {
+                process: { mensagemErro },
+                integra: null,
+                singleInstance,
+              };
+          }
+        } catch {}
+      }
+
+      // Espera captura do processo
+      const start = Date.now();
+      while (!processCaptured && Date.now() - start < maxWaitMs)
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+
+      if (!processCaptured) throw new Error('Processo não foi capturado');
+
+      // Captura do PDF /integra
+      if (downloadIntegra) {
+        // Espera a requisição /integra ser feita
+        const integraRespPromise = page.waitForResponse(
+          (resp) => resp.url().includes('/integra') && resp.status() === 200,
+          { timeout: maxWaitMs },
+        );
+
+        // Clica no botão de download da integra, se existir
+        const btnIntegra = await page.$('#btnDownloadIntegra');
+        if (btnIntegra) await btnIntegra.click();
+
+        try {
+          const r = await integraRespPromise;
+          integraBuffer = await r.buffer();
+          this.logger.log(
+            `✅ PDF /integra capturado (${integraBuffer.length} bytes)`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `⚠ Falha ao capturar PDF /integra: ${err?.message}`,
+          );
+        }
+      }
+
+      return {
+        process: !downloadIntegra ? capturedResponseData : undefined,
+        integra: integraBuffer ?? undefined,
+        singleInstance,
+      };
+    } finally {
+      try {
+        await client?.send('Network.disable');
+      } catch {}
+      try {
+        if (page && !page.isClosed()) await page.close();
+      } catch {}
+      this.pool.release(context);
+    }
+  }
+}

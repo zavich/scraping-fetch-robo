@@ -35,7 +35,7 @@ export class LoginPoolService {
   private contaIndex = 0;
   private contadorProcessos = 0;
 
-  private getConta(force = false): { username: string; password: string } {
+  getConta(force = false): { username: string; password: string } {
     if (force || this.contadorProcessos >= 5) {
       this.contaIndex = (this.contaIndex + 1) % this.contas.length;
       this.contadorProcessos = 0;
@@ -74,7 +74,10 @@ export class LoginPoolService {
     }
   }
 
-  async getCookies(trt: number): Promise<string> {
+  async getCookies(trt: number): Promise<{
+    cookies: string;
+    account: { username: string; password: string };
+  }> {
     const redisKey = `pje:session:${trt}`;
     const readyKey = `${redisKey}:ready`;
     const lockKey = `pje:lock:${trt}`;
@@ -83,12 +86,11 @@ export class LoginPoolService {
     const maxWait = 60000;
 
     let cookies = await this.redis.get(redisKey);
-    // if (cookies) return this.refreshToken(trt, cookies);
+    let usedAccount: { username: string; password: string } | null = null;
 
     // Checa disponibilidade do site antes de gastar contas
     await this.checkSiteAvailability(trt);
 
-    // Tenta adquirir lock
     const lockAcquired = await (this.redis as any).set(
       lockKey,
       '1',
@@ -102,7 +104,8 @@ export class LoginPoolService {
         let attempts = 0;
 
         while (!success && attempts < this.contas.length) {
-          const { username, password } = this.getConta(attempts > 0);
+          const account = this.getConta(attempts > 0);
+          const { username, password } = account;
           this.logger.debug(
             `🔒 Tentando login TRT ${trt} com conta ${username}...`,
           );
@@ -113,18 +116,17 @@ export class LoginPoolService {
               username,
               password,
             );
-            if (!loginResult?.cookies) {
+            if (!loginResult?.cookies)
               throw new Error(`Login TRT ${trt} não retornou cookies.`);
-            }
 
             cookies = loginResult.cookies;
+            usedAccount = account;
 
             await this.redis.set(redisKey, cookies, 'EX', 3600);
             await this.redis.set(readyKey, '1', 'EX', 30);
 
             success = true;
           } catch (err: any) {
-            // Se for erro de site (503), não tenta outra conta
             if (
               err instanceof ServiceUnavailableException &&
               /fora do ar/.test(err.message)
@@ -134,7 +136,6 @@ export class LoginPoolService {
               );
               throw err;
             }
-
             this.logger.warn(
               `❌ Falha ao logar com conta ${username}, tentando próxima...`,
             );
@@ -142,50 +143,54 @@ export class LoginPoolService {
           }
         }
 
-        if (!success) {
+        if (!success)
           throw new Error(
             `Não foi possível logar no TRT ${trt} com nenhuma conta.`,
           );
-        }
-        // ✅ Só depois que refreshToken terminar, libera o lock
-        // const refreshed = await this.refreshToken(trt, cookies as string);
         await this.redis.del(lockKey);
-        // return refreshed;
       } catch (err) {
         await this.redis.del(lockKey);
         throw err;
       }
     }
 
-    // Espera outro worker finalizar login
     const start = Date.now();
     while (!cookies && Date.now() - start < maxWait) {
       const ready = await this.redis.get(readyKey);
       if (ready) {
         cookies = await this.redis.get(redisKey);
-        if (cookies) break;
+        if (cookies) {
+          usedAccount = this.getConta(true); // fallback, pode ser ajustado
+          break;
+        }
       }
       await new Promise((r) => setTimeout(r, waitInterval));
     }
 
     if (!cookies) {
-      // Nenhum cookie disponível após espera, tenta nova conta
       this.logger.warn(
         `⚠️ Timeout esperando cookie TRT ${trt}, forçando nova conta.`,
       );
-      const { username, password } = this.getConta(true);
+      const account = this.getConta(true);
       const loginResult = await this.loginService.execute(
         trt,
-        username,
-        password,
+        account.username,
+        account.password,
       );
       cookies = loginResult.cookies;
+      usedAccount = account;
+
       await this.redis.set(redisKey, cookies, 'EX', 3600);
       await this.redis.set(readyKey, '1', 'EX', 30);
     }
-    return cookies;
+
+    return { cookies: cookies!, account: usedAccount! };
   }
-  async forceRefreshCookies(trt: number): Promise<string> {
+
+  async forceRefreshCookies(trt: number): Promise<{
+    cookies: string;
+    account: { username: string; password: string };
+  }> {
     const redisKey = `pje:session:${trt}`;
     const readyKey = `${redisKey}:ready`;
     await this.redis.del(redisKey, readyKey);

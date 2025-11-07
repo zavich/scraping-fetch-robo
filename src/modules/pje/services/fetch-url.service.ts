@@ -8,8 +8,8 @@ import { CaptchaService } from 'src/services/captcha.service';
 import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
-export class ProcessFindService {
-  private readonly logger = new Logger(ProcessFindService.name);
+export class FetchUrlMovimentService {
+  private readonly logger = new Logger(FetchUrlMovimentService.name);
   private readonly redis = new Redis({
     host: process.env.REDIS_HOST || 'redis',
     port: Number(process.env.REDIS_PORT) || 6379,
