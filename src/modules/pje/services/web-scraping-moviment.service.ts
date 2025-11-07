@@ -13,9 +13,7 @@ export class WebScrapingMovimentService {
     port: Number(process.env.REDIS_PORT) || 6379,
   });
 
-  constructor(
-    private readonly scrapingService: ScrapingService, // injeta o ScrapingService
-  ) {}
+  constructor(private readonly scrapingService: ScrapingService) {}
 
   async execute(
     numeroDoProcesso: string,
@@ -24,13 +22,17 @@ export class WebScrapingMovimentService {
     const regionTRT = numeroDoProcesso.includes('.')
       ? Number(numeroDoProcesso.split('.')[3])
       : null;
+
     if (!regionTRT)
       throw new Error(`Invalid process number: ${numeroDoProcesso}`);
 
     const instances: ProcessosResponse[] = [];
-    const initialGrau = origem === 'TST' ? 3 : 1;
 
-    for (let i = initialGrau; i <= 3; i++) {
+    // ✅ Regras de início
+    const initialGrau = origem === 'TST' ? 3 : 1;
+    const finalGrau = origem === 'TST' ? 3 : 3;
+
+    for (let i = initialGrau; i <= finalGrau; i++) {
       try {
         const delayMs = this.getRandomDelay();
         this.logger.debug(
@@ -38,7 +40,6 @@ export class WebScrapingMovimentService {
         );
         await this.delay(delayMs);
 
-        // Chama o ScrapingService para capturar o processo via Puppeteer
         const { process, singleInstance } = await this.scrapingService.execute(
           numeroDoProcesso,
           regionTRT,
@@ -46,26 +47,112 @@ export class WebScrapingMovimentService {
         );
 
         const mensagemErro = (process as any)?.mensagemErro;
-        if (mensagemErro) {
+
+        // ✅ 1) Regra especial para TST: se instância única → TST não existe
+        if (origem === 'TST' && singleInstance) {
           this.logger.warn(
-            `Processo ${numeroDoProcesso} retornou mensagemErro na instância ${i}: ${mensagemErro}`,
+            `⚠️ Processo ${numeroDoProcesso} não possui instância 3 (TST).`,
           );
-          instances.push(process as unknown as ProcessosResponse);
-          break;
+
+          return [
+            {
+              mensagemErro: 'Processo não possui instância no TST',
+              mensagem: '',
+              tokenDesafio: '',
+              itensProcesso: [],
+              instance: '',
+              imagem: '',
+              resposta: '',
+              id: 0,
+              numero: '',
+              classe: '',
+              orgaoJulgador: '',
+              pessoaRelator: '',
+              segredoJustica: false,
+              justicaGratuita: false,
+              distribuidoEm: '',
+              autuadoEm: '',
+              valorDaCausa: 0,
+              poloAtivo: [],
+              poloPassivo: [],
+              assuntos: [],
+              expedientes: [],
+              juizoDigital: false,
+              documentos: [],
+            },
+          ];
         }
-        if (process) {
-          instances.push(process as unknown as ProcessosResponse);
-        }
+
+        // ✅ 2) Instância única em TRT → finaliza imediatamente
         if (singleInstance) {
           this.logger.log(
             `✅ Processo ${numeroDoProcesso} é de instância única. Finalizando buscas.`,
           );
+
+          if (process) {
+            instances.push(process as unknown as ProcessosResponse);
+          }
+
           break;
         }
+
+        // ✅ 3) Mensagem de erro apresentada pelo tribunal
+        if (mensagemErro) {
+          this.logger.warn(
+            `Processo ${numeroDoProcesso} retornou mensagemErro na instância ${i}: ${mensagemErro}`,
+          );
+
+          instances.push(process as unknown as ProcessosResponse);
+          break;
+        }
+
+        // ✅ 4) Dados válidos da instância
+        if (process) {
+          instances.push(process as unknown as ProcessosResponse);
+        }
       } catch (err: any) {
+        const msg = err.message || String(err);
+
+        // ✅ 5) Erro de instância inexistente no TST
+        if (origem === 'TST' && msg.includes('Instância 3 não encontrada')) {
+          this.logger.warn(
+            `⚠️ Processo ${numeroDoProcesso} não possui instância no TST.`,
+          );
+
+          return [
+            {
+              mensagemErro: 'Processo não possui instância no TST',
+              mensagem: '',
+              tokenDesafio: '',
+              itensProcesso: [],
+              instance: '',
+              imagem: '',
+              resposta: '',
+              id: 0,
+              numero: '',
+              classe: '',
+              orgaoJulgador: '',
+              pessoaRelator: '',
+              segredoJustica: false,
+              justicaGratuita: false,
+              distribuidoEm: '',
+              autuadoEm: '',
+              valorDaCausa: 0,
+              poloAtivo: [],
+              poloPassivo: [],
+              assuntos: [],
+              expedientes: [],
+              juizoDigital: false,
+              documentos: [],
+            },
+          ];
+        }
+
         this.logger.warn(
-          `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
+          `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${msg}`,
         );
+
+        // Em TRT continua tentando a próxima instância
         continue;
       }
     }
@@ -78,9 +165,7 @@ export class WebScrapingMovimentService {
   }
 
   private getRandomDelay() {
-    // if (regionTRT === 15) {
-    //   return Math.floor(Math.random() * (15000 - 10000 + 1)) + 10000;
-    // }
+    // Regra opcional futura para TRT15
     return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
   }
 }
