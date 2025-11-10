@@ -5,6 +5,7 @@ import { Job, Queue } from 'bullmq';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
+import dayjs from 'dayjs';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -206,19 +207,38 @@ export class GenericProcessoWorker extends WorkerHost {
         const queueName = `trt${regionTRT}`;
         const documentosQueue = this.documentosQueues[queueName];
 
-        const existing = (await documentosQueue.getJob(numero)) as
-          | Job
-          | undefined;
-
-        if (existing && (await existing.isFailed())) {
-          await existing.remove();
-        }
-
         if (!documentosQueue) {
           this.logger.error(`Fila de documentos não encontrada: ${queueName}`);
           return;
         }
 
+        const existing = (await documentosQueue.getJob(numero)) as
+          | Job
+          | undefined;
+
+        if (existing) {
+          // 1. Se falhou → remove
+          if (await existing.isFailed()) {
+            this.logger.warn(`Job ${numero} está FAILED — removendo.`);
+            await existing.remove();
+          }
+
+          // 2. Se está ativo há mais de 1 hora → remove
+          const state = await existing.getState();
+          if (state === 'active') {
+            const startedAt = existing.processedOn ?? existing.timestamp;
+            const diffHours = dayjs().diff(startedAt, 'hour');
+
+            if (diffHours >= 1) {
+              this.logger.warn(
+                `Job ${numero} está ACTIVE há ${diffHours} horas — removendo para reprocessar.`,
+              );
+              await existing.remove();
+            }
+          }
+        }
+
+        // 3. Recria o job ✅
         await documentosQueue.add(
           'consulta-processo-documento',
           { numero, instances },

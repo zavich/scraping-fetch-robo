@@ -36,6 +36,7 @@
     "axios": "^1.11.0",
     "axios-cookiejar-support": "^6.0.4",
     "bullmq": "^5.58.4",
+    "dayjs": "^1.11.19",
     "ioredis": "^5.7.0",
     "jimp": "^1.6.0",
     "pdf-lib": "^1.17.1",
