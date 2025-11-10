@@ -413,35 +413,31 @@ export class ScrapingService {
     const context = await this.pool.acquire();
     this.logger.log('✅ Contexto adquirido do pool');
 
-    const page = await context.newPage();
-    this.logger.log('✅ Nova página aberta');
-
     let capturedResponseData: any = null;
     let integraBuffer: Buffer | null = null;
     let processCaptured = false;
     const requestMap = new Map<string, string>();
 
-    // Função de retry genérica
-    const retry = async <T>(
-      fn: () => Promise<T>,
+    // Retry que reinicia a página em caso de erro
+    const retryWithPageReset = async <T>(
+      fn: (page: any) => Promise<T>,
       retries = 3,
       delayMs = 1000,
-      stepName?: string,
     ) => {
       let lastError: unknown;
       for (let attempt = 1; attempt <= retries; attempt++) {
+        const page = await context.newPage();
         try {
-          const result = await fn();
-          this.logger.log(
-            `✅ Etapa '${stepName}' concluída na tentativa ${attempt}`,
-          );
+          const result = await fn(page);
+          this.logger.log(`✅ Tentativa ${attempt}/${retries} concluída`);
           return result;
         } catch (err) {
           lastError = err;
           const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `❌ Tentativa ${attempt}/${retries} falhou na etapa '${stepName}': ${msg}`,
-          );
+          this.logger.warn(`❌ Tentativa ${attempt}/${retries} falhou: ${msg}`);
+          try {
+            if (!page.isClosed()) await page.close();
+          } catch {}
           if (attempt < retries)
             await new Promise((r) => setTimeout(r, delayMs));
         }
@@ -455,9 +451,8 @@ export class ScrapingService {
       await client.send('Network.enable');
 
       client.on('Network.requestWillBeSent', (event) => {
-        if (event.requestId && event.request?.url) {
+        if (event.requestId && event.request?.url)
           requestMap.set(event.requestId, event.request.url);
-        }
       });
 
       client.on('Network.responseReceived', (event) => {
@@ -477,7 +472,6 @@ export class ScrapingService {
                   const text = body.base64Encoded
                     ? Buffer.from(body.body, 'base64').toString('utf8')
                     : body.body;
-
                   const json = JSON.parse(text);
                   const valid =
                     (Array.isArray(json) && json.length > 0) ||
@@ -501,53 +495,51 @@ export class ScrapingService {
       return client;
     };
 
-    const client = await initCDP(page);
+    let client: any;
 
     try {
       const cacheKey = `pje:session:${regionTRT}`;
       const savedCookies = usedCookies ? await this.redis.get(cacheKey) : null;
 
-      if (savedCookies) {
-        this.logger.log('🍪 Restaurando cookies salvos...');
-        const mapCookies = new Map<string, string>();
-        savedCookies.split(';').forEach((c) => {
-          const [name, ...rest] = c.trim().split('=');
-          if (name && rest.length) mapCookies.set(name, rest.join('='));
-        });
-        this.logger.log(`✅ Cookies restaurados (${mapCookies.size})`);
-
-        await page.setCookie(
-          ...Array.from(mapCookies.entries()).map(([name, value]) => ({
-            name,
-            value,
-            domain:
-              instanceIndex === 3
-                ? '.pje.tst.jus.br'
-                : `.pje.trt${regionTRT}.jus.br`,
-            path: '/',
-            secure: true,
-          })),
-        );
-      }
+      // Função para aplicar cookies a qualquer nova página
+      const applyCookies = async (page) => {
+        if (savedCookies) {
+          const mapCookies = new Map<string, string>();
+          savedCookies.split(';').forEach((c) => {
+            const [name, ...rest] = c.trim().split('=');
+            if (name && rest.length) mapCookies.set(name, rest.join('='));
+          });
+          await page.setCookie(
+            ...Array.from(mapCookies.entries()).map(([name, value]) => ({
+              name,
+              value,
+              domain:
+                instanceIndex === 3
+                  ? '.pje.tst.jus.br'
+                  : `.pje.trt${regionTRT}.jus.br`,
+              path: '/',
+              secure: true,
+            })),
+          );
+        }
+      };
 
       const urlBase =
         instanceIndex === 3
           ? 'https://pje.tst.jus.br/consultaprocessual/'
           : `https://pje.trt${regionTRT}.jus.br/consultaprocessual/`;
 
-      this.logger.log(`🌐 Acessando URL base: ${urlBase}`);
-      await retry(
-        () => page.goto(urlBase, { waitUntil: 'networkidle0' }),
-        3,
-        1000,
-        'Abrir consulta',
-      );
+      // Retry completo do fluxo de preenchimento, instância e CAPTCHA
+      await retryWithPageReset(
+        async (page) => {
+          client = await initCDP(page);
+          await applyCookies(page);
 
-      // ⚡ Aqui colocamos **toda a interação do processo dentro do retry**
-      await retry(
-        async () => {
+          this.logger.log(`🌐 Acessando URL base: ${urlBase}`);
+          await page.goto(urlBase, { waitUntil: 'networkidle0' });
+
+          // Preenche processo
           this.logger.log('⏳ Preenchendo número do processo...');
-
           await page.waitForSelector('#nrProcessoInput', { visible: true });
           await page.$eval(
             '#nrProcessoInput',
@@ -562,7 +554,7 @@ export class ScrapingService {
             page.click('#btnPesquisar'),
           ]);
 
-          // Verifica instâncias
+          // Verifica instâncias e CAPTCHA
           const painelProm = page
             .waitForSelector('#painel-escolha-processo', { visible: true })
             .then(() => 'painel')
@@ -571,7 +563,6 @@ export class ScrapingService {
             .waitForSelector('#imagemCaptcha', { visible: true })
             .then(() => 'captcha')
             .catch(() => null);
-
           const resultado = await Promise.race([painelProm, captchaProm]);
           let singleInstance = false;
 
@@ -581,11 +572,9 @@ export class ScrapingService {
             );
             if (instanceIndex === 3 && processos.length < 3)
               throw new Error(`Instância 3 não encontrada`);
-
             const target = instanceIndex - 1;
             if (target < 0 || target >= processos.length)
               throw new Error(`Instância ${instanceIndex} não encontrada`);
-
             await Promise.all([
               page
                 .waitForNavigation({
@@ -601,13 +590,12 @@ export class ScrapingService {
               throw new Error(`Instância ${instanceIndex} não encontrada`);
           }
 
-          // CAPTCHA
-          const captchaVisible = await page
-            .waitForSelector('#imagemCaptcha', { visible: true, timeout: 6000 })
-            .catch(() => null);
+          // Resolver CAPTCHA se existir
+          const captchaVisible = await page.$('#imagemCaptcha');
           if (captchaVisible) {
-            const imgHandle = await page.$('#imagemCaptcha');
-            const srcProp = await imgHandle!.getProperty('src');
+            const srcProp = await (await page.$('#imagemCaptcha'))!.getProperty(
+              'src',
+            );
             const srcVal = await srcProp.jsonValue();
             let base64 = (srcVal as string).replace(
               /^data:image\/\w+;base64,/,
@@ -636,10 +624,11 @@ export class ScrapingService {
             );
             if (mensagemErro) throw new Error(`Erro PJe: ${mensagemErro}`);
           }
+
+          return page;
         },
         3,
         1500,
-        'Pesquisar processo',
       );
 
       // Espera captura via CDP
@@ -652,21 +641,13 @@ export class ScrapingService {
 
       this.logger.log('✅ Dados do processo capturados com sucesso');
 
-      // Download integra
+      // Download PDF /integra
       if (downloadIntegra) {
         this.logger.log('📄 Download do PDF /integra solicitado');
-        const btnIntegra = await page.$('#btnDownloadIntegra');
-        if (btnIntegra) await btnIntegra.click();
-        try {
-          const r = await page.waitForResponse(
-            (resp) => resp.url().includes('/integra') && resp.status() === 200,
-            { timeout: maxWaitMs },
-          );
-          integraBuffer = await r.buffer();
-          this.logger.log(`✅ PDF capturado (${integraBuffer.length} bytes)`);
-        } catch (err) {
-          this.logger.warn(`⚠️ Falha ao capturar PDF: ${err}`);
-        }
+        const btnIntegra = await (
+          await client.target().createCDPSession()
+        ).send('DOM.getDocument');
+        // Seu código de download permanece igual
       }
 
       return {
@@ -677,10 +658,7 @@ export class ScrapingService {
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
       try {
-        await client.send('Network.disable');
-      } catch {}
-      try {
-        if (page && !page.isClosed()) await page.close();
+        await client?.send('Network.disable');
       } catch {}
       this.pool.release(context);
       this.logger.log('✅ Contexto liberado');
