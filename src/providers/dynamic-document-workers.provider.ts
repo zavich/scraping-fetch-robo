@@ -7,9 +7,23 @@ export function createDynamicDocumentsWorkers(): Provider[] {
   const queues = [...ALL_TRT_DOCUMENT_QUEUES];
 
   return queues.map((queueName) => {
-    const concurrency = queueName === 'pje-documentos-trt15' ? 1 : 2;
+    // Configura concurrency e rate limiter para TRT15
+    const processorOptions =
+      queueName === 'pje-documentos-trt15'
+        ? {
+            concurrency: 1,
+            lockDuration: 120_000,
+            limiter: {
+              max: 1, // 1 job
+              duration: 3 * 60 * 1000, // a cada 3 minutos
+            },
+          }
+        : {
+            concurrency: 2,
+            lockDuration: 120_000,
+          };
 
-    @Processor(queueName, { concurrency, lockDuration: 120000 })
+    @Processor(queueName, processorOptions)
     class WorkerForQueue extends GenericDocumentosWorker {}
 
     return {

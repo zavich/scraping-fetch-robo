@@ -9,7 +9,19 @@ export function createDynamicWorkers(): Provider[] {
   return queues.map((queueName) => {
     const concurrency = queueName === 'pje-trt15' ? 1 : 20;
 
-    @Processor(queueName, { concurrency })
+    // Configuração de rate limiter apenas para TRT 15
+    const processorOptions =
+      queueName === 'pje-trt15'
+        ? {
+            concurrency: 1,
+            limiter: {
+              max: 1, // 1 job
+              duration: 3 * 60 * 1000, // a cada 3 minutos
+            },
+          }
+        : { concurrency };
+
+    @Processor(queueName, processorOptions)
     class WorkerForQueue extends GenericProcessoWorker {}
 
     return {
