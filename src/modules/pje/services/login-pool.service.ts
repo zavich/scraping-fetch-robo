@@ -7,6 +7,7 @@ import {
 import axios from 'axios';
 import Redis from 'ioredis';
 import { PjeLoginService } from './login.service';
+import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
 export class LoginPoolService {
@@ -34,7 +35,33 @@ export class LoginPoolService {
   ];
   private contaIndex = 0;
   private contadorProcessos = 0;
+  private async isCookieValid(trt: number, cookies: string): Promise<boolean> {
+    try {
+      const response = await axios.get(
+        `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
+        {
+          headers: {
+            accept: 'application/json, text/plain, */*',
+            'content-type': 'application/json',
+            referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
+            'x-grau-instancia': '1',
+            'user-agent':
+              userAgents[Math.floor(Math.random() * userAgents.length)],
+            Cookie: cookies,
+          },
+          timeout: 10000,
+          validateStatus: () => true,
+        },
+      );
 
+      if (response.status === 200) return true;
+      if (response.status === 403) return false;
+      if (response.data?.codigoErro === 'ARQ-028') return false;
+      return false;
+    } catch {
+      return false;
+    }
+  }
   getConta(force = false): { username: string; password: string } {
     if (force || this.contadorProcessos >= 5) {
       this.contaIndex = (this.contaIndex + 1) % this.contas.length;
@@ -88,9 +115,43 @@ export class LoginPoolService {
     let cookies = await this.redis.get(redisKey);
     let usedAccount: { username: string; password: string } | null = null;
 
-    // Checa disponibilidade do site antes de gastar contas
+    // ✅ 1) Valida cookie salvo no Redis antes de qualquer coisa
+    if (cookies) {
+      this.logger.debug(`🔍 Validando cookie salvo do TRT-${trt}...`);
+
+      const valid = await this.isCookieValid(trt, cookies);
+
+      if (!valid) {
+        this.logger.warn(`⚠️ Cookie TRT-${trt} expirado. Renovando sessão...`);
+
+        await this.redis.del(redisKey, readyKey);
+
+        const account = this.getConta(true);
+        const loginResult = await this.loginService.execute(
+          trt,
+          account.username,
+          account.password,
+        );
+
+        cookies = loginResult.cookies;
+        usedAccount = account;
+
+        await this.redis.set(redisKey, cookies, 'EX', 3600);
+        await this.redis.set(readyKey, '1', 'EX', 30);
+
+        return { cookies, account };
+      }
+
+      // ✅ Cookie válido → retorna imediatamente
+      this.logger.debug(`✅ Cookie TRT-${trt} ainda é válido`);
+      usedAccount = this.getConta(); // opcional
+      return { cookies, account: usedAccount };
+    }
+
+    // ✅ 2) Se não existe cookie → checa disponibilidade do site antes do login
     await this.checkSiteAvailability(trt);
 
+    // ✅ 3) LOCK para garantir somente 1 login simultâneo
     const lockAcquired = await (this.redis as any).set(
       lockKey,
       '1',
@@ -98,6 +159,7 @@ export class LoginPoolService {
       'PX',
       lockTTL,
     );
+
     if (lockAcquired) {
       try {
         let success = false;
@@ -106,6 +168,7 @@ export class LoginPoolService {
         while (!success && attempts < this.contas.length) {
           const account = this.getConta(attempts > 0);
           const { username, password } = account;
+
           this.logger.debug(
             `🔒 Tentando login TRT ${trt} com conta ${username}...`,
           );
@@ -116,6 +179,7 @@ export class LoginPoolService {
               username,
               password,
             );
+
             if (!loginResult?.cookies)
               throw new Error(`Login TRT ${trt} não retornou cookies.`);
 
@@ -147,6 +211,7 @@ export class LoginPoolService {
           throw new Error(
             `Não foi possível logar no TRT ${trt} com nenhuma conta.`,
           );
+
         await this.redis.del(lockKey);
       } catch (err) {
         await this.redis.del(lockKey);
@@ -154,29 +219,33 @@ export class LoginPoolService {
       }
     }
 
+    // ✅ 4) Espera cookie gerado por outro worker, se for o caso
     const start = Date.now();
     while (!cookies && Date.now() - start < maxWait) {
       const ready = await this.redis.get(readyKey);
       if (ready) {
         cookies = await this.redis.get(redisKey);
         if (cookies) {
-          usedAccount = this.getConta(true); // fallback, pode ser ajustado
+          usedAccount = this.getConta(true); // fallback
           break;
         }
       }
       await new Promise((r) => setTimeout(r, waitInterval));
     }
 
+    // ✅ 5) Timeout → força login com outra conta
     if (!cookies) {
       this.logger.warn(
         `⚠️ Timeout esperando cookie TRT ${trt}, forçando nova conta.`,
       );
+
       const account = this.getConta(true);
       const loginResult = await this.loginService.execute(
         trt,
         account.username,
         account.password,
       );
+
       cookies = loginResult.cookies;
       usedAccount = account;
 
@@ -184,7 +253,7 @@ export class LoginPoolService {
       await this.redis.set(readyKey, '1', 'EX', 30);
     }
 
-    return { cookies: cookies!, account: usedAccount! };
+    return { cookies: cookies, account: usedAccount! };
   }
 
   async forceRefreshCookies(trt: number): Promise<{
