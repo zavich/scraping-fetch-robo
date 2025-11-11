@@ -27,6 +27,7 @@ export class WebScrapingMovimentService {
       throw new Error(`Invalid process number: ${numeroDoProcesso}`);
 
     const instances: ProcessosResponse[] = [];
+    let instancia3NaoEncontrada = false;
 
     // ✅ Regras de início
     let initialGrau = origem === 'TST' ? 3 : 1;
@@ -93,9 +94,7 @@ export class WebScrapingMovimentService {
             `✅ Processo ${numeroDoProcesso} é de instância única. Finalizando buscas.`,
           );
 
-          if (process) {
-            instances.push(process as unknown as ProcessosResponse);
-          }
+          if (process) instances.push(process as ProcessosResponse);
 
           break;
         }
@@ -106,77 +105,18 @@ export class WebScrapingMovimentService {
             `Processo ${numeroDoProcesso} retornou mensagemErro na instância ${i}: ${mensagemErro}`,
           );
 
-          return [
-            {
-              mensagemErro: mensagemErro as string,
-              mensagem: '',
-              tokenDesafio: '',
-              itensProcesso: [],
-              instance: '',
-              imagem: '',
-              resposta: '',
-              id: 0,
-              numero: '',
-              classe: '',
-              orgaoJulgador: '',
-              pessoaRelator: '',
-              segredoJustica: false,
-              justicaGratuita: false,
-              distribuidoEm: '',
-              autuadoEm: '',
-              valorDaCausa: 0,
-              poloAtivo: [],
-              poloPassivo: [],
-              assuntos: [],
-              expedientes: [],
-              juizoDigital: false,
-              documentos: [],
-            },
-          ];
+          if (mensagemErro === 'Instância 3 não encontrada') {
+            instancia3NaoEncontrada = true;
+            continue; // marca que não existe, mas continua coletando outras instâncias
+          }
         }
 
         // ✅ 4) Dados válidos da instância
         if (process) {
-          instances.push(process as unknown as ProcessosResponse);
+          instances.push(process as ProcessosResponse);
         }
       } catch (err: any) {
         const msg = err.message || String(err);
-
-        // ✅ 5) Erro de instância inexistente no TST
-        if (origem === 'TST' && msg.includes('Instância 3 não encontrada')) {
-          this.logger.warn(
-            `⚠️ Processo ${numeroDoProcesso} não possui instância no TST.`,
-          );
-
-          return [
-            {
-              mensagemErro: 'Processo não possui instância no TST',
-              mensagem: '',
-              tokenDesafio: '',
-              itensProcesso: [],
-              instance: '',
-              imagem: '',
-              resposta: '',
-              id: 0,
-              numero: '',
-              classe: '',
-              orgaoJulgador: '',
-              pessoaRelator: '',
-              segredoJustica: false,
-              justicaGratuita: false,
-              distribuidoEm: '',
-              autuadoEm: '',
-              valorDaCausa: 0,
-              poloAtivo: [],
-              poloPassivo: [],
-              assuntos: [],
-              expedientes: [],
-              juizoDigital: false,
-              documentos: [],
-            },
-          ];
-        }
-
         this.logger.warn(
           `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${msg}`,
         );
@@ -184,6 +124,37 @@ export class WebScrapingMovimentService {
         // Em TRT continua tentando a próxima instância
         continue;
       }
+    }
+
+    // ✅ No final, se solicitou TST (instância 3) e não encontrou
+    if (initialGrau === 3 && instancia3NaoEncontrada) {
+      return [
+        {
+          mensagemErro: 'Instância 3 não encontrada',
+          mensagem: '',
+          tokenDesafio: '',
+          itensProcesso: [],
+          instance: '',
+          imagem: '',
+          resposta: '',
+          id: 0,
+          numero: '',
+          classe: '',
+          orgaoJulgador: '',
+          pessoaRelator: '',
+          segredoJustica: false,
+          justicaGratuita: false,
+          distribuidoEm: '',
+          autuadoEm: '',
+          valorDaCausa: 0,
+          poloAtivo: [],
+          poloPassivo: [],
+          assuntos: [],
+          expedientes: [],
+          juizoDigital: false,
+          documentos: [],
+        },
+      ];
     }
 
     return instances;
