@@ -76,9 +76,6 @@ export class ScrapingService {
       client.on('Network.requestWillBeSent', (event) => {
         if (event.requestId && event.request?.url) {
           requestMap.set(event.requestId, event.request.url);
-          // this.logger.debug(
-          //   `➡ Request enviado: ${event.request.url.substring(0, 120)}`,
-          // );
         }
       });
 
@@ -439,62 +436,84 @@ export class ScrapingService {
         .then(() => 'captcha')
         .catch(() => null);
 
-      const resultado = await Promise.race([painelProm, captchaProm]);
+      // const resultado = await Promise.race([painelProm, captchaProm]);
       let singleInstance = false;
 
-      if (resultado === 'painel') {
-        this.logger.log('✅ Múltiplas instâncias detectadas');
+      // if (resultado === 'painel') {
+      //   this.logger.log('✅ Múltiplas instâncias detectadas');
 
-        const processos = await page.$$(
-          '#painel-escolha-processo .selecao-processo',
-        );
-        this.logger.log(
-          `🔢 Total de instâncias disponíveis: ${processos.length}`,
-        );
+      //   const processos = await page.$$(
+      //     '#painel-escolha-processo .selecao-processo',
+      //   );
+      //   this.logger.log(
+      //     `🔢 Total de instâncias disponíveis: ${processos.length}`,
+      //   );
 
-        if (!processos.length) throw new Error('Nenhuma instância encontrada');
+      //   if (!processos.length) throw new Error('Nenhuma instância encontrada');
 
-        // ✅ ✅ NOVO COMPORTAMENTO
-        // Se solicitou instância 3 e só existem 1 ou 2 → parar IMEDIATAMENTE sem captcha
-        if (instanceIndex === 3 && processos.length < 3) {
-          this.logger.warn(
-            `⚠️ Instância 3 não encontrada (apenas ${processos.length} instâncias). Interrompendo sem resolver captcha.`,
-          );
+      //   // ✅ ✅ NOVO COMPORTAMENTO
+      //   // Se solicitou instância 3 e só existem 1 ou 2 → parar IMEDIATAMENTE sem captcha
+      //   if (instanceIndex === 3 && processos.length < 3) {
+      //     this.logger.warn(
+      //       `⚠️ Instância 3 não encontrada (apenas ${processos.length} instâncias). Interrompendo sem resolver captcha.`,
+      //     );
 
-          return {
-            process: { mensagemErro: 'Instância 3 não encontrada' },
-            integra: null,
-            singleInstance: false,
-          };
-        }
+      //     return {
+      //       process: { mensagemErro: 'Instância 3 não encontrada' },
+      //       integra: null,
+      //       singleInstance: false,
+      //     };
+      //   }
 
-        // ✅ instância existe → selecionar normalmente
-        const target = instanceIndex - 1;
-        if (target < 0 || target >= processos.length)
-          throw new Error(`Instância ${instanceIndex} não encontrada`);
+      //   // ✅ instância existe → selecionar normalmente
+      //   const target = instanceIndex - 1;
+      //   if (target < 0 || target >= processos.length)
+      //     throw new Error(`Instância ${instanceIndex} não encontrada`);
 
-        this.logger.log(`✅ Selecionando instância ${instanceIndex}`);
+      //   this.logger.log(`✅ Selecionando instância ${instanceIndex}`);
 
-        await Promise.all([
-          page
-            .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
-            .catch(() => null),
-          processos[target].click(),
-        ]);
+      //   await Promise.all([
+      //     page
+      //       .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
+      //       .catch(() => null),
+      //     processos[target].click(),
+      //   ]);
 
-        this.logger.log('✅ Instância selecionada, indo para CAPTCHA');
-      } else if (resultado === 'captcha') {
-        this.logger.log(
-          '⚠️ Processo possui apenas uma instância — indo direto ao CAPTCHA',
-        );
+      //   this.logger.log('✅ Instância selecionada, indo para CAPTCHA');
+      // } else if (resultado === 'captcha') {
+      //   this.logger.log(
+      //     '⚠️ Processo possui apenas uma instância — indo direto ao CAPTCHA',
+      //   );
+      //   singleInstance = true;
+
+      //   // ✅ ✅ NOVO: impedir buscar instâncias inexistentes
+      //   if (instanceIndex !== 1) {
+      //     this.logger.warn(
+      //       `⚠️ Instância ${instanceIndex} não existe, pois o processo possui apenas uma instância.`,
+      //     );
+
+      //     return {
+      //       process: {
+      //         mensagemErro: `Instância ${instanceIndex} não encontrada`,
+      //       },
+      //       integra: null,
+      //       singleInstance: true,
+      //     };
+      //   }
+      // }
+      // Verifica se existe painel de escolha
+      const painel = await page.$('#painel-escolha-processo');
+      const processos = painel
+        ? await page.$$('#painel-escolha-processo .selecao-processo')
+        : [];
+
+      if (!painel || processos.length === 0) {
+        // Apenas uma instância
         singleInstance = true;
-
-        // ✅ ✅ NOVO: impedir buscar instâncias inexistentes
         if (instanceIndex !== 1) {
           this.logger.warn(
-            `⚠️ Instância ${instanceIndex} não existe, pois o processo possui apenas uma instância.`,
+            `Instância ${instanceIndex} não encontrada: processo tem apenas 1 instância.`,
           );
-
           return {
             process: {
               mensagemErro: `Instância ${instanceIndex} não encontrada`,
@@ -503,8 +522,27 @@ export class ScrapingService {
             singleInstance: true,
           };
         }
+      } else {
+        // Múltiplas instâncias
+        if (instanceIndex > processos.length) {
+          this.logger.warn(
+            `Instância ${instanceIndex} não encontrada: apenas ${processos.length} disponíveis.`,
+          );
+          return {
+            process: {
+              mensagemErro: `Instância ${instanceIndex} não encontrada`,
+            },
+            integra: null,
+            singleInstance: false,
+          };
+        }
+        await processos[instanceIndex - 1].click();
+        await page.waitForNavigation({
+          waitUntil: 'networkidle0',
+          timeout: 15000,
+        });
+        this.logger.log(`Instância ${instanceIndex} selecionada`);
       }
-
       const captchaVisible = await page
         .waitForSelector('#imagemCaptcha', { visible: true, timeout: 6000 })
         .catch(() => null);
