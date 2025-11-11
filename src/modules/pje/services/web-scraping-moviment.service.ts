@@ -39,7 +39,7 @@ export class WebScrapingMovimentService {
 
     for (let i = initialGrau; i <= 3; i++) {
       try {
-        const delayMs = this.getRandomDelay();
+        const delayMs = this.getRandomDelay(regionTRT);
         this.logger.debug(
           `⏱ Delay de ${delayMs}ms antes de buscar a ${i}ª instância`,
         );
@@ -164,8 +164,9 @@ export class WebScrapingMovimentService {
     return new Promise((res) => setTimeout(res, ms));
   }
 
-  private getRandomDelay() {
-    // Regra opcional futura para TRT15
-    return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
+  private getRandomDelay(regionTRT) {
+    const minDelay = regionTRT === 15 ? 2000 : 1000;
+    const maxDelay = regionTRT === 15 ? 10000 : 5000;
+    return Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
   }
 }
