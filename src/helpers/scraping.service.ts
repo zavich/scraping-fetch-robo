@@ -577,7 +577,8 @@ export class ScrapingService {
               (el) => el.textContent?.trim() || '',
             );
             this.logger.warn(`⚠️ Erro apresentado na tela: ${mensagemErro}`);
-            return { process: { mensagemErro }, integra: null, singleInstance };
+            // ❌ não retornar, mas lançar erro para o retry
+            throw new Error(`Erro na tela do processo: ${mensagemErro}`);
           }
         } catch {}
       }
