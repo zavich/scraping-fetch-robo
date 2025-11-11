@@ -35,33 +35,6 @@ export class LoginPoolService {
   ];
   private contaIndex = 0;
   private contadorProcessos = 0;
-  private async isCookieValid(trt: number, cookies: string): Promise<boolean> {
-    try {
-      const response = await axios.get(
-        `https://pje.trt${trt}.jus.br/pje-consulta-api/api/auth/pje`,
-        {
-          headers: {
-            accept: 'application/json, text/plain, */*',
-            'content-type': 'application/json',
-            referer: `https://pje.trt${trt}.jus.br/consultaprocessual/`,
-            'x-grau-instancia': '1',
-            'user-agent':
-              userAgents[Math.floor(Math.random() * userAgents.length)],
-            Cookie: cookies,
-          },
-          timeout: 10000,
-          validateStatus: () => true,
-        },
-      );
-
-      if (response.status === 200) return true;
-      if (response.status === 403) return false;
-      if (response.data?.codigoErro === 'ARQ-028') return false;
-      return false;
-    } catch {
-      return false;
-    }
-  }
   getConta(force = false): { username: string; password: string } {
     if (force || this.contadorProcessos >= 5) {
       this.contaIndex = (this.contaIndex + 1) % this.contas.length;
@@ -119,9 +92,11 @@ export class LoginPoolService {
     if (cookies) {
       this.logger.debug(`🔍 Validando cookie salvo do TRT-${trt}...`);
 
-      const valid = await this.isCookieValid(trt, cookies);
+      // Verifica TTL do cookie no Redis
+      const ttl = await this.redis.ttl(redisKey);
 
-      if (!valid) {
+      if (ttl === -2) {
+        // Cookie expirou ou não existe
         this.logger.warn(`⚠️ Cookie TRT-${trt} expirado. Renovando sessão...`);
 
         await this.redis.del(redisKey, readyKey);
@@ -142,8 +117,10 @@ export class LoginPoolService {
         return { cookies, account };
       }
 
-      // ✅ Cookie válido → retorna imediatamente
-      this.logger.debug(`✅ Cookie TRT-${trt} ainda é válido`);
+      // ✅ Cookie ainda válido → retorna imediatamente
+      this.logger.debug(
+        `✅ Cookie TRT-${trt} ainda é válido. Expira em ${ttl}s`,
+      );
       usedAccount = this.getConta(); // opcional
       return { cookies, account: usedAccount };
     }

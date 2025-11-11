@@ -251,20 +251,7 @@ export class ScrapingService {
       const { hostname } = new URL(urlBase);
 
       const cookies = await page.cookies();
-      const cookiesToClear = [
-        'captchaToken',
-        'respostaDesafio',
-        'tokenDesafio',
-        'tokenCaptcha',
-      ];
 
-      for (const name of cookiesToClear) {
-        await page.evaluate((cookieName) => {
-          document.cookie = `${cookieName}=; path=/; max-age=0;`;
-        }, name);
-
-        this.logger.log(`♻️ Cookie ${name} removido via document.cookie`);
-      }
       if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
         this.logger?.warn(
           '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
