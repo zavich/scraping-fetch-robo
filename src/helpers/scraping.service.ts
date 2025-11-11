@@ -40,33 +40,6 @@ export class ScrapingService {
     let processCaptured = false;
     const requestMap = new Map<string, string>();
 
-    const retry = async <T>(
-      fn: () => Promise<T>,
-      retries = 3,
-      delayMs = 1000,
-      stepName?: string,
-    ) => {
-      let lastError: unknown;
-      for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-          const result = await fn();
-          this.logger.log(
-            `✅ Etapa '${stepName}' concluída na tentativa ${attempt}`,
-          );
-          return result;
-        } catch (err) {
-          lastError = err;
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `❌ Tentativa ${attempt}/${retries} falhou na etapa '${stepName}': ${msg}`,
-          );
-          if (attempt < retries)
-            await new Promise((r) => setTimeout(r, delayMs));
-        }
-      }
-      throw lastError;
-    };
-
     const initCDP = async (pg) => {
       this.logger.log('🔧 Inicializando CDP para monitoramento de rede...');
       const client = await pg.target().createCDPSession();
@@ -170,7 +143,7 @@ export class ScrapingService {
           : `https://pje.trt${regionTRT}.jus.br/consultaprocessual/`;
 
       this.logger.log(`🌐 Acessando URL base: ${urlBase}`);
-      await retry(
+      await this.retry(
         () => page.goto(urlBase, { waitUntil: 'networkidle0' }),
         3,
         1000,
@@ -401,7 +374,7 @@ export class ScrapingService {
 
       this.logger.log('⏳ Preenchendo número do processo...');
 
-      await retry(
+      await this.retry(
         async () => {
           await page.waitForSelector('#nrProcessoInput', { visible: true });
 
@@ -532,7 +505,7 @@ export class ScrapingService {
       if (captchaVisible) {
         this.logger.log('🔐 CAPTCHA detectado — iniciando resolução');
 
-        await retry(
+        await this.retry(
           async () => {
             const imgHandle = await page.$('#imagemCaptcha');
             if (!imgHandle) throw new Error('Imagem de CAPTCHA não encontrada');
@@ -565,23 +538,35 @@ export class ScrapingService {
 
       await new Promise((r) => setTimeout(r, 700));
 
-      const painelErro = await page.$('#painel-erro');
-      if (painelErro) {
-        try {
+      await this.retry(
+        async (attempt) => {
+          const painelErro = await page.$('#painel-erro');
+          if (!painelErro) return;
+
           const spanErro = await painelErro.waitForSelector('span', {
             visible: true,
             timeout: 1500,
           });
+
           if (spanErro) {
             const mensagemErro = await spanErro.evaluate(
               (el) => el.textContent?.trim() || '',
             );
+
             this.logger.warn(`⚠️ Erro apresentado na tela: ${mensagemErro}`);
-            // ❌ não retornar, mas lançar erro para o retry
-            throw new Error(`Erro na tela do processo: ${mensagemErro}`);
+
+            if (attempt < 3) {
+              this.logger.log('🔁 Recarregando página e tentando novamente...');
+              await page.reload({ waitUntil: 'networkidle0', timeout: 60000 });
+            }
+
+            throw new Error(`painel-erro:${mensagemErro}`);
           }
-        } catch {}
-      }
+        },
+        3,
+        2000,
+        'Verificar painel de erro',
+      );
 
       this.logger.log('⏳ Aguardando captura do processo pelo CDP...');
 
@@ -640,4 +625,30 @@ export class ScrapingService {
       this.logger.log('✅ Contexto liberado');
     }
   }
+  retry = async <T>(
+    fn: (attempt: number) => Promise<T>,
+    retries = 3,
+    delayMs = 1000,
+    stepName?: string,
+  ) => {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const result = await fn(attempt);
+
+        this.logger.log(
+          `✅ Etapa '${stepName}' concluída na tentativa ${attempt}`,
+        );
+        return result;
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(
+          `❌ Tentativa ${attempt}/${retries} falhou na etapa '${stepName}': ${msg}`,
+        );
+        if (attempt < retries) await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    throw lastError;
+  };
 }
