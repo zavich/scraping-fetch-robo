@@ -30,15 +30,13 @@ export class WebScrapingMovimentService {
 
     // ✅ Regras de início
     let initialGrau = origem === 'TST' ? 3 : 1;
-    let finalGrau = origem === 'TST' ? 3 : 2; // ✅ TRT tem no máximo 2 instâncias
 
     // ✅ TST sempre é somente 3
     if (origem === 'TST') {
       initialGrau = 3;
-      finalGrau = 3;
     }
 
-    for (let i = initialGrau; i <= finalGrau; i++) {
+    for (let i = initialGrau; i <= 3; i++) {
       try {
         const delayMs = this.getRandomDelay();
         this.logger.debug(

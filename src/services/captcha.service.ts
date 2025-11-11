@@ -138,4 +138,90 @@ export class CaptchaService {
       return 0;
     }
   }
+  async resolveAwsWaf({
+    websiteURL,
+    websiteKey,
+    context,
+    iv,
+    challengeScript,
+    captchaScript,
+  }: {
+    websiteURL: string;
+    websiteKey: string;
+    context: string;
+    iv: string;
+    challengeScript: string;
+    captchaScript: string;
+  }) {
+    this.logger.log(`🧩 Iniciando resolução do AWS WAF em: ${websiteURL}`);
+
+    // 1️⃣ Criar task no 2Captcha
+    const createTaskResp = await fetch('https://api.2captcha.com/createTask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientKey: this.API_KEY,
+        task: {
+          type: 'AmazonTaskProxyless',
+          websiteURL,
+          websiteKey,
+          iv,
+          context,
+          challengeScript,
+          captchaScript,
+        },
+      }),
+    });
+
+    const createTaskResult = await createTaskResp.json();
+
+    if (createTaskResult.errorId !== 0) {
+      throw new Error(
+        `Erro ao criar task 2Captcha: ${createTaskResult.errorCode} - ${createTaskResult.errorDescription}`,
+      );
+    }
+
+    const taskId = createTaskResult.taskId;
+    this.logger.log(`📡 Task criada no 2Captcha com ID: ${taskId}`);
+
+    // 2️⃣ Esperar até o CAPTCHA ser resolvido
+    let result;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      await new Promise((r) => setTimeout(r, 5000)); // espera 5s
+
+      const checkResp = await fetch('https://api.2captcha.com/getTaskResult', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientKey: this.API_KEY,
+          taskId,
+        }),
+      });
+
+      result = await checkResp.json();
+
+      if (result.status === 'ready') break;
+
+      this.logger.log(`⏳ Aguardando resposta... (${attempt + 1}/40)`);
+    }
+
+    if (!result || result.status !== 'ready') {
+      throw new Error('Tempo limite atingido aguardando resolução do CAPTCHA');
+    }
+
+    this.logger.log('✅ CAPTCHA AWS WAF resolvido com sucesso!');
+    this.logger.debug('🧾 Resultado:', result.solution);
+
+    // 3️⃣ Extrair o cookie de resposta
+    const { captcha_voucher, existing_token } = result.solution;
+
+    if (!captcha_voucher && !existing_token) {
+      throw new Error('Não foi possível obter o token do AWS WAF');
+    }
+
+    return {
+      existing_token,
+      captcha_voucher,
+    };
+  }
 }

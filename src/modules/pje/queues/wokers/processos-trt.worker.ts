@@ -111,16 +111,10 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
-      const service =
-        regionTRT === 3
-          ? this.fetchUrlMovimentService
-          : this.webScrapingMovimentService;
-
-      const instances = await service.execute(numero, origem);
-      // const instances = await this.webScrapingMovimentService.execute(
-      //   numero,
-      //   origem,
-      // );
+      const instances = await this.webScrapingMovimentService.execute(
+        numero,
+        origem,
+      );
       const result = instances.slice(0, 2);
 
       if (!instances || instances.length === 0) {
@@ -256,6 +250,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // ✅ POST final
       // --------------------------
       console.log('RESPONSE', response);
+
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
