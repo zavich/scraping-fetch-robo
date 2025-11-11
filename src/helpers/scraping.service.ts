@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
-import { Page } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
 
@@ -252,6 +251,20 @@ export class ScrapingService {
       const { hostname } = new URL(urlBase);
 
       const cookies = await page.cookies();
+      const cookiesToClear = [
+        'captchaToken',
+        'respostaDesafio',
+        'tokenDesafio',
+        'tokenCaptcha',
+      ];
+
+      for (const name of cookiesToClear) {
+        await page.evaluate((cookieName) => {
+          document.cookie = `${cookieName}=; path=/; max-age=0;`;
+        }, name);
+
+        this.logger.log(`♻️ Cookie ${name} removido via document.cookie`);
+      }
       if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
         this.logger?.warn(
           '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
@@ -426,94 +439,80 @@ export class ScrapingService {
       );
 
       this.logger.log('✅ Número do processo preenchido');
-
       const painelProm = page
         .waitForSelector('#painel-escolha-processo', { visible: true })
         .then(() => 'painel')
         .catch(() => null);
+
       const captchaProm = page
         .waitForSelector('#imagemCaptcha', { visible: true })
         .then(() => 'captcha')
         .catch(() => null);
 
-      // const resultado = await Promise.race([painelProm, captchaProm]);
+      const resultado = await Promise.race([painelProm, captchaProm]);
+
       let singleInstance = false;
+      // let capturedResponseData: any = null;
 
-      // if (resultado === 'painel') {
-      //   this.logger.log('✅ Múltiplas instâncias detectadas');
+      if (resultado === 'painel') {
+        this.logger.log('✅ Múltiplas instâncias detectadas');
 
-      //   const processos = await page.$$(
-      //     '#painel-escolha-processo .selecao-processo',
-      //   );
-      //   this.logger.log(
-      //     `🔢 Total de instâncias disponíveis: ${processos.length}`,
-      //   );
+        const processos = await page.$$(
+          '#painel-escolha-processo .selecao-processo',
+        );
+        this.logger.log(
+          `🔢 Total de instâncias disponíveis: ${processos.length}`,
+        );
 
-      //   if (!processos.length) throw new Error('Nenhuma instância encontrada');
+        if (!processos.length) throw new Error('Nenhuma instância encontrada');
 
-      //   // ✅ ✅ NOVO COMPORTAMENTO
-      //   // Se solicitou instância 3 e só existem 1 ou 2 → parar IMEDIATAMENTE sem captcha
-      //   if (instanceIndex === 3 && processos.length < 3) {
-      //     this.logger.warn(
-      //       `⚠️ Instância 3 não encontrada (apenas ${processos.length} instâncias). Interrompendo sem resolver captcha.`,
-      //     );
+        // Se solicitou instância 3 e só existem 1 ou 2 → parar sem captcha
+        if (instanceIndex === 3 && processos.length < 3) {
+          this.logger.warn(
+            `⚠️ Instância 3 não encontrada (apenas ${processos.length} instâncias). Interrompendo sem resolver captcha.`,
+          );
 
-      //     return {
-      //       process: { mensagemErro: 'Instância 3 não encontrada' },
-      //       integra: null,
-      //       singleInstance: false,
-      //     };
-      //   }
+          return {
+            process: { mensagemErro: 'Instância 3 não encontrada' },
+            integra: null,
+            singleInstance: false,
+          };
+        }
 
-      //   // ✅ instância existe → selecionar normalmente
-      //   const target = instanceIndex - 1;
-      //   if (target < 0 || target >= processos.length)
-      //     throw new Error(`Instância ${instanceIndex} não encontrada`);
+        // Seleciona instância solicitada
+        const target = instanceIndex - 1;
+        if (target < 0 || target >= processos.length)
+          throw new Error(`Instância ${instanceIndex} não encontrada`);
 
-      //   this.logger.log(`✅ Selecionando instância ${instanceIndex}`);
+        this.logger.log(`✅ Selecionando instância ${instanceIndex}`);
 
-      //   await Promise.all([
-      //     page
-      //       .waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 })
-      //       .catch(() => null),
-      //     processos[target].click(),
-      //   ]);
+        // Aguarda resposta da API do processo após clicar
+        const responsePromise = page.waitForResponse(
+          (resp) =>
+            resp.url().includes('/pje-consulta-api/api/processos/') &&
+            resp.status() === 200,
+          { timeout: 30000 }, // espera até 30s
+        );
 
-      //   this.logger.log('✅ Instância selecionada, indo para CAPTCHA');
-      // } else if (resultado === 'captcha') {
-      //   this.logger.log(
-      //     '⚠️ Processo possui apenas uma instância — indo direto ao CAPTCHA',
-      //   );
-      //   singleInstance = true;
+        await processos[target].click();
 
-      //   // ✅ ✅ NOVO: impedir buscar instâncias inexistentes
-      //   if (instanceIndex !== 1) {
-      //     this.logger.warn(
-      //       `⚠️ Instância ${instanceIndex} não existe, pois o processo possui apenas uma instância.`,
-      //     );
+        const response = await responsePromise;
+        const text = await response.text();
+        capturedResponseData = JSON.parse(text);
 
-      //     return {
-      //       process: {
-      //         mensagemErro: `Instância ${instanceIndex} não encontrada`,
-      //       },
-      //       integra: null,
-      //       singleInstance: true,
-      //     };
-      //   }
-      // }
-      // Verifica se existe painel de escolha
-      const painel = await page.$('#painel-escolha-processo');
-      const processos = painel
-        ? await page.$$('#painel-escolha-processo .selecao-processo')
-        : [];
-
-      if (!painel || processos.length === 0) {
-        // Apenas uma instância
+        this.logger.log('✅ Instância selecionada e processo capturado');
+      } else if (resultado === 'captcha') {
+        this.logger.log(
+          '⚠️ Processo possui apenas uma instância — indo direto ao CAPTCHA',
+        );
         singleInstance = true;
+
+        // Se solicitou instância diferente de 1 → erro
         if (instanceIndex !== 1) {
           this.logger.warn(
-            `Instância ${instanceIndex} não encontrada: processo tem apenas 1 instância.`,
+            `⚠️ Instância ${instanceIndex} não existe, pois o processo possui apenas uma instância.`,
           );
+
           return {
             process: {
               mensagemErro: `Instância ${instanceIndex} não encontrada`,
@@ -522,26 +521,23 @@ export class ScrapingService {
             singleInstance: true,
           };
         }
+
+        this.logger.log('✅ Processo capturado via CAPTCHA (única instância)');
       } else {
-        // Múltiplas instâncias
-        if (instanceIndex > processos.length) {
-          this.logger.warn(
-            `Instância ${instanceIndex} não encontrada: apenas ${processos.length} disponíveis.`,
-          );
+        this.logger.warn(
+          '⚠️ Resultado inesperado ao detectar múltiplas instâncias',
+        );
+
+        // Se o usuário solicitou instância 3 e não há painel → retorna erro
+        if (instanceIndex === 3) {
           return {
             process: {
-              mensagemErro: `Instância ${instanceIndex} não encontrada`,
+              mensagemErro: 'Instância 3 não encontrada',
             },
             integra: null,
-            singleInstance: false,
+            singleInstance: true,
           };
         }
-        await processos[instanceIndex - 1].click();
-        await page.waitForNavigation({
-          waitUntil: 'networkidle0',
-          timeout: 15000,
-        });
-        this.logger.log(`Instância ${instanceIndex} selecionada`);
       }
       const captchaVisible = await page
         .waitForSelector('#imagemCaptcha', { visible: true, timeout: 6000 })
@@ -655,201 +651,5 @@ export class ScrapingService {
       this.pool.release(context);
       this.logger.log('✅ Contexto liberado');
     }
-  }
-  async handleAwsWaf(page: Page, urlBase: string) {
-    const { hostname } = new URL(urlBase);
-    const awsWafTokenKey = `aws-waf-token:${hostname}`;
-
-    // Espera por iframes do WAF
-    await page
-      .waitForFunction(
-        () => {
-          const iframes = Array.from(document.querySelectorAll('iframe'));
-          return iframes.some(
-            (f) =>
-              f.src.includes('awswaf') ||
-              f.src.includes('captcha') ||
-              f.src.includes('token'),
-          );
-        },
-        { timeout: 10000 },
-      )
-      .catch(() => null);
-
-    // Busca o frame do WAF
-    const wafFrame = page
-      .frames()
-      .find(
-        (f) =>
-          f.url().includes('awswaf') ||
-          f.url().includes('captcha') ||
-          f.url().includes('token'),
-      );
-
-    if (!wafFrame) {
-      this.logger?.log('❌ Nenhum frame AWS WAF encontrado');
-      return null;
-    }
-    this.logger?.log('✅ Frame AWS WAF detectado:', wafFrame.url());
-
-    // Extrai parâmetros WAF
-    const wafParams = await page.evaluate(() => {
-      const w = window as any;
-      const key = w.gokuProps?.key || null;
-      const iv = w.gokuProps?.iv || null;
-      const context = w.gokuProps?.context || null;
-
-      const html = document.documentElement.innerHTML;
-      const backupKey =
-        (html.match(/"key"\s*:\s*"([^"]+)"/i) || [])[1] ||
-        (html.match(/"sitekey"\s*:\s*"([^"]+)"/i) || [])[1];
-      const backupIv = (html.match(/"iv"\s*:\s*"([^"]+)"/i) || [])[1];
-      const backupContext = (html.match(/"context"\s*:\s*"([^"]+)"/i) || [])[1];
-
-      const scripts = Array.from(document.querySelectorAll('script')).map(
-        (s) => s.src,
-      );
-      const challengeScript = scripts.find((s) => s.includes('challenge'));
-      const captchaScript = scripts.find((s) => s.includes('captcha'));
-
-      return {
-        websiteKey: key || backupKey,
-        iv: iv || backupIv,
-        context: context || backupContext,
-        challengeScript,
-        captchaScript,
-      };
-    });
-
-    this.logger?.log('wafParams:', wafParams);
-
-    // Tenta recuperar token do Redis
-    let token = await this.redis.get(awsWafTokenKey);
-    let tokenIsValid = false;
-
-    if (token) {
-      this.logger?.log(
-        '✅ Token AWS WAF encontrado no Redis. Tentando usar...',
-      );
-
-      const cookies = await page.cookies();
-      if (cookies.length) {
-        await page.deleteCookie(
-          ...cookies.map((c) => ({
-            name: c.name,
-            domain: c.domain,
-            path: c.path,
-          })),
-        );
-        this.logger?.log(`♻️ ${cookies.length} cookies antigos removidos`);
-      }
-
-      await page.setCookie({
-        name: 'aws-waf-token',
-        value: token,
-        domain: hostname,
-        path: '/',
-        httpOnly: false,
-        secure: true,
-        expires: Math.floor(Date.now() / 1000) + 60 * 60,
-      });
-
-      await page.goto(urlBase, { waitUntil: 'networkidle0', timeout: 60000 });
-
-      // Checa se token ainda é válido
-      const wafParamsCheck = await page.evaluate(() => {
-        const w = window as any;
-        const key = w.gokuProps?.key || null;
-        const iv = w.gokuProps?.iv || null;
-        const context = w.gokuProps?.context || null;
-        const html = document.documentElement.innerHTML;
-
-        const backupKey =
-          (html.match(/"key"\s*:\s*"([^"]+)"/i) || [])[1] ||
-          (html.match(/"sitekey"\s*:\s*"([^"]+)"/i) || [])[1];
-        const backupIv = (html.match(/"iv"\s*:\s*"([^"]+)"/i) || [])[1];
-        const backupContext = (html.match(/"context"\s*:\s*"([^"]+)"/i) ||
-          [])[1];
-
-        return {
-          websiteKey: key || backupKey,
-          iv: iv || backupIv,
-          context: context || backupContext,
-        };
-      });
-
-      tokenIsValid = !(
-        wafParamsCheck.websiteKey &&
-        wafParamsCheck.iv &&
-        wafParamsCheck.context
-      );
-
-      if (tokenIsValid) {
-        this.logger?.log(
-          '✅ Token AWS WAF válido, pode continuar sem resolver CAPTCHA.',
-        );
-      } else {
-        this.logger?.warn(
-          '⚠️ Token AWS WAF inválido ou expirado. Resolver CAPTCHA será necessário.',
-        );
-        token = null;
-      }
-    }
-
-    // Resolve CAPTCHA se necessário
-    if (
-      !token &&
-      wafParams?.websiteKey &&
-      wafParams?.context &&
-      wafParams?.iv
-    ) {
-      this.logger?.warn(
-        '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
-      );
-
-      const solved = await this.captchaService.resolveAwsWaf({
-        websiteURL: urlBase,
-        websiteKey: wafParams.websiteKey,
-        context: wafParams.context,
-        iv: wafParams.iv,
-        challengeScript: wafParams.challengeScript || '',
-        captchaScript: wafParams.captchaScript || '',
-      });
-
-      const tokenToUse = solved?.existing_token as string;
-      if (!tokenToUse) throw new Error('Token AWS WAF não encontrado');
-
-      const cookies = await page.cookies();
-      if (cookies.length) {
-        await page.deleteCookie(
-          ...cookies.map((c) => ({
-            name: c.name,
-            domain: c.domain,
-            path: c.path,
-          })),
-        );
-        this.logger?.log(`♻️ ${cookies.length} cookies antigos removidos`);
-      }
-
-      await page.setCookie({
-        name: 'aws-waf-token',
-        value: tokenToUse,
-        domain: hostname,
-        path: '/',
-        httpOnly: false,
-        secure: true,
-        expires: Math.floor(Date.now() / 1000) + 60 * 60,
-      });
-
-      await this.redis.setex(awsWafTokenKey, 60 * 60, tokenToUse);
-      this.logger?.log('💾 Token AWS WAF salvo no Redis e setado no browser');
-
-      await page.goto(urlBase, { waitUntil: 'networkidle0', timeout: 60000 });
-      this.logger?.log('🔁 Página recarregada após ativar token AWS WAF');
-
-      token = tokenToUse;
-    }
-
-    return { token, wafParams, wafFrame };
   }
 }

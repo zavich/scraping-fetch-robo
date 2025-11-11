@@ -137,16 +137,15 @@ export class GenericProcessoWorker extends WorkerHost {
       // 🔐 Segredo de Justiça
       // --------------------------
       const segredo = instances.some((i) => {
+        if (!i) return false; // protege contra null/undefined
         const maybeMsg = (i as any).mensagemErro as unknown;
         if (typeof maybeMsg !== 'string') return false;
         const msg = maybeMsg;
         if (!msg) return false;
-        // Normalize and remove diacritics to match "segredo de justiça" robustly
         const normalized = msg
           .normalize('NFD')
           .replace(/[\u0300-\u036f]/g, '')
           .toLowerCase();
-        // Match "segredo" optionally followed by "justica" (handles "segredo de justiça", "segredo", etc.)
         return /segredo(?:.*justica)?/.test(normalized);
       });
 
@@ -214,17 +213,12 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
       }
-      function hasMensagemErroString(
-        obj: unknown,
-      ): obj is { mensagemErro: string } {
-        if (obj && typeof obj === 'object') {
-          const v = (obj as Record<string, unknown>)['mensagemErro'];
-          return typeof v === 'string' && v.length > 0;
-        }
-        return false;
-      }
-
-      const erroMensagem = instances.find(hasMensagemErroString);
+      const erroMensagem = instances.find(
+        (i) =>
+          i &&
+          typeof (i as any).mensagemErro === 'string' &&
+          (i as any).mensagemErro.length > 0,
+      );
 
       if (erroMensagem) {
         this.logger.warn(
@@ -249,8 +243,6 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // ✅ POST final
       // --------------------------
-      console.log('RESPONSE', response);
-
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
