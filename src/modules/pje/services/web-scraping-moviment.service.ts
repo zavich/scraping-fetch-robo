@@ -106,8 +106,33 @@ export class WebScrapingMovimentService {
             `Processo ${numeroDoProcesso} retornou mensagemErro na instância ${i}: ${mensagemErro}`,
           );
 
-          instances.push(process as unknown as ProcessosResponse);
-          break;
+          return [
+            {
+              mensagemErro: mensagemErro as string,
+              mensagem: '',
+              tokenDesafio: '',
+              itensProcesso: [],
+              instance: '',
+              imagem: '',
+              resposta: '',
+              id: 0,
+              numero: '',
+              classe: '',
+              orgaoJulgador: '',
+              pessoaRelator: '',
+              segredoJustica: false,
+              justicaGratuita: false,
+              distribuidoEm: '',
+              autuadoEm: '',
+              valorDaCausa: 0,
+              poloAtivo: [],
+              poloPassivo: [],
+              assuntos: [],
+              expedientes: [],
+              juizoDigital: false,
+              documentos: [],
+            },
+          ];
         }
 
         // ✅ 4) Dados válidos da instância
