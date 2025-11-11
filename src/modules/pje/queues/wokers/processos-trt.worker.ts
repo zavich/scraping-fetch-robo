@@ -162,6 +162,36 @@ export class GenericProcessoWorker extends WorkerHost {
         return;
       }
 
+      const erroMensagem = instances.find(
+        (i) =>
+          i &&
+          typeof (i as any).mensagemErro === 'string' &&
+          (i as any).mensagemErro.length > 0,
+      );
+
+      if (erroMensagem) {
+        this.logger.warn(
+          `⚠️ Mensagem de erro para o processo ${numero}: ${erroMensagem.mensagemErro}`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          erroMensagem.mensagemErro,
+          true,
+          origem,
+        );
+        await axios.post(webhookUrl, response);
+        return;
+      }
+
+      // --------------------------
+      // ✅ Resposta final
+      // --------------------------
+      const response = normalizeResponse(numero, result, '', false, origem);
+
+      // --------------------------
+      // ✅ POST final
+      // --------------------------
       // --------------------------
       // 📄 Enfileirar documentos
       // --------------------------
@@ -213,36 +243,6 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
       }
-      const erroMensagem = instances.find(
-        (i) =>
-          i &&
-          typeof (i as any).mensagemErro === 'string' &&
-          (i as any).mensagemErro.length > 0,
-      );
-
-      if (erroMensagem) {
-        this.logger.warn(
-          `⚠️ Mensagem de erro para o processo ${numero}: ${erroMensagem.mensagemErro}`,
-        );
-        const response = normalizeResponse(
-          numero,
-          [],
-          erroMensagem.mensagemErro,
-          true,
-          origem,
-        );
-        await axios.post(webhookUrl, response);
-        return;
-      }
-
-      // --------------------------
-      // ✅ Resposta final
-      // --------------------------
-      const response = normalizeResponse(numero, result, '', false, origem);
-
-      // --------------------------
-      // ✅ POST final
-      // --------------------------
       await axios.post(webhookUrl, response);
 
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
