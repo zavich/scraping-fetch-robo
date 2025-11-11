@@ -24,7 +24,7 @@ export class ProcessDocumentsFindService {
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
   }
-  delayMs = Math.floor(Math.random() * (5000 - 1000 + 1)) + 5000; // 5 a 10s
+  delayMs = Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
 
   async execute(
     numeroDoProcesso: string,
