@@ -106,7 +106,7 @@ export class ConsultarProcessoQueue {
       {
         jobId: numero,
         attempts: 3,
-        priority: priority ? 1 : 5,
+        priority: priority ? 0 : 5,
         backoff: { type: 'fixed', delay: 5000 },
         removeOnFail: false,
         removeOnComplete: true,
