@@ -244,8 +244,6 @@ export class ScrapingService {
         };
       });
 
-      console.log('wafParams:', wafParams);
-
       console.log('wafFrame URL:', wafFrame?.url() || '❌ não encontrado');
       console.log('wafParams:', wafParams);
       const { hostname } = new URL(urlBase);
