@@ -78,6 +78,7 @@ export class ConsultarProcessoQueue {
     origem?: string,
     documents = false,
     webhook?: string,
+    priority = false,
   ) {
     const queueName = origem === 'TST' ? 'pje-tst' : getTRTQueue(numero);
 
@@ -105,6 +106,7 @@ export class ConsultarProcessoQueue {
       {
         jobId: numero,
         attempts: 3,
+        priority: priority ? 1 : 5,
         backoff: { type: 'fixed', delay: 5000 },
         removeOnFail: false,
         removeOnComplete: true,

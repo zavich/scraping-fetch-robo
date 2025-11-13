@@ -11,15 +11,15 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 
 import { Response } from 'express';
-import { PdfExtractService } from './services/extract.service';
-import { PjeLoginService } from './services/login.service';
 import { ScrapingService } from '../../helpers/scraping.service';
+import { PdfExtractService } from './services/extract.service';
+import { LoginPoolService } from './services/login-pool.service';
 @Controller('processos')
 export class PjeController {
   constructor(
     private readonly consultarProcessoQueue: ConsultarProcessoQueue,
     private readonly extractService: PdfExtractService,
-    private readonly pjeLoginService: PjeLoginService,
+    private readonly loginPoolService: LoginPoolService,
     private readonly scrapingService: ScrapingService,
   ) {}
   @Post('extract-by-id')
@@ -81,25 +81,32 @@ export class PjeController {
   @Post('/:numero')
   async getFindProcess(
     @Param('numero') numero: string,
-    @Body() body: { documents?: boolean; origem?: string; webhook?: string },
+    @Body()
+    body: {
+      documents?: boolean;
+      origem?: string;
+      webhook?: string;
+      priority?: boolean;
+    },
   ): Promise<any> {
-    const { documents, origem, webhook } = body || {};
+    const { documents, origem, webhook, priority } = body || {};
     return this.consultarProcessoQueue.execute(
       numero,
       origem,
       documents,
       webhook,
+      priority,
     );
   }
   @Post('/auth/login')
   async loginPje(): Promise<any> {
-    return await this.pjeLoginService.execute(15, '09934500400', 'Pro@!230');
+    return await this.loginPoolService.getCookies(16);
   }
   @Post('/teste/trt')
   async teste(): Promise<any> {
     return await this.scrapingService.execute(
-      '0010065-68.2022.5.15.0122',
-      15,
+      '0016495-78.2023.5.16.0023',
+      16,
       2,
       true,
       true,
