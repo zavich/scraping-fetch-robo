@@ -11,7 +11,7 @@ export class ScrapingService {
     port: Number(process.env.REDIS_PORT) || 6379,
   });
 
-  private readonly pool = new BrowserPool(5); // exemplo: 5 contexts simultâneos
+  private readonly pool = new BrowserPool(10); // exemplo: 10 contexts simultâneos
 
   constructor(private readonly captchaService: CaptchaService) {
     this.pool.init(); // inicializa o pool
