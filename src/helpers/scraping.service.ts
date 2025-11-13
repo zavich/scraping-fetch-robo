@@ -29,8 +29,14 @@ export class ScrapingService {
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
 
-    const context = await this.pool.acquire();
+    let context = await this.pool.acquire();
     this.logger.log('✅ Contexto adquirido do pool');
+
+    // 🔍 Verifica se o contexto é válido antes de abrir a página
+    if (!context || context.closed) {
+      this.logger.warn('⚠️ Contexto inválido ou fechado, criando novo...');
+      context = await this.pool.acquire();
+    }
 
     const page = await context.newPage();
     this.logger.log('✅ Nova página aberta');
