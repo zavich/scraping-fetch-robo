@@ -19,7 +19,12 @@ export function createDynamicWorkers(): Provider[] {
               duration: 3 * 60 * 1000, // a cada 3 minutos
             },
           }
-        : { concurrency };
+        : {
+            concurrency,
+            lockDuration: 600000, // 10 min
+            lockRenewTime: 30000, // renova o lock a cada 30s
+            stalledInterval: 60000,
+          };
 
     @Processor(queueName, processorOptions)
     class WorkerForQueue extends GenericProcessoWorker {}
