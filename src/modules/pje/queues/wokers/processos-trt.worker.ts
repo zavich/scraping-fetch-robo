@@ -136,7 +136,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔐 Segredo de Justiça
       // --------------------------
-      const segredo = instances.some((i) => {
+      const segredo = result.some((i) => {
         if (!i) return false; // protege contra null/undefined
         const maybeMsg = (i as any).mensagemErro as unknown;
         if (typeof maybeMsg !== 'string') return false;
@@ -162,7 +162,7 @@ export class GenericProcessoWorker extends WorkerHost {
         return;
       }
 
-      const erroMensagem = instances.find(
+      const erroMensagem = result.find(
         (i) =>
           i &&
           typeof (i as any).mensagemErro === 'string' &&
