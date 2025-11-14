@@ -12,11 +12,16 @@ import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.
       isGlobal: true,
     }),
     PjeModule,
+    // BullModule.forRoot({
+    //   connection: {
+    //     host: process.env.REDIS_HOST,
+    //     port: Number(process.env.REDIS_PORT),
+    //     password: process.env.REDIS_PASSWORD || undefined,
+    //   },
+    // }),
     BullModule.forRoot({
       connection: {
-        host: process.env.REDIS_HOST,
-        port: Number(process.env.REDIS_PORT),
-        password: process.env.REDIS_PASSWORD || undefined,
+        url: process.env.REDIS_URL,
       },
     }),
     ScheduleModule.forRoot(),
