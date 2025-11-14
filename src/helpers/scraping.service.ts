@@ -1,17 +1,19 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
-import { Page, CDPSession } from 'puppeteer';
+import { CDPSession, Page } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
 
 @Injectable()
 export class ScrapingService {
   private readonly logger = new Logger(ScrapingService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL as string);
 
   private readonly pool = new BrowserPool(10); // exemplo: 30 contexts simultâneos
 
-  constructor(private readonly captchaService: CaptchaService) {
+  constructor(
+    private readonly captchaService: CaptchaService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+  ) {
     this.pool.init(); // inicializa o pool
   }
   async execute(

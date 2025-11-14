@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { BullModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { PjeModule } from './modules/pje/pje.module';
 import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.module';
-import Redis from 'ioredis';
+import { RedisModule } from './connection/redis.module';
+import { BullModule } from '@nestjs/bullmq';
 
 @Module({
   imports: [
@@ -21,14 +21,17 @@ import Redis from 'ioredis';
     //   },
     // }),
 
-    BullModule.forRoot({
-      connection: new Redis(process.env.REDIS_URL as string, {
-        tls: {
-          rejectUnauthorized: false,
-        },
+    // BullModule.forRoot({
+    //   connection: redis,
+    // }),
+    BullModule.forRootAsync({
+      imports: [RedisModule],
+      inject: ['REDIS_CLIENT'],
+      useFactory: (redisClient: any) => ({
+        connection: redisClient,
       }),
     }),
-
+    RedisModule,
     ScheduleModule.forRoot(),
     ReceitaFederalModule,
   ],

@@ -1,22 +1,27 @@
 // src/modules/pje/services/process-find.service.ts
 
-import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import * as fs from 'fs';
-import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
+import Redis from 'ioredis';
 
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL as string);
   constructor(
     private readonly documentoService: DocumentoService,
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));

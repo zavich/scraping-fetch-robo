@@ -1,20 +1,22 @@
 // login-pool.service.ts
 import {
+  Inject,
   Injectable,
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import axios from 'axios';
-import Redis from 'ioredis';
 import { PjeLoginService } from './login.service';
-import { userAgents } from 'src/utils/user-agents';
+import Redis from 'ioredis';
 
 @Injectable()
 export class LoginPoolService {
   private readonly logger = new Logger(LoginPoolService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL as string);
 
-  constructor(private readonly loginService: PjeLoginService) {}
+  constructor(
+    private readonly loginService: PjeLoginService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+  ) {}
 
   private contas = [
     {
@@ -89,7 +91,6 @@ export class LoginPoolService {
     if (cookies) {
       this.logger.debug(`🔍 Validando cookie salvo do TRT-${trt}...`);
 
-      // Verifica TTL do cookie no Redis
       // Verifica TTL do cookie no Redis
       const ttl = await this.redis.ttl(redisKey);
 

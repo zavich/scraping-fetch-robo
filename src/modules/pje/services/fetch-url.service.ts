@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
@@ -10,9 +10,11 @@ import { userAgents } from 'src/utils/user-agents';
 @Injectable()
 export class FetchUrlMovimentService {
   private readonly logger = new Logger(FetchUrlMovimentService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL as string);
 
-  constructor(private readonly captchaService: CaptchaService) {}
+  constructor(
+    private readonly captchaService: CaptchaService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+  ) {}
 
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));

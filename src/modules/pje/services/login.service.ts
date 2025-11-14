@@ -1,4 +1,5 @@
 import {
+  Inject,
   Injectable,
   Logger,
   ServiceUnavailableException,
@@ -17,8 +18,10 @@ interface LoginResponse {
 @Injectable()
 export class PjeLoginService {
   private readonly logger = new Logger(PjeLoginService.name);
-  private readonly redis = new Redis(process.env.REDIS_URL as string);
-  constructor(private readonly captchaService: CaptchaService) {
+  constructor(
+    private readonly captchaService: CaptchaService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+  ) {
     // this.pool.init(); // inicializa o pool
   }
   async execute(
