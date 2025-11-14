@@ -26,6 +26,8 @@ export class BrowserManager {
           '--no-zygote',
           '--disable-software-rasterizer',
         ],
+        protocolTimeout: 180_000, // 3 minutos
+        timeout: 180_000,
       });
       console.log('✅ Browser inicializado');
     }
