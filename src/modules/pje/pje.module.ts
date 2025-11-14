@@ -21,22 +21,24 @@ import { ProcessDocumentsFindService } from './services/process-documents-find.s
 import { ScrapingService } from '../../helpers/scraping.service';
 import { WebScrapingMovimentService } from './services/web-scraping-moviment.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
+import { QueueModule } from 'src/connection/queue.module';
 
 @Module({
   imports: [
     HttpModule,
     // ✅ registra filas de documentos por TRT
 
-    BullModule.registerQueue(
-      // fila geral
-      { name: 'pje-tst' },
+    // BullModule.registerQueue(
+    //   // fila geral
+    //   { name: 'pje-tst' },
 
-      // filas de processos por TRT
-      ...ALL_TRT_QUEUES.map((q) => ({ name: q })),
+    //   // filas de processos por TRT
+    //   ...ALL_TRT_QUEUES.map((q) => ({ name: q })),
 
-      // filas de documentos por TRT
-      ...ALL_TRT_DOCUMENT_QUEUES.map((q) => ({ name: q })),
-    ),
+    //   // filas de documentos por TRT
+    //   ...ALL_TRT_DOCUMENT_QUEUES.map((q) => ({ name: q })),
+    // ),
+    QueueModule,
   ],
   controllers: [PjeController],
   providers: [
