@@ -16,6 +16,7 @@ import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.
       connection: {
         host: process.env.REDIS_HOST,
         port: Number(process.env.REDIS_PORT),
+        password: process.env.REDIS_PASSWORD || undefined,
       },
     }),
     ScheduleModule.forRoot(),
