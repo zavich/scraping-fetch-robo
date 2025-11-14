@@ -6,7 +6,6 @@ import { PjeModule } from './modules/pje/pje.module';
 import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.module';
 import { RedisModule } from './connection/redis.module';
 import { BullModule } from '@nestjs/bullmq';
-import { QueueModule } from './connection/queue.module';
 
 @Module({
   imports: [
@@ -33,7 +32,6 @@ import { QueueModule } from './connection/queue.module';
       }),
     }),
     RedisModule,
-    QueueModule,
     ScheduleModule.forRoot(),
     ReceitaFederalModule,
   ],
