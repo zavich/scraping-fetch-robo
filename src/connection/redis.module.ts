@@ -10,10 +10,17 @@ import Redis from 'ioredis';
         if (!process.env.REDIS_URL) {
           throw new Error('REDIS_URL não está definido!');
         }
-        return new Redis(process.env.REDIS_URL, {
-          // tls: { rejectUnauthorized: false },
+
+        const client = new Redis(process.env.REDIS_URL, {
           maxRetriesPerRequest: null, // obrigatório para BullMQ
         });
+
+        // Evita logs de "Unhandled error event"
+        client.on('error', (err) => {
+          console.warn('[Redis] error event:', err.message);
+        });
+
+        return client;
       },
     },
   ],
