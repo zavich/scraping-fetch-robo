@@ -11,7 +11,7 @@ import Redis from 'ioredis';
           throw new Error('REDIS_URL não está definido!');
         }
         return new Redis(process.env.REDIS_URL, {
-          // tls: { rejectUnauthorized: false },
+          tls: { rejectUnauthorized: false },
           maxRetriesPerRequest: null, // obrigatório para BullMQ
         });
       },
