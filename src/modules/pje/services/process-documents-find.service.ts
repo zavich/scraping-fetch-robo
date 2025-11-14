@@ -12,10 +12,7 @@ import { PdfExtractService } from './extract.service';
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
-  private readonly redis = new Redis({
-    host: process.env.REDIS_HOST || 'redis',
-    port: Number(process.env.REDIS_PORT) || 6379,
-  });
+  private readonly redis = new Redis(process.env.REDIS_URL as string);
   constructor(
     private readonly documentoService: DocumentoService,
     private readonly awsS3Service: AwsS3Service,

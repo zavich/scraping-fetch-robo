@@ -17,10 +17,7 @@ interface LoginResponse {
 @Injectable()
 export class PjeLoginService {
   private readonly logger = new Logger(PjeLoginService.name);
-  private readonly redis = new Redis({
-    host: process.env.REDIS_HOST || 'redis',
-    port: Number(process.env.REDIS_PORT) || 6379,
-  });
+  private readonly redis = new Redis(process.env.REDIS_URL as string);
   constructor(private readonly captchaService: CaptchaService) {
     // this.pool.init(); // inicializa o pool
   }

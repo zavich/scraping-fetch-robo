@@ -7,10 +7,7 @@ import { BrowserPool } from 'src/utils/browser-pool';
 @Injectable()
 export class ScrapingService {
   private readonly logger = new Logger(ScrapingService.name);
-  private readonly redis = new Redis({
-    host: process.env.REDIS_HOST || 'redis',
-    port: Number(process.env.REDIS_PORT) || 6379,
-  });
+  private readonly redis = new Redis(process.env.REDIS_URL as string);
 
   private readonly pool = new BrowserPool(10); // exemplo: 30 contexts simultâneos
 
