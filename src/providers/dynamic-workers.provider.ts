@@ -14,10 +14,10 @@ export function createDynamicWorkers(): Provider[] {
       queueName === 'pje-trt15'
         ? {
             concurrency: 1,
-            limiter: {
-              max: 1, // 1 job
-              duration: 3 * 60 * 1000, // a cada 3 minutos
-            },
+            // limiter: {
+            //   max: 1, // 1 job
+            //   duration: 3 * 60 * 1000, // a cada 3 minutos
+            // },
           }
         : {
             concurrency,

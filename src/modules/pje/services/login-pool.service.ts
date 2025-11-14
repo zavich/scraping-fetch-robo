@@ -93,35 +93,33 @@ export class LoginPoolService {
       this.logger.debug(`🔍 Validando cookie salvo do TRT-${trt}...`);
 
       // Verifica TTL do cookie no Redis
+      // Verifica TTL do cookie no Redis
       const ttl = await this.redis.ttl(redisKey);
 
+      // 1) Se chave não existe → renovar
       if (ttl === -2) {
-        // Cookie expirou ou não existe
-        this.logger.warn(`⚠️ Cookie TRT-${trt} expirado. Renovando sessão...`);
-
-        await this.redis.del(redisKey, readyKey);
-
-        const account = this.getConta(true);
-        const loginResult = await this.loginService.execute(
-          trt,
-          account.username,
-          account.password,
+        this.logger.warn(
+          `⚠️ Cookie TRT-${trt} não existe no Redis. Renovando...`,
         );
-
-        cookies = loginResult.cookies;
-        usedAccount = account;
-
-        await this.redis.set(redisKey, cookies, 'EX', 3600);
-        await this.redis.set(readyKey, '1', 'EX', 30);
-
-        return { cookies, account };
+        return await this.renovarSessao(trt, redisKey, readyKey);
       }
 
-      // ✅ Cookie ainda válido → retorna imediatamente
-      this.logger.debug(
-        `✅ Cookie TRT-${trt} ainda é válido. Expira em ${ttl}s`,
-      );
-      usedAccount = this.getConta(); // opcional
+      // 2) Verifica se cookie tem tokens essenciais
+      const hasAccess = /access_token/.test(cookies);
+      const hasRefresh = /refresh_token/.test(cookies);
+
+      // Se cookie existe no Redis mas está quebrado → renovar
+      if (!hasAccess || !hasRefresh) {
+        this.logger.warn(
+          `⚠️ Cookie TRT-${trt} inválido (faltam tokens). Renovando sessão...`,
+        );
+        await this.redis.del(redisKey, readyKey);
+        return await this.getCookies(trt);
+      }
+
+      // 3) Cookie válido
+      this.logger.debug(`✅ Cookie TRT-${trt} válido. Expira em ${ttl}s`);
+      usedAccount = this.getConta();
       return { cookies, account: usedAccount };
     }
 
@@ -157,12 +155,18 @@ export class LoginPoolService {
               password,
             );
 
-            if (!loginResult?.cookies)
+            if (!loginResult?.cookies || loginResult.cookies.length === 0)
               throw new Error(`Login TRT ${trt} não retornou cookies.`);
 
             cookies = loginResult.cookies;
             usedAccount = account;
 
+            const hasAccess = /access_token/.test(cookies);
+            const hasRefresh = /refresh_token/.test(cookies);
+
+            if (!hasAccess || !hasRefresh) {
+              throw new Error(`Login TRT ${trt} retornou cookies inválidos.`);
+            }
             await this.redis.set(redisKey, cookies, 'EX', 3600);
             await this.redis.set(readyKey, '1', 'EX', 30);
 
@@ -241,5 +245,23 @@ export class LoginPoolService {
     const readyKey = `${redisKey}:ready`;
     await this.redis.del(redisKey, readyKey);
     return this.getCookies(trt); // Isso vai gerar um novo login
+  }
+  private async renovarSessao(trt: number, redisKey: string, readyKey: string) {
+    await this.redis.del(redisKey, readyKey);
+
+    const account = this.getConta(true);
+
+    const loginResult = await this.loginService.execute(
+      trt,
+      account.username,
+      account.password,
+    );
+
+    const newCookies = loginResult.cookies;
+
+    await this.redis.set(redisKey, newCookies, 'EX', 3600);
+    await this.redis.set(readyKey, '1', 'EX', 30);
+
+    return { cookies: newCookies, account };
   }
 }

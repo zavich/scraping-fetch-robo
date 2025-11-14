@@ -37,7 +37,9 @@ export class WebScrapingMovimentService {
       initialGrau = 3;
     }
 
-    for (let i = initialGrau; i <= 3; i++) {
+    let maxInstance = 3; // valor padrão antes da primeira chamada
+
+    for (let i = initialGrau; i <= maxInstance; i++) {
       try {
         const delayMs = this.getRandomDelay(regionTRT);
         this.logger.debug(
@@ -45,20 +47,35 @@ export class WebScrapingMovimentService {
         );
         await this.delay(delayMs);
 
-        const { process, singleInstance } = await this.scrapingService.execute(
+        const result = (await this.scrapingService.execute(
           numeroDoProcesso,
           regionTRT,
           i,
-        );
+        )) as {
+          process?: ProcessosResponse;
+          singleInstance?: boolean;
+          quantityInstances?: number;
+          mensagemErro?: string;
+        };
 
-        const mensagemErro = (process as any)?.mensagemErro;
+        const { process, singleInstance, quantityInstances } = result;
 
-        // ✅ 1) Regra especial para TST: se instância única → TST não existe
+        // Assim que descobrir o quantityInstances, ajusta o loop
+        if (quantityInstances && quantityInstances < maxInstance) {
+          this.logger.debug(
+            `🔢 Atualizando maxInstance para ${quantityInstances}`,
+          );
+          maxInstance = quantityInstances;
+        }
+
+        const mensagemErro =
+          result.mensagemErro ?? (result.process as any)?.mensagemErro;
+
+        // --- Regra TST ---
         if (origem === 'TST' && singleInstance) {
           this.logger.warn(
             `⚠️ Processo ${numeroDoProcesso} não possui instância 3 (TST).`,
           );
-
           return [
             {
               mensagemErro: 'Processo não possui instância no TST',
@@ -88,18 +105,16 @@ export class WebScrapingMovimentService {
           ];
         }
 
-        // ✅ 2) Instância única em TRT → finaliza imediatamente
+        // --- Instância única ---
         if (singleInstance) {
           this.logger.log(
-            `✅ Processo ${numeroDoProcesso} é de instância única. Finalizando buscas.`,
+            `✅ Processo ${numeroDoProcesso} é de instância única.`,
           );
-
           if (process) instances.push(process as ProcessosResponse);
-
           break;
         }
 
-        // ✅ 3) Mensagem de erro apresentada pelo tribunal
+        // --- Mensagem de erro ---
         if (mensagemErro) {
           this.logger.warn(
             `Processo ${numeroDoProcesso} retornou mensagemErro na instância ${i}: ${mensagemErro}`,
@@ -107,11 +122,11 @@ export class WebScrapingMovimentService {
 
           if (mensagemErro === 'Instância 3 não encontrada') {
             instancia3NaoEncontrada = true;
-            continue; // marca que não existe, mas continua coletando outras instâncias
+            continue;
           }
         }
 
-        // ✅ 4) Dados válidos da instância
+        // --- Dados válidos ---
         if (process) {
           instances.push(process as ProcessosResponse);
         }
@@ -121,7 +136,6 @@ export class WebScrapingMovimentService {
           `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${msg}`,
         );
 
-        // Em TRT continua tentando a próxima instância
         continue;
       }
     }

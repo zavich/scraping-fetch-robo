@@ -114,16 +114,17 @@ export class PjeLoginService {
         };
       });
 
-      console.log('wafParams:', wafParams);
-
       console.log('wafFrame URL:', wafFrame?.url() || '❌ não encontrado');
-      console.log('wafParams:', wafParams);
-      const { hostname } = new URL(loginUrl);
+      const urlObj = new URL(loginUrl);
+
+      const correctDomain = urlObj.hostname;
 
       if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
         this.logger?.warn(
           '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
         );
+        const client = await page.target().createCDPSession();
+        await client.send('Page.stopLoading');
 
         // Extrai parâmetros WAF do site
         const wafParamsExtracted = await page.evaluate(() => {
@@ -222,29 +223,47 @@ export class PjeLoginService {
               '⚠️ Não foi possível parsear voucherResponse como JSON',
             );
           }
-          const cookies = await page.cookies();
-          if (cookies.length) {
+          const wafCookies = (await page.cookies()).filter((c) =>
+            c.name.startsWith('aws-waf'),
+          );
+
+          this.logger.log(
+            '🔥 Cookies WAF encontrados antes de limpar:',
+            wafCookies,
+          );
+
+          if (wafCookies.length) {
             await page.deleteCookie(
-              ...cookies.map((c) => ({
+              ...wafCookies.map((c) => ({
                 name: c.name,
                 domain: c.domain,
-                path: c.path,
+                path: c.path || '/',
               })),
             );
+
+            this.logger.log('🧹 Cookies AWS WAF removidos.');
           }
+          await page.evaluate(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+          });
           // Setar cookie no browser
           await page.setCookie({
             name: 'aws-waf-token',
             value: voucherResponse?.token as string,
-            domain: hostname,
+            domain: correctDomain,
             path: '/',
             httpOnly: false,
             secure: true,
             expires: Math.floor(Date.now() / 1000) + 60 * 60,
           });
+          const after = await page.cookies();
+          this.logger.log(
+            '🍪 Cookies depois de setar token:',
+            after.filter((c) => c.name.includes('waf')),
+          );
 
           this.logger?.log('🍪 Cookie aws-waf-token setado no browser');
-
           // Recarrega a página para validar token
           await page.goto(loginUrl, {
             waitUntil: 'networkidle0',
@@ -268,69 +287,6 @@ export class PjeLoginService {
         }
       }
       await new Promise((resolve) => setTimeout(resolve, 800));
-
-      // const hasCaptcha = await page.$('#amzn-captcha-verify-button');
-
-      // // ✅ LOGIN VIA AXIOS QUANDO HÁ CAPTCHA
-      // if (hasCaptcha) {
-      //   this.logger.warn('CAPTCHA detectado → usando Axios');
-
-      //   try {
-      //     const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
-
-      //     const userAgent =
-      //       userAgents[Math.floor(Math.random() * userAgents.length)];
-
-      //     const response = await axios.post<LoginResponse>(
-      //       url,
-      //       { login: username, senha: password },
-      //       {
-      //         headers: {
-      //           accept: 'application/json, text/plain, */*',
-      //           'content-type': 'application/json',
-      //           origin: `https://pje.trt${regionTRT}.jus.br`,
-      //           referer: url,
-      //           'user-agent': userAgent,
-      //           'x-grau-instancia': '1',
-      //         },
-      //         withCredentials: true,
-      //       },
-      //     );
-
-      //     const api = response.data;
-
-      //     if (!api.access_token || !api.refresh_token) {
-      //       throw new ServiceUnavailableException(
-      //         'Resposta inválida do PJe (faltam tokens)',
-      //       );
-      //     }
-
-      //     // ✅ MONTA O COOKIE EXATAMENTE COMO NO SEU EXEMPLO
-      //     const cookieString =
-      //       `access_token_1g=${api.access_token}; ` +
-      //       `refresh_token_1g=${api.refresh_token}; ` +
-      //       `instancia=${api.instancia}`;
-
-      //     // ✅ SALVA NO REDIS NO FORMATO FINAL
-      //     await this.redis.set(cacheKey, cookieString, 'EX', 1800);
-
-      //     this.logger.debug(`✅ Tokens salvos no Redis: ${cacheKey}`);
-
-      //     return { cookies: cookieString };
-      //   } catch (err: unknown) {
-      //     let trace: string;
-      //     if (err instanceof Error) trace = err.stack ?? err.message;
-      //     else trace = String(err);
-      //     this.logger.error('Erro no login via Axios', trace);
-      //     throw new ServiceUnavailableException(
-      //       'Falha no login via API ao detectar CAPTCHA.',
-      //     );
-      //   }
-      // }
-
-      // ✅ LOGIN NORMAL VIA PUPPETEER
-      // this.logger.debug('Nenhum CAPTCHA → login via Puppeteer');
-
       await page.waitForSelector('input[name="usuario"]', { visible: true });
       await page.type('input[name="usuario"]', username);
       await page.type('input[name="senha"]', password);

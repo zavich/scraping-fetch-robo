@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
+import { Page, CDPSession } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
 
@@ -73,9 +74,9 @@ export class ScrapingService {
       throw lastError;
     };
 
-    const initCDP = async (pg) => {
+    const initCDP = async (pg: Page): Promise<CDPSession> => {
       this.logger.log('🔧 Inicializando CDP para monitoramento de rede...');
-      const client = await pg.target().createCDPSession();
+      const client: CDPSession = await pg.target().createCDPSession();
       await client.send('Network.enable');
 
       client.on('Network.requestWillBeSent', (event) => {
@@ -251,15 +252,16 @@ export class ScrapingService {
       });
 
       console.log('wafFrame URL:', wafFrame?.url() || '❌ não encontrado');
-      console.log('wafParams:', wafParams);
-      const { hostname } = new URL(urlBase);
+      const urlObj = new URL(urlBase);
 
-      const cookies = await page.cookies();
+      const correctDomain = urlObj.hostname;
 
       if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
         this.logger?.warn(
           '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
         );
+        const client = await page.target().createCDPSession();
+        await client.send('Page.stopLoading');
 
         // Extrai parâmetros WAF do site
         const wafParamsExtracted = await page.evaluate(() => {
@@ -358,28 +360,48 @@ export class ScrapingService {
               '⚠️ Não foi possível parsear voucherResponse como JSON',
             );
           }
-          if (cookies.length) {
+          const wafCookies = (await page.cookies()).filter((c) =>
+            c.name.startsWith('aws-waf'),
+          );
+
+          this.logger.log(
+            '🔥 Cookies WAF encontrados antes de limpar:',
+            wafCookies,
+          );
+
+          if (wafCookies.length) {
             await page.deleteCookie(
-              ...cookies.map((c) => ({
+              ...wafCookies.map((c) => ({
                 name: c.name,
                 domain: c.domain,
-                path: c.path,
+                path: c.path || '/',
               })),
             );
+
+            this.logger.log('🧹 Cookies AWS WAF removidos.');
           }
+          await page.evaluate(() => {
+            localStorage.clear();
+            sessionStorage.clear();
+          });
+
           // Setar cookie no browser
           await page.setCookie({
             name: 'aws-waf-token',
             value: voucherResponse?.token as string,
-            domain: hostname,
+            domain: correctDomain,
             path: '/',
             httpOnly: false,
             secure: true,
             expires: Math.floor(Date.now() / 1000) + 60 * 60,
           });
+          const after = await page.cookies();
+          this.logger.log(
+            '🍪 Cookies depois de setar token:',
+            after.filter((c) => c.name.includes('waf')),
+          );
 
           this.logger?.log('🍪 Cookie aws-waf-token setado no browser');
-
           // Recarrega a página para validar token
           await page.goto(urlBase, {
             waitUntil: 'networkidle0',
@@ -444,7 +466,7 @@ export class ScrapingService {
 
       let singleInstance = false;
       // let capturedResponseData: any = null;
-
+      let quantityInstances;
       if (resultado === 'painel') {
         this.logger.log('✅ Múltiplas instâncias detectadas');
 
@@ -454,7 +476,7 @@ export class ScrapingService {
         this.logger.log(
           `🔢 Total de instâncias disponíveis: ${processos.length}`,
         );
-
+        quantityInstances = processos.length;
         if (!processos.length) throw new Error('Nenhuma instância encontrada');
 
         // Se solicitou instância 3 e só existem 1 ou 2 → parar sem captcha
@@ -628,6 +650,7 @@ export class ScrapingService {
         process: !downloadIntegra ? capturedResponseData : undefined,
         integra: integraBuffer ?? undefined,
         singleInstance,
+        quantityInstances: quantityInstances ?? undefined,
       };
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
