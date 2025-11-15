@@ -7,24 +7,14 @@ export function createDynamicWorkers(): Provider[] {
   const queues = [...ALL_TRT_QUEUES, 'pje-tst'];
 
   return queues.map((queueName) => {
-    const concurrency = queueName === 'pje-trt15' ? 1 : 10;
+    const concurrency = 10;
 
-    // Configuração de rate limiter apenas para TRT 15
-    const processorOptions =
-      queueName === 'pje-trt15'
-        ? {
-            concurrency: 1,
-            // limiter: {
-            //   max: 1, // 1 job
-            //   duration: 3 * 60 * 1000, // a cada 3 minutos
-            // },
-          }
-        : {
-            concurrency,
-            lockDuration: 600000, // 10 min
-            lockRenewTime: 30000, // renova o lock a cada 30s
-            stalledInterval: 60000,
-          };
+    const processorOptions = {
+      concurrency,
+      lockDuration: 600000, // 10 min
+      lockRenewTime: 30000, // renova o lock a cada 30s
+      stalledInterval: 60000,
+    };
 
     @Processor(queueName, processorOptions)
     class WorkerForQueue extends GenericProcessoWorker {}
