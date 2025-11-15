@@ -1,16 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import * as fs from 'fs';
-import Redis from 'ioredis';
 import * as path from 'path';
 import { ScrapingService } from 'src/helpers/scraping.service';
 
 @Injectable()
 export class DocumentoService {
-  private readonly redis = new Redis({
-    host: process.env.REDIS_HOST || 'redis',
-    port: Number(process.env.REDIS_PORT) || 6379,
-  });
   private readonly logger = new Logger(DocumentoService.name);
   constructor(private readonly scrapingService: ScrapingService) {}
   async execute(

@@ -2,12 +2,11 @@ import { WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Job } from 'bullmq';
-import Redis from 'ioredis';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 
+import { ProcessosResponse } from 'src/interfaces';
 import { LoginPoolService } from '../../services/login-pool.service';
 import { ProcessDocumentsFindService } from '../../services/process-documents-find.service';
-import { ProcessosResponse } from 'src/interfaces';
 
 export class GenericDocumentosWorker extends WorkerHost {
   protected readonly logger = new Logger(GenericDocumentosWorker.name);
@@ -19,10 +18,7 @@ export class GenericDocumentosWorker extends WorkerHost {
   protected readonly processDocsService!: ProcessDocumentsFindService;
   @Inject(LoginPoolService)
   protected readonly loginPoolService!: LoginPoolService;
-  private readonly redis = new Redis({
-    host: process.env.REDIS_HOST || 'redis',
-    port: Number(process.env.REDIS_PORT) || 6379,
-  });
+
   async process(job: Job<{ numero: string; instances: ProcessosResponse[] }>) {
     const { numero, instances } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;

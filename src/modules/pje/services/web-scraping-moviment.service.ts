@@ -1,17 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Injectable, Logger } from '@nestjs/common';
-import Redis from 'ioredis';
 import { ProcessosResponse } from 'src/interfaces';
 import { ScrapingService } from '../../../helpers/scraping.service';
 
 @Injectable()
 export class WebScrapingMovimentService {
   private readonly logger = new Logger(WebScrapingMovimentService.name);
-  private readonly redis = new Redis({
-    host: process.env.REDIS_HOST || 'redis',
-    port: Number(process.env.REDIS_PORT) || 6379,
-  });
 
   constructor(private readonly scrapingService: ScrapingService) {}
 
