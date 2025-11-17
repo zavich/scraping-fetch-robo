@@ -359,25 +359,35 @@ export class ScrapingService {
               '⚠️ Não foi possível parsear voucherResponse como JSON',
             );
           }
-          const wafCookies = (await page.cookies()).filter((c) =>
-            c.name.startsWith('aws-waf'),
-          );
+          // const wafCookies = (await page.cookies()).filter((c) =>
+          //   c.name.startsWith('aws-waf'),
+          // );
 
-          this.logger.log(
-            '🔥 Cookies WAF encontrados antes de limpar:',
-            wafCookies,
-          );
+          // this.logger.log(
+          //   '🔥 Cookies WAF encontrados antes de limpar:',
+          //   wafCookies,
+          // );
 
-          if (wafCookies.length) {
-            await page.deleteCookie(
-              ...wafCookies.map((c) => ({
+          // if (wafCookies.length) {
+          //   await page.deleteCookie(
+          //     ...wafCookies.map((c) => ({
+          //       name: c.name,
+          //       domain: c.domain,
+          //       path: c.path || '/',
+          //     })),
+          //   );
+
+          //   this.logger.log('🧹 Cookies AWS WAF removidos.');
+          // }
+          const cookies = await page.cookies();
+          for (const c of cookies) {
+            if (c.name === 'aws-waf-token') {
+              await page.deleteCookie({
                 name: c.name,
                 domain: c.domain,
-                path: c.path || '/',
-              })),
-            );
-
-            this.logger.log('🧹 Cookies AWS WAF removidos.');
+                path: c.path,
+              });
+            }
           }
           await page.evaluate(() => {
             localStorage.clear();
@@ -388,7 +398,7 @@ export class ScrapingService {
           await page.setCookie({
             name: 'aws-waf-token',
             value: voucherResponse?.token as string,
-            domain: correctDomain,
+            domain: '.pje.trt3.jus.br',
             path: '/',
             httpOnly: false,
             secure: true,
