@@ -23,7 +23,7 @@ export class FetchUrlMovimentService {
   // Delay aleatório maior para TRT15 (10-15s)
   private getRandomDelay(regionTRT: number) {
     if (regionTRT === 15) {
-      return Math.floor(Math.random() * (15000 - 10000 + 1)) + 10000;
+      return Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000;
     }
     return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
   }

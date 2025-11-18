@@ -8,10 +8,6 @@ import { userAgents } from 'src/utils/user-agents';
 
 @Injectable()
 export class FetchDocumentoService {
-  // private readonly redis = new Redis({
-  //   host: process.env.REDIS_HOST || 'redis',
-  //   port: Number(process.env.REDIS_PORT) || 6379,
-  // });
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
   private readonly logger = new Logger(FetchDocumentoService.name);
   async execute(
