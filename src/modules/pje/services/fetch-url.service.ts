@@ -127,6 +127,12 @@ export class FetchUrlMovimentService {
 
           instances.push(processoResponse);
         } catch (err: any) {
+          if (i === 1) {
+            this.logger.error(
+              `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
+            );
+            break;
+          }
           this.logger.warn(
             `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
           );
@@ -232,12 +238,44 @@ export class FetchUrlMovimentService {
   }
 
   async fetchCaptcha(imagem: string): Promise<string> {
-    try {
-      const captcha = await this.captchaService.resolveCaptcha(imagem);
-      return captcha.resposta;
-    } catch (error: any) {
-      this.logger.error('Erro ao buscar captcha:', error.message);
-      return '';
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const captcha = await this.captchaService.resolveCaptcha(imagem);
+
+        if (captcha?.resposta) {
+          return captcha.resposta;
+        }
+
+        this.logger.warn(
+          `Captcha vazio ou inválido na tentativa ${attempt}/${MAX_RETRIES}`,
+        );
+      } catch (error: any) {
+        // Erro clássico do DNS do Railway
+        if (error.code === 'ENOTFOUND') {
+          this.logger.warn(
+            `⚠️ DNS falhou ao resolver 2captcha.com (ENOTFOUND) — tentativa ${attempt}/${MAX_RETRIES}`,
+          );
+        } else {
+          this.logger.error(
+            `Erro ao buscar captcha (tentativa ${attempt}/${MAX_RETRIES}):`,
+            error.message,
+          );
+          throw error;
+        }
+
+        // Última tentativa → retorna vazio
+        if (attempt === MAX_RETRIES) {
+          return '';
+        }
+
+        // Pequeno delay entre os retries
+        await new Promise((r) => setTimeout(r, 300 * attempt));
+      }
     }
+
+    // fallback final
+    return '';
   }
 }
