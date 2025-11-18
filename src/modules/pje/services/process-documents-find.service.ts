@@ -13,12 +13,14 @@ import { normalizeString } from 'src/utils/normalize-string';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
 import Redis from 'ioredis';
+import { FetchDocumentoService } from './fetch-documents-url.service';
 
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
   constructor(
     private readonly documentoService: DocumentoService,
+    private readonly fetchDocumentoService: FetchDocumentoService,
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
@@ -184,10 +186,11 @@ export class ProcessDocumentsFindService {
       );
       await this.delay(this.delayMs);
 
-      const filePath = await this.documentoService.execute(
-        processNumber,
+      const filePath = await this.fetchDocumentoService.execute(
+        ultimaInstancia?.id as number,
         regionTRT,
-        Number(ultimaInstancia?.instance),
+        ultimaInstancia?.instance as string,
+        processNumber,
       );
 
       const fileBuffer = fs.readFileSync(filePath);

@@ -21,6 +21,7 @@ import { ProcessDocumentsFindService } from './services/process-documents-find.s
 import { ScrapingService } from '../../helpers/scraping.service';
 import { WebScrapingMovimentService } from './services/web-scraping-moviment.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
+import { FetchDocumentoService } from './services/fetch-documents-url.service';
 
 @Module({
   imports: [
@@ -48,16 +49,12 @@ import { FetchUrlMovimentService } from './services/fetch-url.service';
     ConsultarProcessoQueue,
     AwsS3Service,
     PdfExtractService,
-    // DocumentosWorker,
     LoginPoolService,
     ScrapingService,
-    // ✅ queue-service ANTES dos geradores de workers
     ConsultarProcessoDocumentoQueue,
     ProcessDocumentsFindService,
-    // workers de processos dinâmicos
+    FetchDocumentoService,
     ...createDynamicWorkers(),
-
-    // workers de documentos dinâmicos
     ...createDynamicDocumentsWorkers(),
   ],
   exports: [],
