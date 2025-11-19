@@ -81,12 +81,9 @@ export class FetchUrlMovimentService {
           );
           await this.delay(delayMs);
 
-          const tokenCaptcha =
-            regionTRT === 15
-              ? undefined
-              : ((await this.redis.get(
-                  `pje:token:captcha:${numeroDoProcesso}:${i}`,
-                )) as string);
+          const tokenCaptcha = (await this.redis.get(
+            `pje:token:captcha:${numeroDoProcesso}:${i}`,
+          )) as string;
 
           const headers = this.buildHeaders(
             numeroDoProcesso,
