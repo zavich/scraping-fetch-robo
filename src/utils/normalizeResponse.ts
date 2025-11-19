@@ -53,7 +53,6 @@ export function normalizeResponse(
       },
     };
   }
-  console.log('body: ', body);
 
   const regionTRT = Number(body[0]?.numero.split('.')[3]);
   const isTrabalhista = Number(body[0]?.numero.split('.')[2]);
