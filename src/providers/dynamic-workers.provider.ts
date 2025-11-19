@@ -7,7 +7,7 @@ export function createDynamicWorkers(): Provider[] {
   const queues = [...ALL_TRT_QUEUES, 'pje-tst'];
 
   return queues.map((queueName) => {
-    const concurrency = 1;
+    const concurrency = 5;
 
     const processorOptions = {
       concurrency,
