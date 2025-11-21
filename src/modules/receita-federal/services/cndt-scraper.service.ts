@@ -36,7 +36,7 @@ export class CndtScraperService {
       await page.type('input[name="gerarCertidaoForm:cpfCnpj"]', cnpj, {
         delay: 120,
       });
-
+      await new Promise((r) => setTimeout(r, 1200));
       // Captura captcha Base64
       await page.waitForSelector('#idImgBase64', { visible: true });
 
