@@ -7,12 +7,12 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as fs from 'fs';
+import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
-import Redis from 'ioredis';
 import { FetchDocumentoService } from './fetch-documents-url.service';
 
 @Injectable()
@@ -185,13 +185,21 @@ export class ProcessDocumentsFindService {
         `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${ultimaInstancia?.instance}ª instância`,
       );
       await this.delay(this.delayMs);
-
-      const filePath = await this.fetchDocumentoService.execute(
-        ultimaInstancia?.id as number,
-        regionTRT,
-        ultimaInstancia?.instance as string,
-        processNumber,
-      );
+      let filePath: string;
+      if (regionTRT === 3) {
+        filePath = await this.documentoService.execute(
+          processNumber,
+          regionTRT,
+          Number(ultimaInstancia?.instance),
+        );
+      } else {
+        filePath = await this.fetchDocumentoService.execute(
+          ultimaInstancia?.id as number,
+          regionTRT,
+          ultimaInstancia?.instance as string,
+          processNumber,
+        );
+      }
 
       const fileBuffer = fs.readFileSync(filePath);
       buffersPorInstancia[ultimaInstancia?.id as number] = fileBuffer;
