@@ -6,6 +6,7 @@ import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import dayjs from 'dayjs';
+import { ScrapingService } from 'src/helpers/scraping.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -13,6 +14,8 @@ export class GenericProcessoWorker extends WorkerHost {
   constructor(
     @Inject(WebScrapingMovimentService)
     private readonly webScrapingMovimentService: WebScrapingMovimentService,
+    @Inject(ScrapingService)
+    private readonly scrapingService: ScrapingService,
     @Inject(FetchUrlMovimentService)
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
 
@@ -111,11 +114,14 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
-      const serviceUtilized =
-        regionTRT === 3
-          ? this.webScrapingMovimentService
-          : this.fetchUrlMovimentService;
-      const instances = await serviceUtilized.execute(numero, origem);
+      if (regionTRT === 3) {
+        await this.scrapingService.execute(numero, regionTRT, 1);
+      }
+      // return;
+      const instances = await this.fetchUrlMovimentService.execute(
+        numero,
+        origem,
+      );
       const result = instances.slice(0, 2);
 
       if (!instances || instances.length === 0) {

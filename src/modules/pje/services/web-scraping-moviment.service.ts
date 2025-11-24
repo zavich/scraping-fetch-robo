@@ -42,11 +42,7 @@ export class WebScrapingMovimentService {
         );
         await this.delay(delayMs);
 
-        const result = (await this.scrapingService.execute(
-          numeroDoProcesso,
-          regionTRT,
-          i,
-        )) as {
+        const result = {} as {
           process?: ProcessosResponse;
           singleInstance?: boolean;
           quantityInstances?: number;

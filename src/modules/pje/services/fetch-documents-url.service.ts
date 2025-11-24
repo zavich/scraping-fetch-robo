@@ -27,7 +27,8 @@ export class FetchDocumentoService {
       const tokenCaptcha = await this.redis.get(
         `pje:token:captcha:${processNumber}:${instancia}`,
       );
-
+      const redisKeyAWS = `aws-waf-token:${processNumber}`;
+      const aws = await this.redis.get(redisKeyAWS);
       const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
       const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha || ''}`;
 
@@ -38,6 +39,7 @@ export class FetchDocumentoService {
       const response = await axios.get(url, {
         headers: {
           Authorization: `Bearer ${accessToken1g}`,
+          Cookie: `${aws}`,
           'x-grau-instancia': instancia,
           referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
           'user-agent':

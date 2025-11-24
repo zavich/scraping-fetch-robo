@@ -185,21 +185,12 @@ export class ProcessDocumentsFindService {
         `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${ultimaInstancia?.instance}ª instância`,
       );
       await this.delay(this.delayMs);
-      let filePath: string;
-      if (regionTRT === 3) {
-        filePath = await this.documentoService.execute(
-          processNumber,
-          regionTRT,
-          Number(ultimaInstancia?.instance),
-        );
-      } else {
-        filePath = await this.fetchDocumentoService.execute(
-          ultimaInstancia?.id as number,
-          regionTRT,
-          ultimaInstancia?.instance as string,
-          processNumber,
-        );
-      }
+      const filePath = await this.fetchDocumentoService.execute(
+        ultimaInstancia?.id as number,
+        regionTRT,
+        ultimaInstancia?.instance as string,
+        processNumber,
+      );
 
       const fileBuffer = fs.readFileSync(filePath);
       buffersPorInstancia[ultimaInstancia?.id as number] = fileBuffer;
