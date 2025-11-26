@@ -188,14 +188,6 @@ export class FetchUrlMovimentService {
           userAgent,
         ),
       });
-
-      const tokenCaptcha = response.headers['captchatoken'] as string;
-      if (tokenCaptcha)
-        await this.redis.set(
-          `pje:token:captcha:${numeroDoProcesso}:${instance}`,
-          tokenCaptcha,
-        );
-
       return response.data;
     } catch (error: any) {
       const isTRT15 = regionTRT === 15;
