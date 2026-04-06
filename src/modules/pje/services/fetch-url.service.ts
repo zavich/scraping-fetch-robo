@@ -36,9 +36,18 @@ export class FetchUrlMovimentService {
   ) {
     const ua =
       userAgent ||
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
+      userAgents[Math.floor(Math.random() * userAgents.length)];
     const redisKey = `aws-waf-token:${numeroDoProcesso}`;
     const aws = await this.redis.get(redisKey);
+
+    const secChUaOptions = [
+      '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+      '"Chromium";v="120", "Not-A.Brand";v="99"',
+      '"Google Chrome";v="110", "Chromium";v="110"',
+    ];
+
+    const secChUaPlatformOptions = ['"macOS"', '"Windows"', '"Linux"'];
+
     return {
       accept: 'application/json, text/plain, */*',
       'content-type': 'application/json',
@@ -48,9 +57,12 @@ export class FetchUrlMovimentService {
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent': ua,
       'sec-ch-ua':
-        '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+        secChUaOptions[Math.floor(Math.random() * secChUaOptions.length)],
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"macOS"',
+      'sec-ch-ua-platform':
+        secChUaPlatformOptions[
+          Math.floor(Math.random() * secChUaPlatformOptions.length)
+        ],
     };
   }
 
