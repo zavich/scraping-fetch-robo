@@ -188,6 +188,17 @@ export class FetchUrlMovimentService {
           userAgent,
         ),
       });
+      const captchaToken = response.headers['captchatoken'] as string;
+      this.logger.debug(
+        `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
+      );
+      const catchaTokenRedisKey = `tokencaptcha:${numeroDoProcesso}:${instance}`;
+      await this.redis.set(
+        catchaTokenRedisKey,
+        captchaToken,
+        'EX',
+        60 * 30, // expira em 30 minutos
+      );
       return response.data;
     } catch (error: any) {
       const isTRT15 = regionTRT === 15;
