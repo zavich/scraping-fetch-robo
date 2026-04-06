@@ -35,24 +35,22 @@ export class FetchUrlMovimentService {
     userAgent?: string,
   ) {
     const ua =
-      userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
+      userAgent ||
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
     const redisKey = `aws-waf-token:${numeroDoProcesso}`;
     const aws = await this.redis.get(redisKey);
     return {
       accept: 'application/json, text/plain, */*',
-      'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       'content-type': 'application/json',
       'x-grau-instancia': instance,
       cookie: `${aws}`,
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent': ua,
-      'sec-fetch-site': 'same-origin',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-dest': 'empty',
-      'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
+      'sec-ch-ua':
+        '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
+      'sec-ch-ua-platform': '"macOS"',
     };
   }
 
