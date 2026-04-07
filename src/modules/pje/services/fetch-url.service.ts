@@ -76,7 +76,7 @@ export class FetchUrlMovimentService {
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
 
-          const headers = await this.buildHeaders(
+          const headers = this.buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
@@ -169,7 +169,7 @@ export class FetchUrlMovimentService {
           ? userAgents[Math.floor(Math.random() * userAgents.length)]
           : undefined;
       const response = await axios.get<ProcessosResponse>(url, {
-        headers: await this.buildHeaders(
+        headers: this.buildHeaders(
           numeroDoProcesso,
           instance,
           regionTRT,
