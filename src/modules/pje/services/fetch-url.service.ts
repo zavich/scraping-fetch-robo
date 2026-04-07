@@ -33,8 +33,6 @@ export class FetchUrlMovimentService {
   ) {
     const ua =
       userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
-    const redisKey = `aws-waf-token:${numeroDoProcesso}`;
-    const aws = await this.redis.get(redisKey);
     return {
       accept: 'application/json, text/plain, */*',
       'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
