@@ -7,11 +7,15 @@ import { WebScrapingMovimentService } from '../../services/web-scraping-moviment
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import dayjs from 'dayjs';
 import { ScrapingService } from 'src/helpers/scraping.service';
+import { BrowserManager } from 'src/utils/browser.manager';
+import Redis from 'ioredis';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
   private readonly documentosQueues: Record<string, Queue> = {};
   constructor(
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+
     @Inject(WebScrapingMovimentService)
     private readonly webScrapingMovimentService: WebScrapingMovimentService,
     @Inject(ScrapingService)
@@ -117,6 +121,7 @@ export class GenericProcessoWorker extends WorkerHost {
       if (regionTRT === 3) {
         await this.scrapingService.execute(numero, regionTRT, 1);
       }
+      await this.getPjeCookies(regionTRT);
       // return;
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
@@ -266,5 +271,29 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
       }
     }
+  }
+  async getPjeCookies(regionTRT: number) {
+    const { context, page } = await BrowserManager.createPage();
+
+    const baseUrl = `https://pje.trt${regionTRT}.jus.br`;
+
+    // let cookieHeader = '';
+    let headers = {};
+    page.on('request', (request) => {
+      const url = request.url();
+
+      if (url.includes('/pje-consulta-api/api/propriedades')) {
+        headers = request.headers();
+      }
+    });
+
+    await page.goto(`${baseUrl}/consultaprocessual/`, {
+      waitUntil: 'networkidle2',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 5000)); // espera 5 segundos para garantir que o cookie seja capturado
+    await this.redis.set('headers', JSON.stringify(headers), 'EX', 60 * 5); // expira em 5 minutos
+
+    await context.close();
   }
 }
