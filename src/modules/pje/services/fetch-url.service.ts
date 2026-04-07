@@ -39,17 +39,15 @@ export class FetchUrlMovimentService {
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent':
-        parsedHeaders['user-agent'] ||
         userAgent ||
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-      'sec-fetch-site': parsedHeaders['sec-fetch-site'] || 'same-origin',
-      'sec-fetch-mode': parsedHeaders['sec-fetch-mode'] || 'cors',
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
       'sec-fetch-dest': 'empty',
       'sec-ch-ua':
-        parsedHeaders['sec-ch-ua'] ||
         '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': parsedHeaders['sec-ch-ua-platform'] || '"macOS"',
+      'sec-ch-ua-platform': '"macOS"',
     };
   }
 
