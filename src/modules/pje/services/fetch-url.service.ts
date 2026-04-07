@@ -34,7 +34,12 @@ export class FetchUrlMovimentService {
     const redisKey = `aws-waf-token:${numeroDoProcesso}`;
     const aws =
       (await this.redis.get(redisKey)) ||
-      'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE; aws-waf-token=f3047ae1-0ffb-4401-9ce8-58baa0ddad6f:EAoAjWRzM25ZAAAA:8SZGMzM84zRUNgX5RmW/cv9CrrZFGiTBDP8nOjCGT7csBoOw82mMrNel5LuGFUtbwUq5iFgNsFDpCdigTNsLkZwNVF+Gqtv6yWPrHb9DJBsGFT0iegUMJ2EDn94FWvTOz7wO5tjNDh9iLF5e7HP7+AnO/JzHxBsCnTRexnE4vMUCDXYE/VDZTdFVoPG/r32txYE=';
+      'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE';
+    const headers = await this.redis.get('headers');
+    if (!headers) {
+      throw new Error('Headers not found in Redis');
+    }
+    const parsedHeaders = JSON.parse(headers) as Record<string, string>;
 
     return {
       accept: 'application/json, text/plain, */*',
@@ -44,15 +49,17 @@ export class FetchUrlMovimentService {
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent':
+        parsedHeaders['user-agent'] ||
         userAgent ||
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-      'sec-fetch-site': 'same-origin',
-      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': parsedHeaders['sec-fetch-site'] || 'same-origin',
+      'sec-fetch-mode': parsedHeaders['sec-fetch-mode'] || 'cors',
       'sec-fetch-dest': 'empty',
       'sec-ch-ua':
+        parsedHeaders['sec-ch-ua'] ||
         '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"macOS"',
+      'sec-ch-ua-platform': parsedHeaders['sec-ch-ua-platform'] || '"macOS"',
     };
   }
 
@@ -81,24 +88,15 @@ export class FetchUrlMovimentService {
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
 
-          // const headers = this.buildHeaders(
-          //   numeroDoProcesso,
-          //   i.toString(),
-          //   regionTRT,
-          // );
-          const headers = await this.redis.get('headers');
-          if (!headers) {
-            throw new Error('Headers not found in Redis');
-          }
-          const parsedHeaders = JSON.parse(headers) as Record<string, string>;
-          const headersParams = {
-            ...parsedHeaders,
-            'x-grau-instancia': i.toString(),
-          };
+          const headers = this.buildHeaders(
+            numeroDoProcesso,
+            i.toString(),
+            regionTRT,
+          );
 
           const { data } = await axios.get<DetalheProcesso[]>(
             `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            { headers: headersParams },
+            { headers: await headers },
           );
 
           const detalheProcesso = data[0];
@@ -137,9 +135,8 @@ export class FetchUrlMovimentService {
           instances.push(processoResponse);
         } catch (err: any) {
           this.logger.error(
-            `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.data?.message || err.message}`,
+            `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.data.message}`,
           );
-
           if (i === 1) {
             this.logger.error(
               `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
@@ -187,17 +184,14 @@ export class FetchUrlMovimentService {
         regionTRT === 15
           ? userAgents[Math.floor(Math.random() * userAgents.length)]
           : undefined;
-      const headers = await this.redis.get('headers');
-      if (!headers) {
-        throw new Error('Headers not found in Redis');
-      }
-      const parsedHeaders = JSON.parse(headers) as Record<string, string>;
-      const headersParams = {
-        ...parsedHeaders,
-        'x-grau-instancia': instance,
-      };
+
       const response = await axios.get<ProcessosResponse>(url, {
-        headers: headersParams,
+        headers: await this.buildHeaders(
+          numeroDoProcesso,
+          instance,
+          regionTRT,
+          userAgent,
+        ),
       });
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
