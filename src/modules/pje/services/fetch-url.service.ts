@@ -34,20 +34,8 @@ export class FetchUrlMovimentService {
     regionTRT: number,
     userAgent?: string,
   ) {
-    const ua =
-      userAgent ||
-      userAgents[Math.floor(Math.random() * userAgents.length)];
     const redisKey = `aws-waf-token:${numeroDoProcesso}`;
     const aws = await this.redis.get(redisKey);
-
-    const secChUaOptions = [
-      '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
-      '"Chromium";v="120", "Not-A.Brand";v="99"',
-      '"Google Chrome";v="110", "Chromium";v="110"',
-    ];
-
-    const secChUaPlatformOptions = ['"macOS"', '"Windows"', '"Linux"'];
-
     return {
       accept: 'application/json, text/plain, */*',
       'content-type': 'application/json',
@@ -55,14 +43,16 @@ export class FetchUrlMovimentService {
       cookie: `${aws}`,
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
-      'user-agent': ua,
+      'user-agent':
+        userAgent ||
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
       'sec-ch-ua':
-        secChUaOptions[Math.floor(Math.random() * secChUaOptions.length)],
+        '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform':
-        secChUaPlatformOptions[
-          Math.floor(Math.random() * secChUaPlatformOptions.length)
-        ],
+      'sec-ch-ua-platform': '"macOS"',
     };
   }
 
@@ -198,6 +188,17 @@ export class FetchUrlMovimentService {
           userAgent,
         ),
       });
+      const captchaToken = response.headers['captchatoken'] as string;
+      this.logger.debug(
+        `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
+      );
+      const catchaTokenRedisKey = `tokencaptcha:${numeroDoProcesso}:${instance}`;
+      await this.redis.set(
+        catchaTokenRedisKey,
+        captchaToken,
+        'EX',
+        60 * 60 * 24, // expira em 24 horas
+      );
       return response.data;
     } catch (error: any) {
       const isTRT15 = regionTRT === 15;

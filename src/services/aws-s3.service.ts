@@ -32,4 +32,23 @@ export class AwsS3Service {
 
     return `https://${this.bucket}.s3.${process.env.AWS_S3_REGION}.amazonaws.com/${key}`;
   }
+
+  async uploadS3Object(
+    bucket: string,
+    key: string,
+    body: Buffer | Uint8Array | string,
+    contentType?: string,
+  ): Promise<void> {
+    const s3Client = this.s3;
+
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType || 'application/octet-stream',
+        ServerSideEncryption: 'AES256',
+      }),
+    );
+  }
 }
