@@ -7,6 +7,9 @@ import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
 import { userAgents } from 'src/utils/user-agents';
 
+// Configura um timeout global para o axios
+axios.defaults.timeout = 10000; // 10 segundos
+
 @Injectable()
 export class FetchUrlMovimentService {
   private readonly logger = new Logger(FetchUrlMovimentService.name);
@@ -38,6 +41,7 @@ export class FetchUrlMovimentService {
       'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       'content-type': 'application/json',
       'x-grau-instancia': instance,
+      priority: 'u=1, i', // Adicionado cabeçalho priority
       cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
