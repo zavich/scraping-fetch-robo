@@ -33,8 +33,6 @@ export class FetchUrlMovimentService {
   ) {
     const ua =
       userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
-    const redisKey = `aws-waf-token:${numeroDoProcesso}`;
-    const aws = await this.redis.get(redisKey);
     return {
       accept: 'application/json, text/plain, */*',
       'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
@@ -78,7 +76,7 @@ export class FetchUrlMovimentService {
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
 
-          const headers = await this.buildHeaders(
+          const headers = this.buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
@@ -171,7 +169,7 @@ export class FetchUrlMovimentService {
           ? userAgents[Math.floor(Math.random() * userAgents.length)]
           : undefined;
       const response = await axios.get<ProcessosResponse>(url, {
-        headers: await this.buildHeaders(
+        headers: this.buildHeaders(
           numeroDoProcesso,
           instance,
           regionTRT,
