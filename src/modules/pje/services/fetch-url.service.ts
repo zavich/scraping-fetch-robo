@@ -81,15 +81,24 @@ export class FetchUrlMovimentService {
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
 
-          const headers = this.buildHeaders(
-            numeroDoProcesso,
-            i.toString(),
-            regionTRT,
-          );
+          // const headers = this.buildHeaders(
+          //   numeroDoProcesso,
+          //   i.toString(),
+          //   regionTRT,
+          // );
+          const headers = await this.redis.get('headers');
+          if (!headers) {
+            throw new Error('Headers not found in Redis');
+          }
+          const parsedHeaders = JSON.parse(headers) as Record<string, string>;
+          const headersParams = {
+            ...parsedHeaders,
+            'x-grau-instancia': i.toString(),
+          };
 
           const { data } = await axios.get<DetalheProcesso[]>(
             `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            { headers: await headers },
+            { headers: headersParams },
           );
 
           const detalheProcesso = data[0];
@@ -174,14 +183,17 @@ export class FetchUrlMovimentService {
         regionTRT === 15
           ? userAgents[Math.floor(Math.random() * userAgents.length)]
           : undefined;
-
+      const headers = await this.redis.get('headers');
+      if (!headers) {
+        throw new Error('Headers not found in Redis');
+      }
+      const parsedHeaders = JSON.parse(headers) as Record<string, string>;
+      const headersParams = {
+        ...parsedHeaders,
+        'x-grau-instancia': instance,
+      };
       const response = await axios.get<ProcessosResponse>(url, {
-        headers: await this.buildHeaders(
-          numeroDoProcesso,
-          instance,
-          regionTRT,
-          userAgent,
-        ),
+        headers: headersParams,
       });
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
