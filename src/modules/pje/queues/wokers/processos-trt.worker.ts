@@ -257,7 +257,7 @@ export class GenericProcessoWorker extends WorkerHost {
       }
       console.log('RESPONSE:', response);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
-      await axios.post(webhookUrl, response);
+      // await axios.post(webhookUrl, response);
     } catch (error) {
       this.logger.error(error);
 
@@ -275,7 +275,7 @@ export class GenericProcessoWorker extends WorkerHost {
   async getPjeCookies(regionTRT: number) {
     const { context, page } = await BrowserManager.createPage();
 
-    const baseUrl = `https://pje.trt${regionTRT}.jus.br`;
+    const baseUrl = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`;
 
     // let cookieHeader = '';
     let headers = {};
