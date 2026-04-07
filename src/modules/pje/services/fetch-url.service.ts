@@ -31,35 +31,23 @@ export class FetchUrlMovimentService {
     regionTRT: number,
     userAgent?: string,
   ) {
-    const redisKey = `aws-waf-token:${numeroDoProcesso}`;
-    const aws =
-      (await this.redis.get(redisKey)) ||
-      'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE';
-    const headers = await this.redis.get('headers');
-    if (!headers) {
-      throw new Error('Headers not found in Redis');
-    }
-    const parsedHeaders = JSON.parse(headers) as Record<string, string>;
-
     return {
       accept: 'application/json, text/plain, */*',
       'content-type': 'application/json',
       'x-grau-instancia': instance,
-      cookie: `${aws}`,
+      cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent':
-        parsedHeaders['user-agent'] ||
         userAgent ||
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-      'sec-fetch-site': parsedHeaders['sec-fetch-site'] || 'same-origin',
-      'sec-fetch-mode': parsedHeaders['sec-fetch-mode'] || 'cors',
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
       'sec-fetch-dest': 'empty',
       'sec-ch-ua':
-        parsedHeaders['sec-ch-ua'] ||
         '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
       'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': parsedHeaders['sec-ch-ua-platform'] || '"macOS"',
+      'sec-ch-ua-platform': '"macOS"',
     };
   }
 
