@@ -5,7 +5,8 @@ import axios from 'axios';
 import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
-import { userAgents } from 'src/utils/user-agents';
+import { scraperRequest } from 'src/utils/fetch-scraper';
+import { buildHeaders } from 'src/utils/user-agents';
 
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
@@ -26,33 +27,6 @@ export class FetchUrlMovimentService {
   // Delay aleatório maior para TRT15 (10-15s)
   private getRandomDelay() {
     return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
-  }
-
-  private buildHeaders(
-    numeroDoProcesso: string,
-    instance: string,
-    regionTRT: number,
-    userAgent?: string,
-  ) {
-    const ua =
-      userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
-    return {
-      accept: 'application/json, text/plain, */*',
-      'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'content-type': 'application/json',
-      'x-grau-instancia': instance,
-      priority: 'u=1, i', // Adicionado cabeçalho priority
-      cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
-      origin: `https://pje.trt${regionTRT}.jus.br`,
-      referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
-      'user-agent': ua,
-      'sec-fetch-site': 'same-origin',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-dest': 'empty',
-      'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-    };
   }
 
   async execute(
@@ -80,16 +54,21 @@ export class FetchUrlMovimentService {
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
 
-          const headers = this.buildHeaders(
+          const headers = buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
           );
-          const { data } = await axios.get<DetalheProcesso[]>(
-            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            { headers },
+          // const { data } = await axios.get<DetalheProcesso[]>(
+          //   `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+          //   { headers },
+          // );
+          const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
+          const { data } = await scraperRequest<DetalheProcesso[]>(
+            url,
+            `${numeroDoProcesso}`, // sticky session
+            headers,
           );
-
           const detalheProcesso = data[0];
           if (!detalheProcesso) continue;
 
@@ -167,19 +146,15 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
-      // TROCAR USER-AGENT a cada tentativa TRT15
-      const userAgent =
-        regionTRT === 15
-          ? userAgents[Math.floor(Math.random() * userAgents.length)]
-          : undefined;
-      const response = await axios.get<ProcessosResponse>(url, {
-        headers: this.buildHeaders(
-          numeroDoProcesso,
-          instance,
-          regionTRT,
-          userAgent,
-        ),
-      });
+      const headers = buildHeaders(numeroDoProcesso, instance, regionTRT);
+      // const response = await axios.get<ProcessosResponse>(url, {
+      //   headers: buildHeaders(numeroDoProcesso, instance, regionTRT),
+      // });
+      const response = await scraperRequest<ProcessosResponse>(
+        url,
+        `${numeroDoProcesso}`, // sticky session
+        headers,
+      );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
