@@ -25,7 +25,7 @@ export class FetchUrlMovimentService {
     return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
   }
 
-  private async buildHeaders(
+  private buildHeaders(
     numeroDoProcesso: string,
     instance: string,
     regionTRT: number,
@@ -40,7 +40,7 @@ export class FetchUrlMovimentService {
       'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       'content-type': 'application/json',
       'x-grau-instancia': instance,
-      cookie: `${aws}`,
+      cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent': ua,
