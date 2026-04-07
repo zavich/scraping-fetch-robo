@@ -136,6 +136,10 @@ export class FetchUrlMovimentService {
 
           instances.push(processoResponse);
         } catch (err: any) {
+          this.logger.error(
+            `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.data?.message || err.message}`,
+          );
+
           if (i === 1) {
             this.logger.error(
               `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
