@@ -32,7 +32,10 @@ export class FetchUrlMovimentService {
     userAgent?: string,
   ) {
     const redisKey = `aws-waf-token:${numeroDoProcesso}`;
-    const aws = await this.redis.get(redisKey);
+    const aws =
+      (await this.redis.get(redisKey)) ||
+      'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE; aws-waf-token=f3047ae1-0ffb-4401-9ce8-58baa0ddad6f:EAoAjWRzM25ZAAAA:8SZGMzM84zRUNgX5RmW/cv9CrrZFGiTBDP8nOjCGT7csBoOw82mMrNel5LuGFUtbwUq5iFgNsFDpCdigTNsLkZwNVF+Gqtv6yWPrHb9DJBsGFT0iegUMJ2EDn94FWvTOz7wO5tjNDh9iLF5e7HP7+AnO/JzHxBsCnTRexnE4vMUCDXYE/VDZTdFVoPG/r32txYE=';
+
     return {
       accept: 'application/json, text/plain, */*',
       'content-type': 'application/json',
