@@ -21,10 +21,7 @@ export class FetchUrlMovimentService {
   }
 
   // Delay aleatório maior para TRT15 (10-15s)
-  private getRandomDelay(regionTRT: number) {
-    if (regionTRT === 15) {
-      return Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000;
-    }
+  private getRandomDelay() {
     return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
   }
 
@@ -77,12 +74,6 @@ export class FetchUrlMovimentService {
       const initialGrau = origem === 'TST' ? 3 : 1;
       for (let i = initialGrau; i <= grauMax; i++) {
         try {
-          const delayMs = this.getRandomDelay(regionTRT);
-          this.logger.debug(
-            `⏱ Delay de ${delayMs}ms antes de buscar a ${i}ª instância`,
-          );
-          await this.delay(delayMs);
-
           const tokenCaptcha = (await this.redis.get(
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
@@ -100,6 +91,13 @@ export class FetchUrlMovimentService {
 
           const detalheProcesso = data[0];
           if (!detalheProcesso) continue;
+
+          // Delay aleatório para evitar bloqueios
+          const delayMs = this.getRandomDelay();
+          this.logger.debug(
+            `⏱ Delay de ${delayMs}ms antes de buscar a ${i}ª instância`,
+          );
+          await this.delay(delayMs);
 
           let processoResponse = await this.fetchProcess(
             numeroDoProcesso,
@@ -142,12 +140,6 @@ export class FetchUrlMovimentService {
       return instances;
     } catch (error: any) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
-      if ([401, 403].includes(error?.response?.status)) {
-        this.logger.warn(
-          `Sessão expirada no TRT-${regionTRT}, refazendo login...`,
-        );
-        return this.execute(numeroDoProcesso, origem); // reprocessa com novo login
-      }
       return [];
     }
   }

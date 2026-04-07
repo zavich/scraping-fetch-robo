@@ -11,6 +11,10 @@ export function createDynamicDocumentsWorkers(): Provider[] {
     const processorOptions = {
       concurrency: queueName === 'pje-documentos-trt3' ? 1 : 2,
       lockDuration: 120_000,
+      limiter: {
+        max: 1,
+        duration: 5000,
+      },
     };
 
     @Processor(queueName, processorOptions)

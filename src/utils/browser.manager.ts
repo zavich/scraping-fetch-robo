@@ -54,8 +54,12 @@ export class BrowserManager {
 
     await page.setRequestInterception(true);
     page.on('request', (req) => {
-      if (req.resourceType() === 'image') req.abort();
-      else req.continue();
+      const blocked = ['image', 'font', 'media', 'stylesheet'];
+      if (blocked.includes(req.resourceType())) {
+        req.abort().catch(() => {});
+      } else {
+        req.continue().catch(() => {});
+      }
     });
 
     return { context, page };
