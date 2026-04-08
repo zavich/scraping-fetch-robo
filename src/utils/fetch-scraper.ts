@@ -19,7 +19,7 @@ export async function scraperRequest<T>(
       'Content-Type': 'application/json',
       ...headers,
     },
-    timeout: 60000, // Aumente para 60 segundos
+    timeout: 180000, // Aumente para 180 segundos para casos mais complexos
   };
 
   // 👇 só adiciona body se for POST/PUT/PATCH
@@ -34,13 +34,15 @@ export async function scraperRequest<T>(
     api_key: SCRAPER_API_KEY,
     url,
     country_code: 'br',
-    session_number: session,
     keep_headers: true,
     render: false,
   };
 
   if (configParams?.ultra) {
     params.ultra_premium = true;
+  }
+  if (session) {
+    params.session_number = session;
   }
   try {
     if (useScraper) {
