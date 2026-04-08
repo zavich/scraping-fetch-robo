@@ -8,6 +8,7 @@ import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
 import Redis from 'ioredis';
+import { TRTINVALIDO } from 'src/utils/trt-validate';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -112,7 +113,17 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
-
+      if (TRTINVALIDO.includes(regionTRT)) {
+        this.logger.warn(`⚠️ TRT ${regionTRT} não é válido para consulta`);
+        const response = normalizeResponse(
+          numero,
+          [],
+          `TRT ${regionTRT} não é válido para consulta`,
+          true,
+        );
+        await axios.post(webhookUrl, response);
+        return;
+      }
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
