@@ -75,7 +75,8 @@ export class FetchDocumentoService {
       // 🔹 headers
       const headers = {
         Authorization: `Bearer ${accessToken1g}`,
-        Cookie: `${cookies}; ${awsWafToken}`, // 👈 importante juntar tudo
+        'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        Cookie: `${cookies}; ${awsWafToken || ''}`, // 👈 importante juntar tudo
         'x-grau-instancia': instancia,
         referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
         'user-agent':
