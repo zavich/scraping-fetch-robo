@@ -14,6 +14,9 @@ import { Response } from 'express';
 import { ScrapingService } from '../../helpers/scraping.service';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
+import { buildHeaders } from 'src/utils/user-agents';
+import { scraperRequest } from 'src/utils/fetch-scraper';
+import { LoginResponse } from './services/login.service';
 @Controller('processos')
 export class PjeController {
   constructor(
@@ -100,7 +103,15 @@ export class PjeController {
   }
   @Post('/auth/login')
   async loginPje(): Promise<any> {
-    return await this.loginPoolService.getCookies(1);
+    const url = `https://pje.trt2.jus.br/pje-consulta-api/api/auth`;
+    const headers = buildHeaders('login', '1', 2, url);
+    const username = process.env.PJE_USER_FIRST || 'rafael.nicacio';
+    const password = process.env.PJE_PASS_FIRST || 'Rafael123!';
+    const response = await scraperRequest(url, `username`, headers, 'POST', {
+      login: username,
+      senha: password,
+    });
+    return response.data as LoginResponse;
   }
   @Post('/teste/trt')
   async teste(): Promise<any> {

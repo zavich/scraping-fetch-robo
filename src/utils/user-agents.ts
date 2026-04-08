@@ -34,6 +34,7 @@ export function buildHeaders(
   numeroDoProcesso: string,
   instance: string,
   regionTRT: number,
+  referer?: string,
 ) {
   const ua = userAgents[Math.floor(Math.random() * userAgents.length)];
   return {
@@ -44,7 +45,9 @@ export function buildHeaders(
     priority: 'u=1, i', // Adicionado cabeçalho priority
     cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
     origin: `https://pje.trt${regionTRT}.jus.br`,
-    referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
+    referer:
+      referer ||
+      `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
     'user-agent': ua,
     'sec-fetch-site': 'same-origin',
     'sec-fetch-mode': 'cors',

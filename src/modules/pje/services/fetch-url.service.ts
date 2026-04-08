@@ -152,8 +152,12 @@ export class FetchUrlMovimentService {
       // });
       const response = await scraperRequest<ProcessosResponse>(
         url,
-        `${numeroDoProcesso}`, // sticky session
+        `${numeroDoProcesso}`,
         headers,
+        'GET',
+        undefined,
+        true,
+        { ultra: true },
       );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
