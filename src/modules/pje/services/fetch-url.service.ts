@@ -20,15 +20,6 @@ export class FetchUrlMovimentService {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  private async delay(ms: number) {
-    return new Promise((res) => setTimeout(res, ms));
-  }
-
-  // Delay aleatório maior para TRT15 (10-15s)
-  private getRandomDelay() {
-    return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
-  }
-
   async execute(
     numeroDoProcesso: string,
     origem?: string,
@@ -71,13 +62,6 @@ export class FetchUrlMovimentService {
           );
           const detalheProcesso = data[0];
           if (!detalheProcesso) continue;
-
-          // Delay aleatório para evitar bloqueios
-          const delayMs = this.getRandomDelay();
-          this.logger.debug(
-            `⏱ Delay de ${delayMs}ms antes de buscar a ${i}ª instância`,
-          );
-          await this.delay(delayMs);
 
           let processoResponse = await this.fetchProcess(
             numeroDoProcesso,
@@ -180,17 +164,6 @@ export class FetchUrlMovimentService {
         retryStatus.includes(error.response?.status) &&
         attempt < maxAttempts
       ) {
-        // Delay maior e randomizado para TRT15
-        const baseDelay = isTRT15 ? 10000 : 1000;
-        const delay =
-          Math.pow(2, attempt) * baseDelay + Math.floor(Math.random() * 3000);
-        this.logger.warn(
-          `Rate limit ou bloqueio detectado (tentativa ${attempt}) ${
-            isTRT15 ? '[TRT15]' : ''
-          }, aguardando ${Math.round(delay / 1000)}s antes de tentar novamente...`,
-        );
-        await this.delay(delay);
-
         // REFRESH token CAPTCHA a cada tentativa TRT15
         const newTokenCaptcha =
           isTRT15 && attempt > 1 ? undefined : tockenCaptcha;
