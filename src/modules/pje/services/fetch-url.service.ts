@@ -25,7 +25,7 @@ export class FetchUrlMovimentService {
     return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
   }
 
-  private buildHeaders(
+  private async buildHeaders(
     numeroDoProcesso: string,
     instance: string,
     regionTRT: number,
@@ -33,12 +33,13 @@ export class FetchUrlMovimentService {
   ) {
     const ua =
       userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
+    const aws = await this.redis.get(`aws-waf-token:${numeroDoProcesso}`);
     return {
       accept: 'application/json, text/plain, */*',
       'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       'content-type': 'application/json',
       'x-grau-instancia': instance,
-      cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
+      cookie: `ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE; ${aws}`,
       origin: `https://pje.trt${regionTRT}.jus.br`,
       referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
       'user-agent': ua,
@@ -76,7 +77,7 @@ export class FetchUrlMovimentService {
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
 
-          const headers = this.buildHeaders(
+          const headers = await this.buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
@@ -169,7 +170,7 @@ export class FetchUrlMovimentService {
           ? userAgents[Math.floor(Math.random() * userAgents.length)]
           : undefined;
       const response = await axios.get<ProcessosResponse>(url, {
-        headers: this.buildHeaders(
+        headers: await this.buildHeaders(
           numeroDoProcesso,
           instance,
           regionTRT,

@@ -90,7 +90,7 @@ export class FetchDocumentoService {
           accept: 'application/json, text/plain, */*',
           'content-type': 'application/json',
         },
-        timeout: 300000,
+        timeout: 180000, // Aumente para 180 segundos para casos mais complexos
         responseType: 'arraybuffer',
         withCredentials: true,
       });
