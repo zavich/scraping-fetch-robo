@@ -45,7 +45,7 @@ export class PjeLoginService {
     // const { context, page } = await BrowserManager.createPage();
 
     try {
-      const url = `https://pje.trt2.jus.br/pje-consulta-api/api/auth`;
+      const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
       const headers = buildHeaders('login', '1', 2, url);
       const response = await scraperRequest(
         url,
