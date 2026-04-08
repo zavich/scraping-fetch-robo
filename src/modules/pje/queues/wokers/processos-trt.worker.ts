@@ -116,8 +116,16 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
+      const [awsWafToken, ttl] = await Promise.all([
+        this.redis.get('aws-waf-token'),
+        this.redis.ttl('aws-waf-token'),
+      ]);
 
-      if (regionTRT === 3) {
+      console.log('TTL:', ttl);
+      console.log('Token:', awsWafToken);
+      const isValid = awsWafToken && ttl > 10;
+
+      if (regionTRT === 3 && (!isValid || !awsWafToken)) {
         await this.scrapingService.execute(numero, regionTRT, 1);
       }
       // return;

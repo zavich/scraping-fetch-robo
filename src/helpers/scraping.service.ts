@@ -418,10 +418,10 @@ export class ScrapingService {
         //
         const originalCookies = await page.cookies();
         await this.redis.set(
-          `aws-waf-token:${processNumber}`,
+          `aws-waf-token`,
           originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
-          3600,
+          180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes
         );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({ waitUntil: 'networkidle0' });
