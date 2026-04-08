@@ -19,7 +19,7 @@ export async function scraperRequest<T>(
       'Content-Type': 'application/json',
       ...headers,
     },
-    timeout: 20000,
+    timeout: 60000, // Aumente para 60 segundos
   };
 
   // 👇 só adiciona body se for POST/PUT/PATCH
