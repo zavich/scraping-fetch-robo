@@ -304,9 +304,11 @@ export class ProcessDocumentsFindService {
     }
     const captchaKey = `pje:token:captcha:${processNumber}`;
     const keys = await this.redis.keys(`${captchaKey}*`);
-
+    const captchaTokenRedisKey = `tokencaptcha:${processNumber}*`;
+    const captchaTokenKeys = await this.redis.keys(captchaTokenRedisKey);
     if (keys.length) {
       const deleted = await this.redis.del(...keys);
+      await this.redis.del(...captchaTokenKeys);
       this.logger.debug(
         `🧹 ${deleted} tokenCaptcha(s) removidos para ${processNumber}`,
       );
