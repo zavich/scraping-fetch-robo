@@ -44,11 +44,13 @@ export class FetchUrlMovimentService {
           const tokenCaptcha = (await this.redis.get(
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
-
+          const redisKey = `aws-waf-token:${numeroDoProcesso}`;
+          const awsWafToken = await this.redis.get(redisKey);
           const headers = buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
+            awsWafToken as string,
           );
           // const { data } = await axios.get<DetalheProcesso[]>(
           //   `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
@@ -130,7 +132,14 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
-      const headers = buildHeaders(numeroDoProcesso, instance, regionTRT);
+      const redisKey = `aws-waf-token:${numeroDoProcesso}`;
+      const awsWafToken = await this.redis.get(redisKey);
+      const headers = buildHeaders(
+        numeroDoProcesso,
+        instance,
+        regionTRT,
+        awsWafToken as string,
+      );
       // const response = await axios.get<ProcessosResponse>(url, {
       //   headers: buildHeaders(numeroDoProcesso, instance, regionTRT),
       // });

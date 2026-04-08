@@ -34,16 +34,18 @@ export function buildHeaders(
   numeroDoProcesso: string,
   instance: string,
   regionTRT: number,
+  awswaftoken?: string,
   referer?: string,
 ) {
   const ua = userAgents[Math.floor(Math.random() * userAgents.length)];
+
   return {
     accept: 'application/json, text/plain, */*',
     'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
     'content-type': 'application/json',
     'x-grau-instancia': instance,
     priority: 'u=1, i', // Adicionado cabeçalho priority
-    cookie: 'ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE',
+    cookie: `${awswaftoken}`,
     origin: `https://pje.trt${regionTRT}.jus.br`,
     referer:
       referer ||

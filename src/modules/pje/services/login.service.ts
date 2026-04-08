@@ -33,6 +33,7 @@ export class PjeLoginService {
     regionTRT: number,
     username: string,
     password: string,
+    numero: string,
   ): Promise<{ cookies: string }> {
     const cacheKey = `pje:session:${regionTRT}`;
     const cachedCookies = await this.redis.get(cacheKey);
@@ -46,7 +47,11 @@ export class PjeLoginService {
 
     try {
       const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
-      const headers = buildHeaders('login', '1', 2, url);
+      const awsWafTokenKey = `aws-waf-token:${numero}`;
+      const awsWafToken = await this.redis.get(awsWafTokenKey);
+      console.log('awsWafToken:', awsWafToken);
+
+      const headers = buildHeaders('login', '1', 2, awsWafToken as string);
       const response = await scraperRequest(
         url,
         `username`,

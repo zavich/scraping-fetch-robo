@@ -7,6 +7,7 @@ import { ScrapingService } from 'src/helpers/scraping.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
+import Redis from 'ioredis';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -18,6 +19,7 @@ export class GenericProcessoWorker extends WorkerHost {
     private readonly scrapingService: ScrapingService,
     @Inject(FetchUrlMovimentService)
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
 
     // ✅ injeta todas as filas TRT
     @Inject(getQueueToken('pje-documentos-trt1')) trt1: Queue,
@@ -114,7 +116,10 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
-      if (regionTRT === 3) {
+      const redisKey = `aws-waf-token:${numero}`;
+      const ttl = await this.redis.ttl(redisKey);
+
+      if (regionTRT === 3 && ttl <= 0) {
         await this.scrapingService.execute(numero, regionTRT, 1);
       }
       // return;

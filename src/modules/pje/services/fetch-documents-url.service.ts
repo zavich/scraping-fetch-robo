@@ -22,7 +22,8 @@ export class FetchDocumentoService {
       }
       const redisKey = `pje:session:${regionTRT}`;
       const cookies = (await this.redis.get(redisKey)) || '';
-
+      const awsWafTokenKey = `aws-waf-token:${processNumber}`;
+      const awsWafToken = await this.redis.get(awsWafTokenKey);
       // 🔹 tokenCaptcha
       this.logger.debug(
         `Iniciando busca do tokenCaptcha para o processo ${processNumber}, instância ${instancia}`,
@@ -74,7 +75,7 @@ export class FetchDocumentoService {
       // 🔹 headers
       const headers = {
         Authorization: `Bearer ${accessToken1g}`,
-        Cookie: `${cookies}`, // 👈 importante juntar tudo
+        Cookie: `${cookies}; ${awsWafToken}`, // 👈 importante juntar tudo
         'x-grau-instancia': instancia,
         referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
         'user-agent':
