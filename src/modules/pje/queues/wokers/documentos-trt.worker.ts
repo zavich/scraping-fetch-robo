@@ -42,7 +42,10 @@ export class GenericDocumentosWorker extends WorkerHost {
       }
 
       // Obtém cookies e conta usada
-      const { cookies, account } = await this.loginPool.getCookies(regionTRT);
+      const { cookies, account } = await this.loginPool.getCookies(
+        regionTRT,
+        numero,
+      );
 
       // Se não tiver cookies, significa que nenhuma conta está disponível
       if (!cookies || !account) {

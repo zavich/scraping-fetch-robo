@@ -116,10 +116,8 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // 🔍 Buscar processo
       // --------------------------
-      const redisKey = `aws-waf-token:${numero}`;
-      const ttl = await this.redis.ttl(redisKey);
 
-      if (regionTRT === 3 && ttl <= 0) {
+      if (regionTRT === 3) {
         await this.scrapingService.execute(numero, regionTRT, 1);
       }
       // return;
