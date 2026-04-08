@@ -70,6 +70,7 @@ export async function scraperRequest<T>(
         ...config,
         url,
         data: config.data,
+        timeout: 180000, // Aumente para 180 segundos para casos mais complexos
       });
 
       return fallback;

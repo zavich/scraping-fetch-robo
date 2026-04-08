@@ -46,11 +46,13 @@ export class FetchUrlMovimentService {
           )) as string;
           const redisKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(redisKey);
+          console.log('awsWafToken:', awsWafToken);
+
           const headers = buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
-            awsWafToken as string,
+            awsWafToken || undefined,
           );
           // const { data } = await axios.get<DetalheProcesso[]>(
           //   `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
@@ -66,6 +68,7 @@ export class FetchUrlMovimentService {
           if (!detalheProcesso) continue;
 
           let processoResponse = await this.fetchProcess(
+            headers,
             numeroDoProcesso,
             detalheProcesso.id,
             i.toString(),
@@ -79,6 +82,7 @@ export class FetchUrlMovimentService {
           ) {
             const resposta = await this.fetchCaptcha(processoResponse.imagem);
             processoResponse = await this.fetchProcess(
+              headers,
               numeroDoProcesso,
               detalheProcesso.id,
               i.toString(),
@@ -111,6 +115,7 @@ export class FetchUrlMovimentService {
   }
 
   async fetchProcess(
+    headers: Record<string, string>,
     numeroDoProcesso: string,
     detalheProcessoId: string,
     instance: string,
@@ -132,14 +137,6 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
-      const redisKey = `aws-waf-token:${numeroDoProcesso}`;
-      const awsWafToken = await this.redis.get(redisKey);
-      const headers = buildHeaders(
-        numeroDoProcesso,
-        instance,
-        regionTRT,
-        awsWafToken as string,
-      );
       // const response = await axios.get<ProcessosResponse>(url, {
       //   headers: buildHeaders(numeroDoProcesso, instance, regionTRT),
       // });
@@ -178,6 +175,7 @@ export class FetchUrlMovimentService {
           isTRT15 && attempt > 1 ? undefined : tockenCaptcha;
 
         return this.fetchProcess(
+          headers,
           numeroDoProcesso,
           detalheProcessoId,
           instance,
