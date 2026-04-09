@@ -50,6 +50,7 @@ export class PjeLoginService {
       // const awsWafTokenKey = `aws-waf-token:${numero}`;
       // const awsWafToken = await this.redis.get(awsWafTokenKey);
       // console.log('awsWafToken:', awsWafToken);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
       const headers = buildHeaders('login', '1', 2);
       const response = await scraperRequest(
