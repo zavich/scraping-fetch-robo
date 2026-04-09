@@ -418,7 +418,7 @@ export class ScrapingService {
         //
         const originalCookies = await page.cookies();
         await this.redis.set(
-          `aws-waf-token`,
+          `aws-waf-token:${processNumber}`,
           originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
           180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes

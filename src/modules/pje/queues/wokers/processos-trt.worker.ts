@@ -128,8 +128,8 @@ export class GenericProcessoWorker extends WorkerHost {
       // 🔍 Buscar processo
       // --------------------------
       const [awsWafToken, ttl] = await Promise.all([
-        this.redis.get('aws-waf-token'),
-        this.redis.ttl('aws-waf-token'),
+        this.redis.get(`aws-waf-token:${numero}`),
+        this.redis.ttl(`aws-waf-token:${numero}`),
       ]);
 
       console.log('TTL:', ttl);

@@ -22,7 +22,7 @@ export class FetchDocumentoService {
       }
       const redisKey = `pje:session:${regionTRT}`;
       const cookies = (await this.redis.get(redisKey)) || '';
-      const awsWafTokenKey = `aws-waf-token`;
+      const awsWafTokenKey = `aws-waf-token:${processNumber}`;
       const awsWafToken = await this.redis.get(awsWafTokenKey);
       // 🔹 tokenCaptcha
       this.logger.debug(
