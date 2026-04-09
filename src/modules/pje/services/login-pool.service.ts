@@ -87,7 +87,7 @@ export class LoginPoolService {
 
   async getCookies(
     trt: number,
-    numero: string,
+    numero?: string,
   ): Promise<{
     cookies: string;
     account: { username: string; password: string };
@@ -268,7 +268,7 @@ export class LoginPoolService {
     trt: number,
     redisKey: string,
     readyKey: string,
-    numero: string,
+    numero?: string,
   ) {
     await this.redis.del(redisKey, readyKey);
 

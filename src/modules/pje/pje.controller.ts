@@ -103,15 +103,23 @@ export class PjeController {
   }
   @Post('/auth/login')
   async loginPje(): Promise<any> {
-    const url = `https://pje.trt2.jus.br/pje-consulta-api/api/auth`;
-    const headers = buildHeaders('login', '1', 2, undefined, url);
-    const username = process.env.PJE_USER_FIRST || 'rafael.nicacio';
-    const password = process.env.PJE_PASS_FIRST || 'Rafael123!';
-    const response = await scraperRequest(url, `username`, headers, 'POST', {
-      login: username,
-      senha: password,
-    });
-    return response.data as LoginResponse;
+    // const url = `https://pje.trt2.jus.br/pje-consulta-api/api/auth`;
+    // const headers = buildHeaders('login', '1', 3, undefined, url);
+    // const username = process.env.PJE_USER_FIRST || 'rafael.nicacio';
+    // const password = process.env.PJE_PASS_FIRST || 'Rafael123!';
+    // const response = await scraperRequest(
+    //   url,
+    //   `username`,
+    //   headers,
+    //   'POST',
+    //   {
+    //     login: username,
+    //     senha: password,
+    //   },
+    //   false,
+    // );
+    // return response.data as LoginResponse;
+    return await this.loginPoolService.getCookies(3);
   }
   @Post('/teste/trt')
   async teste(): Promise<any> {
