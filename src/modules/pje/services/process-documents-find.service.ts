@@ -11,30 +11,23 @@ import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
-import { DocumentoService } from './documents.service';
 import { PdfExtractService } from './extract.service';
-import { FetchDocumentoService } from './fetch-documents-url.service';
+import { regexDocumentos } from 'src/utils/regex-documents';
 
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
   constructor(
-    private readonly documentoService: DocumentoService,
-    private readonly fetchDocumentoService: FetchDocumentoService,
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
-  private async delay(ms: number) {
-    return new Promise((res) => setTimeout(res, ms));
-  }
-  delayMs = Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
 
   async execute(
     numeroDoProcesso: string,
     instances: ProcessosResponse[],
+    filePath: string,
   ): Promise<ProcessosResponse[]> {
-    const regionTRT = Number(numeroDoProcesso.split('.')[3]);
     try {
       const instancesWithGrau = instances.map((instance, i) => {
         const instanceNumber = i + 1;
@@ -46,9 +39,8 @@ export class ProcessDocumentsFindService {
       });
       if (!instancesWithGrau || instancesWithGrau.length === 0) return [];
       const documentosRestritos = await this.uploadDocumentosRestritos(
-        regionTRT,
-        instancesWithGrau,
         numeroDoProcesso,
+        filePath,
       );
 
       const newInstances = instancesWithGrau.map((instance) => ({
@@ -67,135 +59,21 @@ export class ProcessDocumentsFindService {
   }
 
   async uploadDocumentosRestritos(
-    regionTRT: number,
-    instances: ProcessosResponse[],
     processNumber: string,
+    filePath: string,
   ): Promise<Documento[]> {
     this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
     const uploadedDocuments: Documento[] = [];
     const processedDocumentIds = new Set<string>();
-
-    const regexDocumentos = [
-      /.*peticao.*inicial.*/i,
-      // /.*sentenca.*/i,
-      // /.*embargos.*de.*declaracao.*/i,
-      // /.*recurso.*ordinario.*/i,
-      // /.*acordao.*/i,
-      // /.*recurso.*de.*revista.*/i,
-      // /.*decisao.*de.*admissibilidade.*/i,
-      // /.*agravo.*de.*instrumento.*/i,
-      // /.*decisao.*/i,
-      // /.*agravo.*interno.*/i,
-      // /.*recurso.*extraordinario.*/i,
-      // /.*planilha.*de.*calculo.*/i,
-      // /.*embargos.*a.*execucao.*/i,
-      // /.*agravo.*de.*peticao.*/i,
-      // /.*procuracao.*/i,
-      // /.*habilitacao.*/i,
-      // /.*substabelecimento.*/i,
-      // /.*manifestacao.*/i,
-      // /.*ccb.*/i,
-      // /.*cessao.*/i,
-      // /.*alvara.*/i,
-      // /.*transito.*em.*julgado.*/i,
-      // /.*peticionamentos.*avulsos.*/i,
-      // /.*decisoes.*/i,
-      // /\bdespachos?\b/i,
-      // /.*intimacoes.*/i,
-      // /.*prevencao.*/i,
-
-      // // CTPS / TRCT
-      // /.*carteira.*trabalho.*/i,
-      // /.*trct.*/i,
-
-      // // Demonstrativos de Pagamento
-      // /.*holerite.*/i,
-      // /.*contracheque.*/i,
-      // /.*ficha.*financeira.*/i,
-      // /.*recibo.*salario.*/i,
-
-      // // Ficha Registro
-      // /.*ficha.*registro.*/i,
-
-      // // Contrato de Trabalho
-      // /.*contrato.*trabalho.*/i,
-
-      // // Cartão de Ponto / Frequência
-      // /.*demonstrativo.*frequencia.*/i,
-      // /.*relatorio.*ponto.*/i,
-      // /.*relatorio.*frequencia.*/i,
-
-      // // Acórdão de Embargos
-      // /.*acordao.*embargos.*/i,
-
-      // // Acórdão TST
-      // /.*acordao.*tst.*/i,
-
-      // // Decisão Monocrática mais específica
-      // /.*decisao.*individual.*/i,
-      // /.*decisao.*relator.*/i,
-
-      // // 🧮 Documentos de Cálculo
-      // /.*planilha(?:s)?.*c[aá]lculo(?:s)?.*/i,
-      // /.*c[aá]lculo(?:s)?.*apresenta[cç][aã]o(?:ões)?.*/i,
-      // /.*apresenta[cç][aã]o(?:ões)?.*c[aá]lculo(?:s)?.*/i,
-      // /.*relat[oó]rio(?:s)?.*c[aá]lculo(?:s)?.*/i,
-
-      // // Apenas "cálculo(s)"
-      // /\bc[aá]lculo(?:s)?\b/i,
-    ];
-
-    const buffersPorInstancia: Record<string, Buffer> = {};
-
-    const movimentsInstances = instances.map((inst) => {
-      // garante que há movimentações
-      if (!inst.itensProcesso?.length) return null;
-
-      // encontra a movimentação mais recente
-      const ultimaMovimentacao = inst.itensProcesso.reduce(
-        (maisRecente, atual) => {
-          const dataMaisRecente = new Date(maisRecente.data);
-          const dataAtual = new Date(atual.data);
-          return dataAtual > dataMaisRecente ? atual : maisRecente;
-        },
-      );
-
-      return {
-        id: inst.id,
-        instance: inst.instance,
-        ultimaMovimentacao,
-      };
-    });
-    const ultimaInstancia = movimentsInstances.reduce((maisRecente, atual) => {
-      if (!maisRecente) return atual;
-      if (!atual) return maisRecente;
-
-      const dataMaisRecente = new Date(maisRecente.ultimaMovimentacao.data);
-      const dataAtual = new Date(atual.ultimaMovimentacao.data);
-
-      // se a data atual for mais recente, retorna ela
-      if (dataAtual > dataMaisRecente) return atual;
-
-      // se for igual ou menor, mantém a maisRecente
-      return maisRecente;
-    }, null);
-    //caso haja mais de uma instancia com a mesma data de moviemntação, pegar a primeira instancia
     try {
-      this.logger.debug(
-        `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${ultimaInstancia?.instance}ª instância`,
-      );
-      await this.delay(this.delayMs);
-      const filePath = await this.fetchDocumentoService.execute(
-        ultimaInstancia?.id as number,
-        regionTRT,
-        ultimaInstancia?.instance as string,
-        processNumber,
-      );
-
+      if (!filePath || !fs.existsSync(filePath)) {
+        throw new BadGatewayException(
+          `O arquivo ${filePath} não foi encontrado.`,
+        );
+      }
       const fileBuffer = fs.readFileSync(filePath);
-      buffersPorInstancia[ultimaInstancia?.id as number] = fileBuffer;
 
-      // remove o arquivo temporário
+      // // remove o arquivo temporário
       try {
         fs.promises
           .unlink(filePath)
@@ -280,23 +158,12 @@ export class ProcessDocumentsFindService {
 
         // ✅ Função auxiliar para evitar duplicação
       } catch (pdfError: any) {
-        // Captura erros específicos do pdfjs-dist
-        const msg =
-          pdfError?.message || pdfError?.toString() || 'Erro desconhecido';
-        if (msg.includes('PasswordException') || msg.includes('Encryption')) {
-          this.logger.error(
-            `🔐 PDF protegido por senha na instância ${ultimaInstancia?.instance}`,
-          );
-        } else {
-          this.logger.error(
-            `❌ Erro ao processar PDF da instância ${ultimaInstancia?.instance}: ${pdfError}`,
-          );
-        }
+        this.logger.error(`❌ Erro ao processar PDF da instância: ${pdfError}`);
         // continue; // ignora esse PDF e vai pro próximo
       }
     } catch (error) {
       this.logger.error(
-        `❌ Erro ao baixar PDF do processo ${processNumber} (instância ${ultimaInstancia?.instance}): ${error.message}`,
+        `❌ Erro ao baixar PDF do processo ${processNumber}: ${error.message}`,
       );
       throw new BadGatewayException(
         `Não foi possível baixar documentos restritos para o processo ${processNumber}`,

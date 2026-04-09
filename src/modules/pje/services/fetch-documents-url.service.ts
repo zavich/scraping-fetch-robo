@@ -4,7 +4,6 @@ import axios from 'axios';
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import * as path from 'path';
-import { scraperRequest } from 'src/utils/fetch-scraper';
 
 @Injectable()
 export class FetchDocumentoService {
@@ -127,6 +126,10 @@ export class FetchDocumentoService {
 
       return filePath;
     } catch (error) {
+      this.logger.error(
+        `Erro ao buscar documento para processo ${processNumber}:`,
+        error,
+      );
       throw new Error('Erro ao executar DocumentoService');
     }
   }

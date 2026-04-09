@@ -11,16 +11,19 @@ import { ProcessDocumentsFindService } from '../../services/process-documents-fi
 export class GenericDocumentosWorker extends WorkerHost {
   protected readonly logger = new Logger(GenericDocumentosWorker.name);
 
-  @Inject(LoginPoolService)
-  protected readonly loginPool!: LoginPoolService;
-
   @Inject(ProcessDocumentsFindService)
   protected readonly processDocsService!: ProcessDocumentsFindService;
   @Inject(LoginPoolService)
   protected readonly loginPoolService!: LoginPoolService;
 
-  async process(job: Job<{ numero: string; instances: ProcessosResponse[] }>) {
-    const { numero, instances } = job.data;
+  async process(
+    job: Job<{
+      numero: string;
+      instances: ProcessosResponse[];
+      filePath: string;
+    }>,
+  ) {
+    const { numero, instances, filePath } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
 
     this.logger.log(`📄 [${job.queueName}] Documentos → ${numero}`);
@@ -41,28 +44,22 @@ export class GenericDocumentosWorker extends WorkerHost {
         return;
       }
 
-      // Obtém cookies e conta usada
-      const { cookies, account } = await this.loginPool.getCookies(
-        regionTRT,
-        numero,
-      );
-
-      // Se não tiver cookies, significa que nenhuma conta está disponível
-      if (!cookies || !account) {
+      if (!filePath) {
+        this.logger.error(`❌ filePath undefined para ${numero}`);
         const resp = normalizeResponse(
           numero,
           [],
-          `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+          `Erro ao gerar arquivo para consulta de documentos, tente novamente mais tarde.`,
           true,
         );
         await axios.post(webhookUrl, resp);
         return;
       }
-
       // Executa consulta de documentos
       const documentos = await this.processDocsService.execute(
         numero,
         instances,
+        filePath,
       );
 
       const result = documentos.slice(0, 2);
