@@ -19,8 +19,6 @@ export class DocumentoService {
         processNumber,
         regionTRT,
         instanceIndex,
-        true,
-        true,
       );
 
       if (!integra) {

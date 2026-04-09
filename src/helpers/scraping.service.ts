@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { CDPSession, Page } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
+import { BrowserManager } from 'src/utils/browser.manager';
 
 @Injectable()
 export class ScrapingService {
@@ -21,28 +22,15 @@ export class ScrapingService {
     regionTRT: number,
     instanceIndex: number,
     usedCookies = false,
-    downloadIntegra = false,
-    maxWaitMs = 180_000,
   ) {
-    const POLL_INTERVAL_MS = 500;
     this.logger.log(
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
-
-    let context = await this.pool.acquire();
+    const { page, context } = await BrowserManager.createPage();
     this.logger.log('✅ Contexto adquirido do pool');
 
-    // 🔍 Verifica se o contexto é válido antes de abrir a página
-    if (!context || context.closed) {
-      this.logger.warn('⚠️ Contexto inválido ou fechado, criando novo...');
-      context = await this.pool.acquire();
-    }
-
-    const page = await context.newPage();
     this.logger.log('✅ Nova página aberta');
 
-    let capturedResponseData: any = null;
-    let integraBuffer: Buffer | null = null;
     let processCaptured = false;
     const requestMap = new Map<string, string>();
 
@@ -111,13 +99,15 @@ export class ScrapingService {
                     : body.body;
 
                   try {
-                    const json = JSON.parse(text);
+                    const json: unknown = JSON.parse(text);
 
                     const valid =
                       (Array.isArray(json) && json.length > 0) ||
-                      (typeof json === 'object' && json && 'id' in json);
+                      (typeof json === 'object' &&
+                        json !== null &&
+                        'id' in json);
                     if (valid) {
-                      capturedResponseData = json;
+                      // capturedResponseData = json;
                       processCaptured = true;
                       this.logger.log('✅ Processo capturado via CDP!');
                       this.logger.debug(
@@ -182,6 +172,20 @@ export class ScrapingService {
         1000,
         'Abrir consulta',
       );
+      const wafCookies = (await page.cookies()).filter((c) =>
+        c.name.startsWith('aws-waf'),
+      );
+
+      if (wafCookies.length) {
+        await page.deleteCookie(
+          ...wafCookies.map((c) => ({
+            name: c.name,
+            domain: c.domain,
+            path: c.path || '/',
+          })),
+        );
+        this.logger.log('🧹 Cookies AWS WAF removidos.');
+      }
       // 🚧 Detecta se caiu no AWS WAF
       // Aguarda o iframe do AWS WAF aparecer no DOM
       await page
@@ -449,7 +453,7 @@ export class ScrapingService {
         if (page && !page.isClosed()) await page.close();
       } catch {}
 
-      this.pool.release(context);
+      await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado');
     }
   }

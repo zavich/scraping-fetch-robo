@@ -119,8 +119,6 @@ export class PjeController {
       '0016495-78.2023.5.16.0023',
       16,
       2,
-      true,
-      true,
     );
   }
 }
