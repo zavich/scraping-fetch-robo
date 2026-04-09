@@ -114,11 +114,13 @@ export class GenericProcessoWorker extends WorkerHost {
         return;
       }
       if (TRTINVALIDO.includes(regionTRT)) {
-        this.logger.warn(`⚠️ TRT ${regionTRT} não é válido para consulta`);
+        this.logger.warn(
+          `⚠️ TRT ${regionTRT} não é válido para consulta ou está indisponível`,
+        );
         const response = normalizeResponse(
           numero,
           [],
-          `TRT ${regionTRT} não é válido para consulta`,
+          `TRT ${regionTRT} não é válido para consulta ou está indisponível`,
           true,
         );
         await axios.post(webhookUrl, response);
