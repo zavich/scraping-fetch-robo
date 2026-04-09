@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import axios from 'axios';
 
 import * as fs from 'fs';
 import Redis from 'ioredis';
@@ -75,7 +76,7 @@ export class FetchDocumentoService {
       const headers = {
         Authorization: `Bearer ${accessToken1g}`,
         'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        Cookie: `${cookies}; ${awsWafToken || ''}`, // 👈 importante juntar tudo
+        Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
         'x-grau-instancia': instancia,
         referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
         'user-agent':
@@ -88,16 +89,12 @@ export class FetchDocumentoService {
         'sec-ch-ua-mobile': '?0',
         'sec-ch-ua-platform': '"Windows"',
       };
-
-      // 🔹 request
-      const response = await scraperRequest(
-        url,
-        processNumber,
+      const response = await axios.get(url, {
         headers,
-        'GET',
-        undefined,
-        true,
-      );
+        timeout: 180000, // Aumente para 180 segundos para casos mais complexos
+        responseType: 'arraybuffer',
+        withCredentials: true,
+      });
 
       // Validação do conteúdo antes de salvar como PDF
       if (!Buffer.isBuffer(response.data)) {
@@ -130,7 +127,6 @@ export class FetchDocumentoService {
 
       return filePath;
     } catch (error) {
-      this.logger.error(`Erro ao executar FetchDocumentoService:`, error);
       throw new Error('Erro ao executar DocumentoService');
     }
   }

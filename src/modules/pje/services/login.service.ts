@@ -47,34 +47,6 @@ export class PjeLoginService {
     const { context, page } = await BrowserManager.createPage();
 
     try {
-      // const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
-      // const awsWafTokenKey = `aws-waf-token:${numero}`;
-      // const awsWafToken = await this.redis.get(awsWafTokenKey);
-      // console.log('awsWafToken:', awsWafToken);
-      // await new Promise((resolve) => setTimeout(resolve, 1000));
-      // const headers = buildHeaders('login', '1', 2);
-      // const response = await scraperRequest(
-      //   url,
-      //   `username`,
-      //   headers,
-      //   'POST',
-      //   {
-      //     login: username,
-      //     senha: password,
-      //   },
-      //   true,
-      // );
-      // const login = response.data as LoginResponse;
-      // const redisKey = `pje:session:${regionTRT}`;
-      // const cookieString = `access_token_1g=${login.access_token}; refresh_token_1g=${login.refresh_token}; instancia=${login.instancia}`;
-      // await this.redis.set(
-      //   redisKey,
-      //   cookieString,
-      //   'EX',
-      //   login.expires_in || 3600,
-      // );
-      // this.logger.debug(`✅ Sessão Puppeteer salva em ${redisKey}`);
-      // return { cookies: cookieString };
       const loginUrl = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`;
       const randomUA =
         userAgents[Math.floor(Math.random() * userAgents.length)];
@@ -141,199 +113,209 @@ export class PjeLoginService {
       console.log('wafFrame URL:', wafFrame?.url() || '❌ não encontrado');
       const urlObj = new URL(loginUrl);
       const correctDomain = urlObj.hostname;
-      // if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
-      //   const response = await fetch(
-      //     `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`,
-      //     {
-      //       method: 'POST',
-      //       headers: {
-      //         accept: 'application/json, text/plain, */*',
-      //         'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      //         'content-type': 'application/json',
-      //         origin: `https://pje.trt${regionTRT}.jus.br`,
-      //         priority: 'u=1, i',
-      //         referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`,
-      //         'sec-ch-ua': `"Chromium";v="142", "Google Chrome";v="142", "Not_A Brand";v="99"`,
-      //         'sec-ch-ua-mobile': '?0',
-      //         'sec-ch-ua-platform': `"macOS"`,
-      //         'sec-fetch-dest': 'empty',
-      //         'sec-fetch-mode': 'cors',
-      //         'sec-fetch-site': 'same-origin',
-      //         'user-agent':
-      //           userAgents[Math.floor(Math.random() * userAgents.length)],
-      //         'x-grau-instancia': '1',
-      //         Cookie: `aws-waf-token=${wafParams?.websiteKey}`,
-      //       },
-      //       body: JSON.stringify({
-      //         login: username,
-      //         senha: password,
-      //       }),
-      //     },
-      //   );
-      //   const data = await response.json();
-      //   const cookies = [
-      //     { name: 'access_token_1g', value: data.access_token },
-      //     { name: 'refresh_token_1g', value: data.refresh_token },
-      //     { name: 'instancia', value: data.instancia },
-      //   ];
-      //   const cookieString = cookies
-      //     .map((c) => `${c.name}=${c.value}`)
-      //     .join('; ');
-      //   await this.redis.set(cacheKey, cookieString, 'EX', 3600);
-      //   return { cookies: cookieString };
-      // }
-      if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
-        this.logger?.warn(
-          '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
-        );
-        const client = await page.target().createCDPSession();
-        await client.send('Page.stopLoading');
-        // Extrai parâmetros WAF do site
-        const wafParamsExtracted = await page.evaluate(() => {
-          const goku = (window as any).gokuProps;
-          if (!goku) return null;
-          const challengeScript = (
-            document.querySelector(
-              'script[src*="token.awswaf.com"]',
-            ) as HTMLScriptElement | null
-          )?.src;
-          const captchaScript = (
-            document.querySelector(
-              'script[src*="captcha.awswaf.com"]',
-            ) as HTMLScriptElement | null
-          )?.src;
-          return {
-            websiteKey: goku.key,
-            iv: goku.iv,
-            context: goku.context,
-            challengeScript,
-            captchaScript,
-          };
-        });
-        this.logger?.log(
-          `🧩 Parâmetros AWS WAF extraídos: ${JSON.stringify(wafParamsExtracted, null, 2)}`,
-        );
-        const solved = await this.captchaService.resolveAwsWaf({
-          websiteURL: loginUrl,
-          websiteKey: (wafParamsExtracted?.websiteKey as string) || '',
-          context: (wafParamsExtracted?.context as string) || '',
-          iv: (wafParamsExtracted?.iv as string) || '',
-          challengeScript:
-            (wafParamsExtracted?.challengeScript as string) || '',
-          captchaScript: (wafParamsExtracted?.captchaScript as string) || '',
-        });
-        this.logger?.log('✅ CAPTCHA resolvido via 2Captcha');
-        const tokenToUse = solved?.existing_token as string;
-        if (!tokenToUse) {
-          throw new Error(
-            'Token AWS WAF não encontrado em solved.existing_token nem em solved.captcha_voucher',
-          );
-        }
-        try {
-          // Extrai base URL do challengeScript
-          let voucherBaseUrl = '';
-          if (wafParamsExtracted?.challengeScript) {
-            voucherBaseUrl = wafParamsExtracted.challengeScript.replace(
-              /\/challenge\.js$/,
-              '',
-            );
-          }
-          this.logger?.log(`🔗 Base URL para voucher: ${voucherBaseUrl}`);
-          const voucherResponseText = String(
-            await page.evaluate(
-              async (
-                baseUrl: string,
-                voucherBody: {
-                  captcha_voucher: string;
-                  existing_token: string;
-                },
-              ) => {
-                const res = await fetch(`${baseUrl}/voucher`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-                  body: JSON.stringify(voucherBody),
-                });
-                return await res.text();
-              },
-              voucherBaseUrl,
-              {
-                captcha_voucher: String(solved.captcha_voucher ?? ''),
-                existing_token: String(solved.existing_token ?? ''),
-              },
-            ),
-          );
-          let voucherResponse: Record<string, unknown> | null = null;
-          try {
-            voucherResponse = JSON.parse(voucherResponseText) as Record<
-              string,
-              unknown
-            >;
-            this.logger?.debug(
-              `🔔 voucherResponse: ${JSON.stringify(voucherResponse).slice(0, 500)}`,
-            );
-          } catch {
-            this.logger?.warn(
-              '⚠️ Não foi possível parsear voucherResponse como JSON',
-            );
-          }
-          const wafCookies = (await page.cookies()).filter((c) =>
-            c.name.startsWith('aws-waf'),
-          );
-          this.logger.log(
-            '🔥 Cookies WAF encontrados antes de limpar:',
-            wafCookies,
-          );
-          if (wafCookies.length) {
-            await page.deleteCookie(
-              ...wafCookies.map((c) => ({
-                name: c.name,
-                domain: c.domain,
-                path: c.path || '/',
-              })),
-            );
-            this.logger.log('🧹 Cookies AWS WAF removidos.');
-          }
-          await page.evaluate(() => {
-            localStorage.clear();
-            sessionStorage.clear();
-          });
-          // Setar cookie no browser
-          await page.setCookie({
-            name: 'aws-waf-token',
-            value: voucherResponse?.token as string,
-            domain: correctDomain,
-            path: '/',
-            httpOnly: false,
-            secure: true,
-            expires: Math.floor(Date.now() / 1000) + 60 * 60,
-          });
-          const after = await page.cookies();
-          this.logger.log(
-            '🍪 Cookies depois de setar token:',
-            after.filter((c) => c.name.includes('waf')),
-          );
-          this.logger?.log('🍪 Cookie aws-waf-token setado no browser');
-          // Recarrega a página para validar token
-          await page.goto(loginUrl, {
-            waitUntil: 'networkidle0',
-            timeout: 60000,
-          });
-          this.logger?.log('🔁 Página recarregada após ativar token AWS WAF');
-        } catch (err) {
+
+      const MAX_RETRIES = 3;
+      let attempt = 0;
+      let wafResolved = false;
+
+      while (attempt < MAX_RETRIES && !wafResolved) {
+        attempt++;
+        this.logger.log(`🔄 Tentativa ${attempt} de resolver o AWS WAF...`);
+
+        if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
           this.logger?.warn(
-            '⚠️ Falha ao setar cookie via page.setCookie, tentando fallback',
+            '⚠️ AWS WAF detectado — tentando resolver via 2Captcha...',
           );
-          await page.evaluate(
-            (name, val) => {
-              document.cookie = `${name}=${val}; path=/; max-age=${60 * 60}; Secure; SameSite=None`;
-            },
-            'aws-waf-token',
-            tokenToUse,
-          );
+          const client = await page.target().createCDPSession();
+          await client.send('Page.stopLoading');
+
+          const wafParamsExtracted = await page.evaluate(() => {
+            const goku = (window as any).gokuProps;
+            if (!goku) return null;
+            const challengeScript = (
+              document.querySelector(
+                'script[src*="token.awswaf.com"]',
+              ) as HTMLScriptElement | null
+            )?.src;
+            const captchaScript = (
+              document.querySelector(
+                'script[src*="captcha.awswaf.com"]',
+              ) as HTMLScriptElement | null
+            )?.src;
+            return {
+              websiteKey: goku.key,
+              iv: goku.iv,
+              context: goku.context,
+              challengeScript,
+              captchaScript,
+            };
+          });
+
           this.logger?.log(
-            '🍪 Cookie aws-waf-token setado via document.cookie (fallback)',
+            `🧩 Parâmetros AWS WAF extraídos: ${JSON.stringify(wafParamsExtracted, null, 2)}`,
+          );
+
+          const solved = await this.captchaService.resolveAwsWaf({
+            websiteURL: loginUrl,
+            websiteKey: (wafParamsExtracted?.websiteKey as string) || '',
+            context: (wafParamsExtracted?.context as string) || '',
+            iv: (wafParamsExtracted?.iv as string) || '',
+            challengeScript:
+              (wafParamsExtracted?.challengeScript as string) || '',
+            captchaScript: (wafParamsExtracted?.captchaScript as string) || '',
+          });
+
+          this.logger?.log('✅ CAPTCHA resolvido via 2Captcha');
+
+          const tokenToUse = solved?.existing_token as string;
+          if (!tokenToUse) {
+            throw new Error(
+              'Token AWS WAF não encontrado em solved.existing_token nem em solved.captcha_voucher',
+            );
+          }
+
+          try {
+            let voucherBaseUrl = '';
+            if (wafParamsExtracted?.challengeScript) {
+              voucherBaseUrl = wafParamsExtracted.challengeScript.replace(
+                /\/challenge\.js$/,
+                '',
+              );
+            }
+
+            this.logger?.log(`🔗 Base URL para voucher: ${voucherBaseUrl}`);
+
+            const voucherResponseText = String(
+              await page.evaluate(
+                async (
+                  baseUrl: string,
+                  voucherBody: {
+                    captcha_voucher: string;
+                    existing_token: string;
+                  },
+                ) => {
+                  const res = await fetch(`${baseUrl}/voucher`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+                    body: JSON.stringify(voucherBody),
+                  });
+                  return await res.text();
+                },
+                voucherBaseUrl,
+                {
+                  captcha_voucher: String(solved.captcha_voucher ?? ''),
+                  existing_token: String(solved.existing_token ?? ''),
+                },
+              ),
+            );
+
+            let voucherResponse: Record<string, unknown> | null = null;
+            try {
+              voucherResponse = JSON.parse(voucherResponseText) as Record<
+                string,
+                unknown
+              >;
+              this.logger?.debug(
+                `🔔 voucherResponse: ${JSON.stringify(voucherResponse).slice(0, 500)}`,
+              );
+            } catch {
+              this.logger?.warn(
+                '⚠️ Não foi possível parsear voucherResponse como JSON',
+              );
+            }
+
+            const wafCookies = (await page.cookies()).filter((c) =>
+              c.name.startsWith('aws-waf'),
+            );
+            this.logger.log(
+              '🔥 Cookies WAF encontrados antes de limpar:',
+              wafCookies,
+            );
+
+            if (wafCookies.length) {
+              await page.deleteCookie(
+                ...wafCookies.map((c) => ({
+                  name: c.name,
+                  domain: c.domain,
+                  path: c.path || '/',
+                })),
+              );
+              this.logger.log('🧹 Cookies AWS WAF removidos.');
+            }
+
+            await page.evaluate(() => {
+              localStorage.clear();
+              sessionStorage.clear();
+            });
+
+            await page.setCookie({
+              name: 'aws-waf-token',
+              value: voucherResponse?.token as string,
+              domain: correctDomain,
+              path: '/',
+              httpOnly: false,
+              secure: true,
+              expires: Math.floor(Date.now() / 1000) + 60 * 60,
+            });
+
+            await this.redis.set(
+              `aws-waf-token:${numero}`,
+              `aws-waf-token=${voucherResponse?.token as string}`,
+              'EX',
+              3600,
+            );
+
+            const after = await page.cookies();
+            this.logger.log(
+              '🍪 Cookies depois de setar token:',
+              after.filter((c) => c.name.includes('waf')),
+            );
+
+            this.logger?.log('🍪 Cookie aws-waf-token setado no browser');
+
+            await page.goto(loginUrl, {
+              waitUntil: 'networkidle0',
+              timeout: 60000,
+            });
+
+            this.logger?.log('🔁 Página recarregada após ativar token AWS WAF');
+          } catch (err) {
+            this.logger?.warn(
+              '⚠️ Falha ao setar cookie via page.setCookie, tentando fallback',
+            );
+            await page.evaluate(
+              (name, val) => {
+                document.cookie = `${name}=${val}; path=/; max-age=${60 * 60}; Secure; SameSite=None`;
+              },
+              'aws-waf-token',
+              tokenToUse,
+            );
+            this.logger?.log(
+              '🍪 Cookie aws-waf-token setado via document.cookie (fallback)',
+            );
+          }
+        }
+
+        this.logger.log('🔍 Verificando se AWS WAF foi realmente removido...');
+        const stillWaf = await page
+          .waitForSelector('input[name="usuario"]', { timeout: 3000 })
+          .then(() => false)
+          .catch(() => true);
+
+        if (!stillWaf) {
+          wafResolved = true;
+          this.logger.log('🟢 AWS WAF removido com sucesso!');
+        } else {
+          this.logger.warn(
+            `⚠️ AWS WAF ainda ativo após tentativa ${attempt}. Retentando...`,
           );
         }
+      }
+
+      if (!wafResolved) {
+        throw new ServiceUnavailableException(
+          'AWS WAF ainda ativo após múltiplas tentativas de resolução.',
+        );
       }
       this.logger.log('🔍 Verificando se AWS WAF foi realmente removido...');
       const stillWaf = await page

@@ -46,7 +46,6 @@ export class FetchUrlMovimentService {
           )) as string;
           const redisKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(redisKey);
-          console.log('awsWafToken:', awsWafToken);
 
           const headers = buildHeaders(
             numeroDoProcesso,
