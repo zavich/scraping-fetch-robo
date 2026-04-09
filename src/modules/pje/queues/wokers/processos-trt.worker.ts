@@ -136,7 +136,7 @@ export class GenericProcessoWorker extends WorkerHost {
       console.log('Token:', awsWafToken);
       const isValid = awsWafToken && ttl > 10;
 
-      if (regionTRT === 3 && (!isValid || !awsWafToken)) {
+      if (regionTRT === 3) {
         await this.scrapingService.execute(numero, regionTRT, 1);
       }
       // return;
