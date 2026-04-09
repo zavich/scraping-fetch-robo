@@ -1,9 +1,9 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import axios from 'axios';
 
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import * as path from 'path';
+import { scraperRequest } from 'src/utils/fetch-scraper';
 
 @Injectable()
 export class FetchDocumentoService {
@@ -71,7 +71,6 @@ export class FetchDocumentoService {
         this.logger.error(`❌ access_token_1g não encontrado no cookie`);
         throw new Error('Sessão inválida (sem access_token_1g)');
       }
-
       // 🔹 headers
       const headers = {
         Authorization: `Bearer ${accessToken1g}`,
@@ -80,16 +79,25 @@ export class FetchDocumentoService {
         'x-grau-instancia': instancia,
         referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
         'user-agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
         accept: 'application/json, text/plain, */*',
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-dest': 'empty',
+        'sec-ch-ua': '"Chromium";v="146", "Not A(Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
       };
 
       // 🔹 request
-      const response = await axios.get<ArrayBuffer>(url, {
+      const response = await scraperRequest(
+        url,
+        processNumber,
         headers,
-        timeout: 300000,
-        responseType: 'arraybuffer',
-      });
+        'GET',
+        undefined,
+        true,
+      );
 
       // Validação do conteúdo antes de salvar como PDF
       if (!Buffer.isBuffer(response.data)) {
@@ -122,8 +130,8 @@ export class FetchDocumentoService {
 
       return filePath;
     } catch (error) {
-      this.logger.error('Erro ao executar DocumentoService', error);
-      throw error; // deixa o Nest lançar 500 mas logado corretamente
+      this.logger.error(`Erro ao executar FetchDocumentoService:`, error);
+      throw new Error('Erro ao executar DocumentoService');
     }
   }
 }

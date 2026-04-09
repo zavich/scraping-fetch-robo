@@ -47,16 +47,11 @@ export class PjeLoginService {
 
     try {
       const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
-      const awsWafTokenKey = `aws-waf-token:${numero}`;
-      const awsWafToken = await this.redis.get(awsWafTokenKey);
-      console.log('awsWafToken:', awsWafToken);
+      // const awsWafTokenKey = `aws-waf-token:${numero}`;
+      // const awsWafToken = await this.redis.get(awsWafTokenKey);
+      // console.log('awsWafToken:', awsWafToken);
 
-      const headers = buildHeaders(
-        'login',
-        '1',
-        regionTRT,
-        awsWafToken || undefined,
-      );
+      const headers = buildHeaders('login', '1', 2);
       const response = await scraperRequest(
         url,
         `username`,
