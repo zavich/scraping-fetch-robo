@@ -62,7 +62,7 @@ export class PjeLoginService {
           login: username,
           senha: password,
         },
-        false,
+        true,
       );
       const login = response.data as LoginResponse;
       const redisKey = `pje:session:${regionTRT}`;
