@@ -11,8 +11,8 @@ import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
-import { PdfExtractService } from './extract.service';
 import { regexDocumentos } from 'src/utils/regex-documents';
+import { PdfExtractService } from './extract.service';
 
 @Injectable()
 export class ProcessDocumentsFindService {
@@ -167,21 +167,6 @@ export class ProcessDocumentsFindService {
       );
       throw new BadGatewayException(
         `Não foi possível baixar documentos restritos para o processo ${processNumber}`,
-      );
-    }
-    const captchaKey = `pje:token:captcha:${processNumber}`;
-    const keys = await this.redis.keys(`${captchaKey}*`);
-    const captchaTokenRedisKey = `tokencaptcha:${processNumber}*`;
-    const captchaTokenKeys = await this.redis.keys(captchaTokenRedisKey);
-    if (keys.length) {
-      const deleted = await this.redis.del(...keys);
-      await this.redis.del(...captchaTokenKeys);
-      this.logger.debug(
-        `🧹 ${deleted} tokenCaptcha(s) removidos para ${processNumber}`,
-      );
-    } else {
-      this.logger.warn(
-        `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber}`,
       );
     }
 

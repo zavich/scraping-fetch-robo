@@ -435,24 +435,49 @@ export class ScrapingService {
           process: { mensagemErro: 'AWS WAF contornado' },
           singleInstance: false,
         };
-      } else {
-        return {
-          integra: null,
-          process: { mensagemErro: 'AWS WAF não contornado' },
-          singleInstance: false,
-        };
       }
+      this.logger.log('✅ Nenhum AWS WAF detectado na página');
+
+      // 👇 1. espera frontend inicializar
+      await new Promise((r) => setTimeout(r, 2000));
+      await page.reload({ waitUntil: 'networkidle0' });
+      // 👇 2. aguarda o cookie aparecer (isso é o segredo)
+      this.logger.log('⏳ Aguardando aws-waf-token...');
+
+      let token: string | null = null;
+
+      for (let i = 0; i < 10; i++) {
+        const cookies = await page.cookies();
+        const found = cookies.find((c) => c.name === 'aws-waf-token');
+
+        if (found?.value) {
+          token = found.value;
+          break;
+        }
+
+        await new Promise((r) => setTimeout(r, 500));
+      }
+
+      // 👇 3. validação
+      if (!token) {
+        throw new Error('❌ aws-waf-token não gerado');
+      }
+
+      // 👇 4. salva
+      await this.redis.set(
+        `aws-waf-token:${processNumber}`,
+        `aws-waf-token=${token}`,
+        'EX',
+        18000, // 5 minutos de validade no Redis, para evitar reCAPTCHA frequentes
+      );
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
-
       try {
         await client.send('Network.disable');
       } catch {}
-
       try {
         if (page && !page.isClosed()) await page.close();
       } catch {}
-
       await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado');
     }

@@ -1,1 +1,1 @@
-export const TRTINVALIDO = [18, 5];
+export const LoginErrorTrt = [18, 5];

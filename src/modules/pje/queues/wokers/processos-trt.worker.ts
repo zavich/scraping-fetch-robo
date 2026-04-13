@@ -5,10 +5,11 @@ import { Job, Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
-import { TRTINVALIDO } from 'src/utils/trt-validate';
+import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
+import { deleteByPattern } from 'src/utils/redis-delete-keys';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -115,23 +116,7 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
-      if (TRTINVALIDO.includes(regionTRT)) {
-        this.logger.warn(
-          `⚠️ TRT ${regionTRT} não é válido para consulta ou está indisponível`,
-        );
-        const response = normalizeResponse(
-          numero,
-          [],
-          `TRT ${regionTRT} não é válido para consulta ou está indisponível`,
-          true,
-        );
-        await axios.post(webhookUrl, response);
-        return;
-      }
-      if (regionTRT === 3) {
-        await this.scrapingService.execute(numero, regionTRT, 1);
-      }
-      // return;
+      await this.scrapingService.execute(numero, regionTRT, 1);
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
@@ -209,9 +194,9 @@ export class GenericProcessoWorker extends WorkerHost {
         console.log(
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
-
+        const validatedTRT = LoginErrorTrt.includes(regionTRT) ? 2 : regionTRT; // TRT3 tem tratamento especial
         const { cookies, account } = await this.loginPool.getCookies(
-          regionTRT,
+          validatedTRT,
           numero,
         );
 
@@ -254,7 +239,14 @@ export class GenericProcessoWorker extends WorkerHost {
 
       console.log('RESPONSE:', response);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
-      // await axios.post(webhookUrl, response);
+      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
+
+      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
+      await axios.post(webhookUrl, response);
     } catch (error) {
       this.logger.error(error);
 
