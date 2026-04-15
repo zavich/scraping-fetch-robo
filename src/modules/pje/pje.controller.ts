@@ -1,7 +1,6 @@
 import {
   Body,
   Controller,
-  Get,
   Param,
   Post,
   Res,
@@ -23,11 +22,6 @@ export class PjeController {
     private readonly loginPoolService: LoginPoolService,
     private readonly scrapingService: ScrapingService,
   ) {}
-
-  @Get('health')
-  healthCheck(@Res() res: Response) {
-    res.status(200).send('ok');
-  }
   @Post('extract-by-id')
   @UseInterceptors(FileInterceptor('file'))
   async extractById(
