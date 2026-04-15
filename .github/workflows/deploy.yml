@@ -47,5 +47,5 @@ jobs:
         with:
           task-definition: task-def-updated.json
           service: scraping
-          cluster: painel-cluster
+          cluster: scraping-cluster
           wait-for-service-stability: true
