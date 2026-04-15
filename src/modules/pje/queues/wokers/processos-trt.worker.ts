@@ -2,18 +2,21 @@ import { getQueueToken, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Job, Queue } from 'bullmq';
-import dayjs from 'dayjs';
+import Redis from 'ioredis';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
+import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
+import { LoginPoolService } from '../../services/login-pool.service';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
-import Redis from 'ioredis';
-import { TRTINVALIDO } from 'src/utils/trt-validate';
+import { deleteByPattern } from 'src/utils/redis-delete-keys';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
   private readonly documentosQueues: Record<string, Queue> = {};
   constructor(
+    @Inject(LoginPoolService) // 👈 AQUI
+    private readonly loginPool: LoginPoolService,
     @Inject(WebScrapingMovimentService)
     private readonly webScrapingMovimentService: WebScrapingMovimentService,
     @Inject(ScrapingService)
@@ -113,31 +116,12 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
-      if (TRTINVALIDO.includes(regionTRT)) {
-        this.logger.warn(
-          `⚠️ TRT ${regionTRT} não é válido para consulta ou está indisponível`,
-        );
-        const response = normalizeResponse(
-          numero,
-          [],
-          `TRT ${regionTRT} não é válido para consulta ou está indisponível`,
-          true,
-        );
-        await axios.post(webhookUrl, response);
-        return;
-      }
-      // --------------------------
-      // 🔍 Buscar processo
-      // --------------------------
-
-      if (regionTRT === 3) {
-        await this.scrapingService.execute(numero, regionTRT, 1);
-      }
-      // return;
+      await this.scrapingService.execute(numero, regionTRT, 1);
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
       );
+
       const result = instances.slice(0, 2);
 
       if (!instances || instances.length === 0) {
@@ -206,68 +190,62 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
+      if (documents) {
+        console.log(
+          `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
+        );
+        const validatedTRT = LoginErrorTrt.includes(regionTRT) ? 2 : regionTRT; // TRT3 tem tratamento especial
+        const { cookies, account } = await this.loginPool.getCookies(
+          validatedTRT,
+          numero,
+        );
 
+        // Se não tiver cookies, significa que nenhuma conta está disponível
+        if (!cookies || !account) {
+          const resp = normalizeResponse(
+            numero,
+            [],
+            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+            true,
+          );
+          await axios.post(webhookUrl, resp);
+          return;
+        }
+        const filePath = await this.fetchUrlMovimentService.fetchDocuments(
+          numero,
+          instances,
+          regionTRT,
+        );
+        const queueName = `trt${regionTRT}`;
+        const documentosQueue = this.documentosQueues[queueName];
+        if (filePath) {
+          await documentosQueue.add(
+            'consulta-processo-documento',
+            { numero, instances, filePath },
+            {
+              jobId: numero,
+              attempts: 2,
+              backoff: { type: 'fixed', delay: 5000 },
+              removeOnFail: false,
+              removeOnComplete: true,
+            },
+          );
+        }
+      }
       // --------------------------
       // ✅ Resposta final
       // --------------------------
       const response = normalizeResponse(numero, result, '', false, origem);
 
-      // --------------------------
-      // ✅ POST final
-      // --------------------------
-      // --------------------------
-      // 📄 Enfileirar documentos
-      // --------------------------
-      if (documents) {
-        const queueName = `trt${regionTRT}`;
-        const documentosQueue = this.documentosQueues[queueName];
-
-        if (!documentosQueue) {
-          this.logger.error(`Fila de documentos não encontrada: ${queueName}`);
-          return;
-        }
-
-        const existing = (await documentosQueue.getJob(numero)) as
-          | Job
-          | undefined;
-
-        if (existing) {
-          // 1. Se falhou → remove
-          if (await existing.isFailed()) {
-            this.logger.warn(`Job ${numero} está FAILED — removendo.`);
-            await existing.remove();
-          }
-
-          // 2. Se está ativo há mais de 1 hora → remove
-          const state = await existing.getState();
-          if (state === 'active') {
-            const startedAt = existing.processedOn ?? existing.timestamp;
-            const diffHours = dayjs().diff(startedAt, 'hour');
-
-            if (diffHours >= 1) {
-              this.logger.warn(
-                `Job ${numero} está ACTIVE há ${diffHours} horas — removendo para reprocessar.`,
-              );
-              await existing.remove();
-            }
-          }
-        }
-
-        // 3. Recria o job ✅
-        await documentosQueue.add(
-          'consulta-processo-documento',
-          { numero, instances },
-          {
-            jobId: numero,
-            attempts: 2,
-            backoff: { type: 'fixed', delay: 5000 },
-            removeOnFail: false,
-            removeOnComplete: true,
-          },
-        );
-      }
       console.log('RESPONSE:', response);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
+      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
+
+      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
       await axios.post(webhookUrl, response);
     } catch (error) {
       this.logger.error(error);
