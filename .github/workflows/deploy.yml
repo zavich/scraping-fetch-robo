@@ -46,6 +46,6 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-def-updated.json
-          service: scraping
+          service: scraping-task-service
           cluster: scraping-cluster
           wait-for-service-stability: true
