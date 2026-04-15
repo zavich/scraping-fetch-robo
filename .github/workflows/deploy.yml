@@ -1,0 +1,51 @@
+name: Deploy Scraping
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & Push
+        env:
+          REGISTRY: 339340413604.dkr.ecr.us-east-2.amazonaws.com
+          REPOSITORY: scraping
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE=$REGISTRY/$REPOSITORY:$IMAGE_TAG
+
+          docker build -t $IMAGE .
+          docker push $IMAGE
+
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Update task definition
+        run: |
+          jq --arg IMAGE "${{ env.IMAGE }}" \
+            '.containerDefinitions[0].image = $IMAGE' \
+            task-definition.json > task-def-updated.json
+
+      - name: Deploy ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: task-def-updated.json
+          service: scraping
+          cluster: painel-cluster
+          wait-for-service-stability: true
