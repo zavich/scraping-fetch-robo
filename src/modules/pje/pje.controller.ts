@@ -25,8 +25,8 @@ export class PjeController {
   ) {}
 
   @Get('health')
-  healthCheck() {
-    return { status: 'ok' };
+  healthCheck(@Res() res: Response) {
+    res.status(200).send('ok');
   }
   @Post('extract-by-id')
   @UseInterceptors(FileInterceptor('file'))
