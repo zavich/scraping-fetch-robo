@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import { CDPSession, Page } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
+import { BrowserManager } from 'src/utils/browser.manager';
 
 @Injectable()
 export class ScrapingService {
@@ -21,28 +22,15 @@ export class ScrapingService {
     regionTRT: number,
     instanceIndex: number,
     usedCookies = false,
-    downloadIntegra = false,
-    maxWaitMs = 180_000,
   ) {
-    const POLL_INTERVAL_MS = 500;
     this.logger.log(
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
-
-    let context = await this.pool.acquire();
+    const { page, context } = await BrowserManager.createPage();
     this.logger.log('✅ Contexto adquirido do pool');
 
-    // 🔍 Verifica se o contexto é válido antes de abrir a página
-    if (!context || context.closed) {
-      this.logger.warn('⚠️ Contexto inválido ou fechado, criando novo...');
-      context = await this.pool.acquire();
-    }
-
-    const page = await context.newPage();
     this.logger.log('✅ Nova página aberta');
 
-    let capturedResponseData: any = null;
-    let integraBuffer: Buffer | null = null;
     let processCaptured = false;
     const requestMap = new Map<string, string>();
 
@@ -111,13 +99,15 @@ export class ScrapingService {
                     : body.body;
 
                   try {
-                    const json = JSON.parse(text);
+                    const json: unknown = JSON.parse(text);
 
                     const valid =
                       (Array.isArray(json) && json.length > 0) ||
-                      (typeof json === 'object' && json && 'id' in json);
+                      (typeof json === 'object' &&
+                        json !== null &&
+                        'id' in json);
                     if (valid) {
-                      capturedResponseData = json;
+                      // capturedResponseData = json;
                       processCaptured = true;
                       this.logger.log('✅ Processo capturado via CDP!');
                       this.logger.debug(
@@ -182,6 +172,20 @@ export class ScrapingService {
         1000,
         'Abrir consulta',
       );
+      const wafCookies = (await page.cookies()).filter((c) =>
+        c.name.startsWith('aws-waf'),
+      );
+
+      if (wafCookies.length) {
+        await page.deleteCookie(
+          ...wafCookies.map((c) => ({
+            name: c.name,
+            domain: c.domain,
+            path: c.path || '/',
+          })),
+        );
+        this.logger.log('🧹 Cookies AWS WAF removidos.');
+      }
       // 🚧 Detecta se caiu no AWS WAF
       // Aguarda o iframe do AWS WAF aparecer no DOM
       await page
@@ -421,7 +425,7 @@ export class ScrapingService {
           `aws-waf-token:${processNumber}`,
           originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
-          3600,
+          180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes
         );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({ waitUntil: 'networkidle0' });
@@ -431,25 +435,50 @@ export class ScrapingService {
           process: { mensagemErro: 'AWS WAF contornado' },
           singleInstance: false,
         };
-      } else {
-        return {
-          integra: null,
-          process: { mensagemErro: 'AWS WAF não contornado' },
-          singleInstance: false,
-        };
       }
+      this.logger.log('✅ Nenhum AWS WAF detectado na página');
+
+      // 👇 1. espera frontend inicializar
+      await new Promise((r) => setTimeout(r, 2000));
+      await page.reload({ waitUntil: 'networkidle0' });
+      // 👇 2. aguarda o cookie aparecer (isso é o segredo)
+      this.logger.log('⏳ Aguardando aws-waf-token...');
+
+      let token: string | null = null;
+
+      for (let i = 0; i < 10; i++) {
+        const cookies = await page.cookies();
+        const found = cookies.find((c) => c.name === 'aws-waf-token');
+
+        if (found?.value) {
+          token = found.value;
+          break;
+        }
+
+        await new Promise((r) => setTimeout(r, 500));
+      }
+
+      // 👇 3. validação
+      if (!token) {
+        throw new Error('❌ aws-waf-token não gerado');
+      }
+
+      // 👇 4. salva
+      await this.redis.set(
+        `aws-waf-token:${processNumber}`,
+        `aws-waf-token=${token}`,
+        'EX',
+        18000, // 5 minutos de validade no Redis, para evitar reCAPTCHA frequentes
+      );
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
-
       try {
         await client.send('Network.disable');
       } catch {}
-
       try {
         if (page && !page.isClosed()) await page.close();
       } catch {}
-
-      this.pool.release(context);
+      await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado');
     }
   }

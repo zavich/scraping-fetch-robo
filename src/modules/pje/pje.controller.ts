@@ -100,7 +100,10 @@ export class PjeController {
   }
   @Post('/auth/login')
   async loginPje(): Promise<any> {
-    return await this.loginPoolService.getCookies(1);
+    return await this.loginPoolService.getCookies(
+      5,
+      '0000631-53.2025.5.05.0017',
+    );
   }
   @Post('/teste/trt')
   async teste(): Promise<any> {
@@ -108,8 +111,6 @@ export class PjeController {
       '0016495-78.2023.5.16.0023',
       16,
       2,
-      true,
-      true,
     );
   }
 }

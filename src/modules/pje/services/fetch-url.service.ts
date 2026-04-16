@@ -2,56 +2,32 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
-import { userAgents } from 'src/utils/user-agents';
+import { scraperRequest } from 'src/utils/fetch-scraper';
+import { buildHeaders } from 'src/utils/user-agents';
+import { FetchDocumentoService } from './fetch-documents-url.service';
+
+// Configura um timeout global para o axios
+axios.defaults.timeout = 10000; // 10 segundos
 
 @Injectable()
 export class FetchUrlMovimentService {
+  private readonly documentosQueues: Record<string, Queue> = {};
+
   private readonly logger = new Logger(FetchUrlMovimentService.name);
 
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    private readonly fetchDocumentoService: FetchDocumentoService,
   ) {}
-
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
   }
-
-  // Delay aleatório maior para TRT15 (10-15s)
-  private getRandomDelay() {
-    return Math.floor(Math.random() * (5000 - 1000 + 1)) + 1000;
-  }
-
-  private async buildHeaders(
-    numeroDoProcesso: string,
-    instance: string,
-    regionTRT: number,
-    userAgent?: string,
-  ) {
-    const ua =
-      userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
-    const aws = await this.redis.get(`aws-waf-token:${numeroDoProcesso}`);
-    return {
-      accept: 'application/json, text/plain, */*',
-      'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      'content-type': 'application/json',
-      'x-grau-instancia': instance,
-      cookie: `ASSINADOR_PJE=PJEOFFICE; MO=PJEOFFICE; ${aws}`,
-      origin: `https://pje.trt${regionTRT}.jus.br`,
-      referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instance}`,
-      'user-agent': ua,
-      'sec-fetch-site': 'same-origin',
-      'sec-fetch-mode': 'cors',
-      'sec-fetch-dest': 'empty',
-      'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
-      'sec-ch-ua-mobile': '?0',
-      'sec-ch-ua-platform': '"Windows"',
-    };
-  }
-
+  delayMs = Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
   async execute(
     numeroDoProcesso: string,
     origem?: string,
@@ -76,28 +52,30 @@ export class FetchUrlMovimentService {
           const tokenCaptcha = (await this.redis.get(
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
+          const redisKey = `aws-waf-token:${numeroDoProcesso}`;
+          const awsWafToken = await this.redis.get(redisKey);
 
-          const headers = await this.buildHeaders(
+          const headers = buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
+            awsWafToken || undefined,
           );
-          const { data } = await axios.get<DetalheProcesso[]>(
-            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            { headers },
+          // const { data } = await axios.get<DetalheProcesso[]>(
+          //   `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+          //   { headers },
+          // );
+          const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
+          const { data } = await scraperRequest<DetalheProcesso[]>(
+            url,
+            `${numeroDoProcesso}`, // sticky session
+            headers,
           );
-
           const detalheProcesso = data[0];
           if (!detalheProcesso) continue;
 
-          // Delay aleatório para evitar bloqueios
-          const delayMs = this.getRandomDelay();
-          this.logger.debug(
-            `⏱ Delay de ${delayMs}ms antes de buscar a ${i}ª instância`,
-          );
-          await this.delay(delayMs);
-
           let processoResponse = await this.fetchProcess(
+            headers,
             numeroDoProcesso,
             detalheProcesso.id,
             i.toString(),
@@ -111,6 +89,7 @@ export class FetchUrlMovimentService {
           ) {
             const resposta = await this.fetchCaptcha(processoResponse.imagem);
             processoResponse = await this.fetchProcess(
+              headers,
               numeroDoProcesso,
               detalheProcesso.id,
               i.toString(),
@@ -134,7 +113,6 @@ export class FetchUrlMovimentService {
           continue;
         }
       }
-
       return instances;
     } catch (error: any) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
@@ -143,6 +121,7 @@ export class FetchUrlMovimentService {
   }
 
   async fetchProcess(
+    headers: Record<string, string>,
     numeroDoProcesso: string,
     detalheProcessoId: string,
     instance: string,
@@ -164,19 +143,18 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
-      // TROCAR USER-AGENT a cada tentativa TRT15
-      const userAgent =
-        regionTRT === 15
-          ? userAgents[Math.floor(Math.random() * userAgents.length)]
-          : undefined;
-      const response = await axios.get<ProcessosResponse>(url, {
-        headers: await this.buildHeaders(
-          numeroDoProcesso,
-          instance,
-          regionTRT,
-          userAgent,
-        ),
-      });
+      // const response = await axios.get<ProcessosResponse>(url, {
+      //   headers: buildHeaders(numeroDoProcesso, instance, regionTRT),
+      // });
+      const response = await scraperRequest<ProcessosResponse>(
+        url,
+        `${numeroDoProcesso}`,
+        headers,
+        'GET',
+        undefined,
+        true,
+        { ultra: true },
+      );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
@@ -198,22 +176,12 @@ export class FetchUrlMovimentService {
         retryStatus.includes(error.response?.status) &&
         attempt < maxAttempts
       ) {
-        // Delay maior e randomizado para TRT15
-        const baseDelay = isTRT15 ? 10000 : 1000;
-        const delay =
-          Math.pow(2, attempt) * baseDelay + Math.floor(Math.random() * 3000);
-        this.logger.warn(
-          `Rate limit ou bloqueio detectado (tentativa ${attempt}) ${
-            isTRT15 ? '[TRT15]' : ''
-          }, aguardando ${Math.round(delay / 1000)}s antes de tentar novamente...`,
-        );
-        await this.delay(delay);
-
         // REFRESH token CAPTCHA a cada tentativa TRT15
         const newTokenCaptcha =
           isTRT15 && attempt > 1 ? undefined : tockenCaptcha;
 
         return this.fetchProcess(
+          headers,
           numeroDoProcesso,
           detalheProcessoId,
           instance,
@@ -268,5 +236,74 @@ export class FetchUrlMovimentService {
 
     // fallback final
     return '';
+  }
+  async fetchDocuments(
+    processNumber: string,
+    instances: ProcessosResponse[],
+    regionTRT: number,
+  ) {
+    try {
+      const movimentsInstances = instances.map((inst, index) => {
+        // garante que há movimentações
+        if (!inst.itensProcesso?.length) return null;
+
+        // encontra a movimentação mais recente
+        const ultimaMovimentacao = inst.itensProcesso.reduce(
+          (maisRecente, atual) => {
+            const dataMaisRecente = new Date(maisRecente.data);
+            const dataAtual = new Date(atual.data);
+            return dataAtual > dataMaisRecente ? atual : maisRecente;
+          },
+        );
+
+        return {
+          id: inst.id,
+          instance: (index + 1).toString(),
+          ultimaMovimentacao,
+        };
+      });
+      const ultimaInstancia = movimentsInstances.reduce(
+        (maisRecente, atual) => {
+          if (!maisRecente) return atual;
+          if (!atual) return maisRecente;
+
+          const dataMaisRecente = new Date(maisRecente.ultimaMovimentacao.data);
+          const dataAtual = new Date(atual.ultimaMovimentacao.data);
+
+          // se a data atual for mais recente, retorna ela
+          if (dataAtual > dataMaisRecente) return atual;
+
+          // se for igual ou menor, mantém a maisRecente
+          return maisRecente;
+        },
+        null,
+      );
+      this.logger.debug(
+        `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${ultimaInstancia?.instance}ª instância`,
+      );
+      if (!ultimaInstancia) {
+        this.logger.warn(
+          `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
+        );
+        return;
+      }
+
+      await this.delay(this.delayMs);
+      const filePath = await this.fetchDocumentoService.execute(
+        ultimaInstancia.id,
+        regionTRT,
+        ultimaInstancia.instance,
+        processNumber,
+      );
+      if (!filePath) {
+        throw new Error('filePath não gerado');
+      }
+      return filePath;
+    } catch (error) {
+      this.logger.error(
+        `Erro ao buscar documentos para ${processNumber}:`,
+        error,
+      );
+    }
   }
 }

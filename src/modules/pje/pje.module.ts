@@ -13,7 +13,6 @@ import { CaptchaService } from 'src/services/captcha.service';
 import { PjeController } from './pje.controller';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { ConsultarProcessoDocumentoQueue } from './queues/service/consultar-processo-documento';
-import { DocumentoService } from './services/documents.service';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
@@ -45,7 +44,6 @@ import { FetchDocumentoService } from './services/fetch-documents-url.service';
     CaptchaService,
     WebScrapingMovimentService,
     FetchUrlMovimentService,
-    DocumentoService,
     ConsultarProcessoQueue,
     AwsS3Service,
     PdfExtractService,

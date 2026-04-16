@@ -4,14 +4,11 @@ import axios from 'axios';
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import * as path from 'path';
-import { CaptchaService } from 'src/services/captcha.service';
+import { LoginErrorTrt } from 'src/utils/trt-validate';
 
 @Injectable()
 export class FetchDocumentoService {
-  constructor(
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    private readonly captchaService: CaptchaService,
-  ) {}
+  constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
   private readonly logger = new Logger(FetchDocumentoService.name);
   async execute(
     processId: number,
@@ -24,33 +21,35 @@ export class FetchDocumentoService {
         this.logger.error('Parâmetros inválidos fornecidos');
         return '';
       }
-      const redisKey = `pje:session:${regionTRT}`;
-      const cookies = (await this.redis.get(redisKey)) as string;
-      // 🔹 Recupera tokenCaptcha específico do processo
-      // Log detalhado para verificar o fluxo do tokenCaptcha
+      const validatedTRT = LoginErrorTrt.includes(regionTRT) ? 2 : regionTRT; // TRT3 tem tratamento especial
+
+      const redisKey = `pje:session:${validatedTRT}`;
+      const cookies = (await this.redis.get(redisKey)) || '';
+      const awsWafTokenKey = `aws-waf-token:${processNumber}`;
+      const awsWafToken = await this.redis.get(awsWafTokenKey);
+      // 🔹 tokenCaptcha
       this.logger.debug(
         `Iniciando busca do tokenCaptcha para o processo ${processNumber}, instância ${instancia}`,
       );
 
-      // Tenta buscar a chave alternativa caso a original não exista
       const catchaTokenRedisKey = `tokencaptcha:${processNumber}:${instancia}`;
       let tokenCaptcha = await this.redis.get(catchaTokenRedisKey);
 
+      // fallback entre instâncias
       if (!tokenCaptcha) {
         this.logger.warn(
-          `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber} (instância ${instancia}). Tentando outras instâncias...`,
+          `⚠️ Nenhum tokenCaptcha para ${processNumber} (instância ${instancia}), tentando fallback...`,
         );
 
-        // Itera por outras instâncias possíveis (1 e 2, por exemplo)
-        const outrasInstancias = ['1', '2', '3'].filter(
-          (inst) => inst !== instancia,
-        );
-        for (const inst of outrasInstancias) {
+        for (const inst of ['1', '2', '3']) {
+          if (inst === instancia) continue;
+
           const alternativaKey = `tokencaptcha:${processNumber}:${inst}`;
           tokenCaptcha = await this.redis.get(alternativaKey);
+
           if (tokenCaptcha) {
             this.logger.debug(
-              `Token CAPTCHA encontrado para ${processNumber} na instância alternativa ${inst}: ${tokenCaptcha}`,
+              `Token encontrado na instância ${inst}: ${tokenCaptcha}`,
             );
             break;
           }
@@ -59,37 +58,41 @@ export class FetchDocumentoService {
 
       if (!tokenCaptcha) {
         this.logger.warn(
-          `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber} em nenhuma instância`,
+          `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber}`,
         );
-      } else {
-        this.logger.debug(`Token CAPTCHA obtido: ${tokenCaptcha}`);
       }
 
-      const redisKeyAWS = `aws-waf-token:${processNumber}`;
-
-      const aws = await this.redis.get(redisKeyAWS);
+      // 🔹 URL
       const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
       const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha || ''}`;
 
-      // 🔹 Extrai access_token_1g do cookie
+      // 🔹 extrai token do cookie
       const match = cookies.match(/access_token_1g=([^;]+)/);
-      const accessToken1g = match ? match[1] : null;
+      const accessToken1g = match?.[1];
 
+      if (!accessToken1g) {
+        this.logger.error(`❌ access_token_1g não encontrado no cookie`);
+        throw new Error('Sessão inválida (sem access_token_1g)');
+      }
+      // 🔹 headers
+      const headers = {
+        Authorization: `Bearer ${accessToken1g}`,
+        'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
+        'x-grau-instancia': instancia,
+        referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+        accept: 'application/json, text/plain, */*',
+        'sec-fetch-site': 'same-origin',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-dest': 'empty',
+        'sec-ch-ua': '"Chromium";v="146", "Not A(Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+      };
       const response = await axios.get(url, {
-        headers: {
-          Authorization: `Bearer ${accessToken1g}`,
-          Cookie: `${aws}`,
-          'x-grau-instancia': instancia,
-          referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
-          'user-agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-          'sec-ch-ua':
-            '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
-          'sec-ch-ua-mobile': '?0',
-          'sec-ch-ua-platform': '"macOS"',
-          accept: 'application/json, text/plain, */*',
-          'content-type': 'application/json',
-        },
+        headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos
         responseType: 'arraybuffer',
         withCredentials: true,
@@ -126,8 +129,11 @@ export class FetchDocumentoService {
 
       return filePath;
     } catch (error) {
-      this.logger.error('Erro ao executar DocumentoService', error);
-      throw error; // deixa o Nest lançar 500 mas logado corretamente
+      this.logger.error(
+        `Erro ao buscar documento para processo ${processNumber}:`,
+        error,
+      );
+      throw new Error('Erro ao executar DocumentoService');
     }
   }
 }
