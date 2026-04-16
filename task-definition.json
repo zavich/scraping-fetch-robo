@@ -147,8 +147,8 @@
   "placementConstraints": [],
   "compatibilities": ["EC2", "FARGATE"],
   "requiresCompatibilities": ["FARGATE"],
-  "cpu": "512",
-  "memory": "4096",
+  "cpu": "1024",
+  "memory": "8192",
   "ephemeralStorage": {
     "sizeInGiB": 40
   },
