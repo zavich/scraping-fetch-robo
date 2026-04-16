@@ -13,17 +13,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure AWS
+      # =========================
+      # AWS CREDENTIALS
+      # =========================
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login ECR
+      # =========================
+      # LOGIN ECR
+      # =========================
+      - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build & Push
+      # =========================
+      # BUILD & PUSH IMAGE
+      # =========================
+      - name: Build and Push Docker image
         env:
           REGISTRY: 339340413604.dkr.ecr.us-east-2.amazonaws.com
           REPOSITORY: scraping
@@ -36,16 +45,49 @@ jobs:
 
           echo "IMAGE=$IMAGE" >> $GITHUB_ENV
 
+      # =========================
+      # DOWNLOAD TASK DEFINITION
+      # =========================
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition scraping-task \
+            --query taskDefinition \
+            --output json > task-definition.json
+
+      # =========================
+      # UPDATE IMAGE IN TASK DEF
+      # =========================
       - name: Update task definition
         run: |
-          jq --arg IMAGE "${{ env.IMAGE }}" \
-            '.containerDefinitions[0].image = $IMAGE' \
-            task-definition.json > task-def-updated.json
+          jq --arg IMAGE "${{ env.IMAGE }}" '
+            .containerDefinitions[0].image = $IMAGE
+            | del(.taskDefinitionArn)
+            | del(.revision)
+            | del(.status)
+            | del(.requiresAttributes)
+            | del(.compatibilities)
+            | del(.registeredAt)
+            | del(.registeredBy)
+          ' task-definition.json > task-def-updated.json
 
-      - name: Deploy ECS
+      # =========================
+      # DEPLOY ECS
+      # =========================
+      - name: Deploy to Amazon ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-def-updated.json
           service: scraping-task-service
           cluster: scraping-cluster
           wait-for-service-stability: true
+
+      # =========================
+      # FORCE DEPLOY (garante rollout)
+      # =========================
+      - name: Force new deployment
+        run: |
+          aws ecs update-service \
+            --cluster scraping-cluster \
+            --service scraping-task-service \
+            --force-new-deployment
