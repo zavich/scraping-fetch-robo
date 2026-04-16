@@ -8,13 +8,10 @@ import { BrowserManager } from './utils/browser.manager';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const port = process.env.PORT || 8081;
+  const port = 8081;
 
   app.enableCors({
-    origin: [
-      'https://robo-api-staging.up.railway.app',
-      'https://robo-api-production.up.railway.app',
-    ],
+    origin: ['https://robo-api-prd.juri.capital'],
     credentials: true,
   });
 
@@ -70,7 +67,7 @@ async function bootstrap() {
     );
   }
 
-  await app.listen(port);
+  await app.listen(port, '0.0.0.0');
   console.log(`🚀 API rodando na porta ${port}`);
 }
 
