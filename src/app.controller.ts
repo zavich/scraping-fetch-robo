@@ -1,9 +1,12 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Response } from '@nestjs/common';
+import { Response as ExpressResponse } from 'express';
 
 @Controller()
 export class AppController {
   @Get('health')
-  health() {
-    return 'ok';
+  health(@Response() res: ExpressResponse) {
+    return res.status(200).json({
+      status: 'ok',
+    });
   }
 }
