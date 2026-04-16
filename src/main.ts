@@ -8,7 +8,7 @@ import { BrowserManager } from './utils/browser.manager';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-  const port = process.env.PORT || 8081;
+  const port = 8081;
 
   app.enableCors({
     origin: [
