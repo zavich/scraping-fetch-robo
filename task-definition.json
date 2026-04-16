@@ -109,7 +109,8 @@
     }
   ],
   "family": "scraping-task",
-  "executionRoleArn": "arn:aws:iam::339340413604:role/scraping-task-role",
+  "executionRoleArn": "arn:aws:iam::339340413604:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::339340413604:role/scraping-task-role",
   "networkMode": "awsvpc",
   "revision": 6,
   "volumes": [],
