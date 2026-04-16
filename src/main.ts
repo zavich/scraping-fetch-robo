@@ -11,10 +11,7 @@ async function bootstrap() {
   const port = 8081;
 
   app.enableCors({
-    origin: [
-      'https://robo-api-staging.up.railway.app',
-      'https://robo-api-production.up.railway.app',
-    ],
+    origin: ['https://robo-api-prd.juri.capital'],
     credentials: true,
   });
 
