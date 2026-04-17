@@ -55,13 +55,24 @@ export class GenericDocumentosWorker extends WorkerHost {
         await axios.post(webhookUrl, resp);
         return;
       }
+
       // Executa consulta de documentos
       const documentos = await this.processDocsService.execute(
         numero,
         instances,
         filePath,
       );
-
+      if (documentos[0].documentos.length === 0) {
+        this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
+        const resp = normalizeResponse(
+          numero,
+          [],
+          `Nenhum documento encontrado, tente novamente mais tarde.`,
+          true,
+        );
+        await axios.post(webhookUrl, resp);
+        return;
+      }
       const result = documentos.slice(0, 2);
       const response = normalizeResponse(numero, result, '', true);
       this.logger.log(`✅ Documentos finalizados → ${numero}`);

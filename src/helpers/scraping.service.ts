@@ -460,7 +460,10 @@ export class ScrapingService {
 
       // 👇 3. validação
       if (!token) {
-        throw new Error('❌ aws-waf-token não gerado');
+        this.logger.warn(
+          `⚠️ aws-waf-token não encontrado após espera, prosseguindo sem token...`,
+        );
+        return;
       }
 
       // 👇 4. salva

@@ -190,7 +190,24 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
+
+      // --------------------------
+      // ✅ Resposta final
+      // --------------------------
+      const response = normalizeResponse(numero, result, '', false, origem);
+
+      console.log('RESPONSE:', response);
+      this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
+      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
+
+      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
+      await axios.post(webhookUrl, response);
       if (documents) {
+        await new Promise((resolve) => setTimeout(resolve, 2000)); // pequena pausa para garantir que o webhook seja processado antes de iniciar a consulta de documentos
         console.log(
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
@@ -218,35 +235,18 @@ export class GenericProcessoWorker extends WorkerHost {
         );
         const queueName = `trt${regionTRT}`;
         const documentosQueue = this.documentosQueues[queueName];
-        if (filePath) {
-          await documentosQueue.add(
-            'consulta-processo-documento',
-            { numero, instances, filePath },
-            {
-              jobId: numero,
-              attempts: 2,
-              backoff: { type: 'fixed', delay: 5000 },
-              removeOnFail: false,
-              removeOnComplete: true,
-            },
-          );
-        }
+        await documentosQueue.add(
+          'consulta-processo-documento',
+          { numero, instances, filePath },
+          {
+            jobId: numero,
+            attempts: 2,
+            backoff: { type: 'fixed', delay: 5000 },
+            removeOnFail: false,
+            removeOnComplete: true,
+          },
+        );
       }
-      // --------------------------
-      // ✅ Resposta final
-      // --------------------------
-      const response = normalizeResponse(numero, result, '', false, origem);
-
-      console.log('RESPONSE:', response);
-      this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
-      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
-
-      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
-      await axios.post(webhookUrl, response);
     } catch (error) {
       this.logger.error(error);
 
