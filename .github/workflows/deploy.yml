@@ -16,7 +16,7 @@ jobs:
     env:
       AWS_REGION: us-east-2
       ECR_REGISTRY: 339340413604.dkr.ecr.us-east-2.amazonaws.com
-      ECR_REPOSITORY: scraping-api
+      ECR_REPOSITORY: scraping
       ECS_CLUSTER: scraping-cluster
       ECS_SERVICE: scraping-task-service
       TASK_FAMILY: scraping-api
