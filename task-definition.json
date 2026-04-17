@@ -18,83 +18,83 @@
       "secrets": [
         {
           "name": "API_KEY",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:API_KEY::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:API_KEY::"
         },
         {
           "name": "API_KEY_2CAPTCHA",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:API_KEY_2CAPTCHA::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:API_KEY_2CAPTCHA::"
         },
         {
           "name": "SCRAPER_API_KEY",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:SCRAPER_API_KEY::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:SCRAPER_API_KEY::"
         },
         {
           "name": "PJE_USER_FIRST",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_USER_FIRST::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_FIRST::"
         },
         {
           "name": "PJE_PASS_FIRST",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_PASS_FIRST::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_FIRST::"
         },
         {
           "name": "PJE_USER_SECOND",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_USER_SECOND::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_SECOND::"
         },
         {
           "name": "PJE_PASS_SECOND",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_PASS_SECOND::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_SECOND::"
         },
         {
           "name": "PJE_USER_THIRD",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_USER_THIRD::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_THIRD::"
         },
         {
           "name": "PJE_PASS_THIRD",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_PASS_THIRD::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_THIRD::"
         },
         {
           "name": "PJE_USER_FOURTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_USER_FOURTH::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_FOURTH::"
         },
         {
           "name": "PJE_PASS_FOURTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_PASS_FOURTH::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_FOURTH::"
         },
         {
           "name": "PJE_USER_FIFTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_USER_FIFTH::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_FIFTH::"
         },
         {
           "name": "PJE_PASS_FIFTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_PASS_FIFTH::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_FIFTH::"
         },
         {
           "name": "PJE_USER_SIXTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_USER_SIXTH::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_SIXTH::"
         },
         {
           "name": "PJE_PASS_SIXTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:PJE_PASS_SIXTH::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_SIXTH::"
         },
         {
           "name": "AWS_S3_REGION",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:AWS_S3_REGION::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:AWS_S3_REGION::"
         },
         {
           "name": "NODE_ENV",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:NODE_ENV::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:NODE_ENV::"
         },
         {
           "name": "AWS_S3_BUCKET_NAME",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:AWS_S3_BUCKET_NAME::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:AWS_S3_BUCKET_NAME::"
         },
         {
           "name": "WEBHOOK_URL",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:WEBHOOK_URL::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:WEBHOOK_URL::"
         },
         {
           "name": "REDIS_URL",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod:REDIS_URL::"
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:REDIS_URL::"
         }
       ],
       "logConfiguration": {
