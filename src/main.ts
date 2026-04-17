@@ -5,6 +5,7 @@ import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { Queue } from 'bullmq';
 import { BrowserManager } from './utils/browser.manager';
+import { Logger } from '@nestjs/common';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -65,6 +66,18 @@ async function bootstrap() {
     console.log(
       `✅ Bull Board carregado com ${bullQueues.length} filas registradas`,
     );
+    const logger = new Logger('BullBoard');
+
+    logger.warn(
+      `Tentando conectar ao Redis para Bull Board... ${process.env.REDIS_URL}`,
+    );
+    try {
+      const tstQueue = app.get<Queue>('BullQueue_pje-tst');
+      await tstQueue.getJobCounts();
+      logger.warn('Redis conectado com sucesso!');
+    } catch (error) {
+      logger.error('Falha ao conectar ao Redis:', error);
+    }
   }
 
   await app.listen(port, '0.0.0.0');
