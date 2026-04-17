@@ -36,17 +36,21 @@ jobs:
       - name: Login Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      # =========================
+      # BUILD IMAGE (SEM latest)
+      # =========================
       - name: Build and Push Docker Image
         run: |
           IMAGE_SHA=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
-          IMAGE_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
 
-          docker build -t $IMAGE_SHA -t $IMAGE_LATEST .
+          docker build -t $IMAGE_SHA .
           docker push $IMAGE_SHA
-          docker push $IMAGE_LATEST
 
           echo "IMAGE_SHA=$IMAGE_SHA" >> $GITHUB_ENV
 
+      # =========================
+      # GET TASK DEF
+      # =========================
       - name: Download Current Task Definition
         run: |
           aws ecs describe-task-definition \
@@ -54,7 +58,10 @@ jobs:
             --query taskDefinition \
             --output json > task-definition.json
 
-      - name: Update Task Definition (safe)
+      # =========================
+      # UPDATE TASK DEF (image only)
+      # =========================
+      - name: Update Task Definition
         run: |
           jq \
             --arg IMAGE "$IMAGE_SHA" \
@@ -76,10 +83,23 @@ jobs:
               )
             ' task-definition.json > task-def-updated.json
 
-      - name: Deploy ECS
+      # =========================
+      # DEPLOY TASK DEFINITION
+      # =========================
+      - name: Deploy ECS Task Definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-def-updated.json
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
+
+      # =========================
+      # FORCE REAL ROLLOUT (IMPORTANTE)
+      # =========================
+      - name: Force new deployment
+        run: |
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment
