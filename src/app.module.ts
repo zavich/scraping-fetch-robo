@@ -2,24 +2,23 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 
-import { BullModule } from '@nestjs/bullmq';
-import Redis from 'ioredis';
-import { AppController } from './app.controller';
-import { RedisModule } from './connection/redis.module';
+import { PjeModule } from './modules/pje/pje.module';
 import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.module';
+import { RedisModule } from './connection/redis.module';
+import { BullModule } from '@nestjs/bullmq';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      cache: true,
-      envFilePath: process.env.NODE_ENV === 'local' ? '.env' : undefined,
     }),
+    PjeModule,
     BullModule.forRootAsync({
       imports: [RedisModule],
       inject: ['REDIS_CLIENT'],
-      useFactory: (redis: Redis) => ({
-        connection: redis,
+      useFactory: (redisClient: any) => ({
+        connection: redisClient,
       }),
     }),
     RedisModule,

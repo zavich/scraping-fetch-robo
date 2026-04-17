@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Module, Global } from '@nestjs/common';
 import Redis from 'ioredis';
 
 @Global()
@@ -7,28 +7,17 @@ import Redis from 'ioredis';
     {
       provide: 'REDIS_CLIENT',
       useFactory: () => {
-        const url = process.env.REDIS_URL;
-
-        if (!url) {
-          throw new Error('REDIS_URL não definido no ambiente');
+        if (!process.env.REDIS_URL) {
+          throw new Error('REDIS_URL não está definido!');
         }
 
-        const client = new Redis(url, {
-          maxRetriesPerRequest: null,
-          enableReadyCheck: true,
-          lazyConnect: false,
-          reconnectOnError: (err) => {
-            console.error('[Redis reconnect error]', err.message);
-            return true;
-          },
+        const client = new Redis(process.env.REDIS_URL, {
+          maxRetriesPerRequest: null, // obrigatório para BullMQ
         });
 
-        client.on('connect', () => {
-          console.log('[Redis] connected');
-        });
-
+        // Evita logs de "Unhandled error event"
         client.on('error', (err) => {
-          console.error('[Redis] error:', err.message);
+          console.warn('[Redis] error event:', err.message);
         });
 
         return client;
