@@ -19,7 +19,7 @@ jobs:
       ECR_REPOSITORY: scraping
       ECS_CLUSTER: scraping-cluster
       ECS_SERVICE: scraping-task-service
-      TASK_FAMILY: scraping-api
+      TASK_FAMILY: scraping-task
       CONTAINER_NAME: scraping-container
 
     steps:
