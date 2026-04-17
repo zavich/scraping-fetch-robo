@@ -16,7 +16,9 @@ export class BrowserManager {
   static async getBrowser(): Promise<Browser> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+        executablePath:
+          process.env.PUPPETEER_EXECUTABLE_PATH ||
+          '/usr/bin/google-chrome-stable',
         headless: true,
         args: [
           '--no-sandbox',
@@ -25,8 +27,11 @@ export class BrowserManager {
           '--disable-gpu',
           '--no-zygote',
           '--disable-software-rasterizer',
+          '--window-size=1366,768',
+          '--start-maximized',
+          '--disable-blink-features=AutomationControlled',
         ],
-        protocolTimeout: 180_000, // 3 minutos
+        protocolTimeout: 120_000,
         timeout: 180_000,
       });
       console.log('✅ Browser inicializado');

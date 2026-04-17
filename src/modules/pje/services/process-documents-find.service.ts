@@ -73,20 +73,25 @@ export class ProcessDocumentsFindService {
       }
       const fileBuffer = fs.readFileSync(filePath);
 
-      // // remove o arquivo temporário
-      try {
-        fs.promises
-          .unlink(filePath)
-          .catch((err) =>
-            this.logger.warn(`Não foi possível deletar: ${err.message}`),
-          );
+      // Validação do PDF antes de processar
+      if (!fileBuffer || fileBuffer.length === 0) {
+        this.logger.error(
+          `❌ O arquivo ${filePath} está vazio ou corrompido. Não é possível processar.`,
+        );
+        throw new BadGatewayException(
+          `O arquivo ${filePath} está vazio ou corrompido. Não é possível processar.`,
+        );
+      }
 
+      // remove o arquivo temporário
+      try {
+        await fs.promises.unlink(filePath);
         this.logger.debug(
           `🗑️ Arquivo temporário ${filePath} deletado com sucesso`,
         );
       } catch (err) {
         this.logger.warn(
-          `⚠️ Não foi possível deletar ${filePath}: ${err.message}`,
+          `⚠️ Não foi possível deletar ${filePath}: ${(err as Error).message}`,
         );
       }
 
@@ -102,9 +107,24 @@ export class ProcessDocumentsFindService {
         const bookmarks: Bookmark[] =
           await this.pdfExtractService.extractBookmarks(fileBuffer);
 
+        if (!bookmarks || bookmarks.length === 0) {
+          this.logger.warn(
+            `⚠️ Nenhum bookmark encontrado no arquivo ${filePath}. Verifique o conteúdo do PDF.`,
+          );
+          return uploadedDocuments;
+        }
+
         const bookmarksFiltrados = bookmarks.filter((b: Bookmark) =>
           regexDocumentos.some((r) => r.test(normalizeString(b.title))),
         );
+
+        if (bookmarksFiltrados.length === 0) {
+          this.logger.warn(
+            `⚠️ Nenhum bookmark relevante encontrado no arquivo ${filePath}.`,
+          );
+          return uploadedDocuments;
+        }
+
         const processarBookmark = async (bookmark: Bookmark) => {
           const extractedPdfBuffer =
             await this.pdfExtractService.extractPagesByIndex(
@@ -119,7 +139,7 @@ export class ProcessDocumentsFindService {
             return;
           }
 
-          const fileKey = `${this.normalize(bookmark.title)}_${bookmark.index}_${Date.now()}_${Math.random()
+          const fileKey = `${normalizeString(bookmark.title)}_${bookmark.index}_${Date.now()}_${Math.random()
             .toString(36)
             .slice(2, 8)}.pdf`;
           await this.awsS3Service.uploadS3Object(
@@ -137,6 +157,7 @@ export class ProcessDocumentsFindService {
 
           processedDocumentIds.add(bookmark.id);
         };
+
         for (const bookmark of bookmarksFiltrados) {
           if (processedDocumentIds.has(bookmark.id)) continue;
 
@@ -155,28 +176,25 @@ export class ProcessDocumentsFindService {
             await processarBookmark(proximo);
           }
         }
-
-        // ✅ Função auxiliar para evitar duplicação
       } catch (pdfError: any) {
-        this.logger.error(`❌ Erro ao processar PDF da instância: ${pdfError}`);
-        // continue; // ignora esse PDF e vai pro próximo
+        this.logger.error(
+          `❌ Erro ao processar PDF da instância ${filePath}: ${(pdfError as Error).message}`,
+        );
+        throw new BadGatewayException(
+          `Erro ao processar PDF da instância ${filePath}: ${(pdfError as Error).message}`,
+        );
       }
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : 'Erro desconhecido';
       this.logger.error(
-        `❌ Erro ao baixar PDF do processo ${processNumber}: ${error.message}`,
+        `❌ Erro ao baixar PDF do processo ${processNumber}: ${errorMessage}`,
       );
       throw new BadGatewayException(
-        `Não foi possível baixar documentos restritos para o processo ${processNumber}`,
+        `Não foi possível baixar documentos restritos para o processo ${processNumber}: ${errorMessage}`,
       );
     }
 
     return uploadedDocuments;
   }
-  normalize = (str: string) =>
-    str
-      .normalize('NFD') // separa acentos
-      .replace(/[\u0300-\u036f]/g, '') // remove acentos
-      .replace(/[^\w\s-]/g, '') // remove caracteres especiais
-      .trim()
-      .replace(/\s+/g, '_');
 }
