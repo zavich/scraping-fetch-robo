@@ -74,7 +74,7 @@ jobs:
         run: |
           jq \
             --arg IMAGE "$IMAGE_SHA" \
-            --arg TASK_ROLE "arn:aws:iam::339340413604:role/NOME_DA_SUA_ROLE_AQUI" \
+            --arg TASK_ROLE "arn:aws:iam::339340413604:role/scraping-task-role" \
             --arg EXEC_ROLE "arn:aws:iam::339340413604:role/ecsTaskExecutionRole" \
             '
             .taskRoleArn = $TASK_ROLE
