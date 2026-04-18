@@ -74,8 +74,12 @@ jobs:
         run: |
           jq \
             --arg IMAGE "$IMAGE_SHA" \
+            --arg TASK_ROLE "arn:aws:iam::339340413604:role/NOME_DA_SUA_ROLE_AQUI" \
+            --arg EXEC_ROLE "arn:aws:iam::339340413604:role/ecsTaskExecutionRole" \
             '
-            .containerDefinitions |= map(
+            .taskRoleArn = $TASK_ROLE
+            | .executionRoleArn = $EXEC_ROLE
+            | .containerDefinitions |= map(
               if .name == env.CONTAINER_NAME then
                 .image = $IMAGE
               else .
