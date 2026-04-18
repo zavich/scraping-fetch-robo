@@ -92,13 +92,8 @@ export class FetchDocumentoService {
       const response = await axios.get(url, {
         headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos
-        // responseType: 'arraybuffer',
+        responseType: 'arraybuffer',
         withCredentials: true,
-      });
-      console.log('Resposta da API:', {
-        status: response.status,
-        headers: response.headers,
-        dataType: typeof response.data,
       });
 
       // Validação do conteúdo antes de salvar como PDF
