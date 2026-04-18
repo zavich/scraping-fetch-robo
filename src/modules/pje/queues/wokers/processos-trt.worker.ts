@@ -9,7 +9,6 @@ import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
 import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
-import { deleteByPattern } from 'src/utils/redis-delete-keys';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -198,14 +197,8 @@ export class GenericProcessoWorker extends WorkerHost {
 
       console.log('RESPONSE:', response);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
-      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
 
-      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
-      await axios.post(webhookUrl, response);
+      // await axios.post(webhookUrl, response);
       if (documents) {
         await new Promise((resolve) => setTimeout(resolve, 2000)); // pequena pausa para garantir que o webhook seja processado antes de iniciar a consulta de documentos
         console.log(
