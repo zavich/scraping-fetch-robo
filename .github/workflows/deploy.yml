@@ -26,9 +26,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # =========================
-      # AWS CREDENTIALS
-      # =========================
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -36,28 +33,20 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # =========================
-      # LOGIN ECR
-      # =========================
       - name: Login Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      # =========================
-      # BUILD IMAGE
-      # =========================
       - name: Build and Push Docker Image
         run: |
-          IMAGE_TAG=${GITHUB_SHA}
-          IMAGE_URI=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
+          IMAGE_SHA=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
+          IMAGE_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
 
-          docker build -t $IMAGE_URI .
-          docker push $IMAGE_URI
+          docker build -t $IMAGE_SHA -t $IMAGE_LATEST .
+          docker push $IMAGE_SHA
+          docker push $IMAGE_LATEST
 
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          echo "IMAGE_SHA=$IMAGE_SHA" >> $GITHUB_ENV
 
-      # =========================
-      # VALIDATION STEP (IMPORTANTE 🔥)
-      # =========================
       - name: Validate Redis URL (fail fast)
         run: |
           echo "Checking REDIS_URL from Secrets Manager..."
@@ -74,9 +63,6 @@ jobs:
             exit 1
           fi
 
-      # =========================
-      # GET TASK DEFINITION
-      # =========================
       - name: Download Current Task Definition
         run: |
           aws ecs describe-task-definition \
@@ -84,13 +70,10 @@ jobs:
             --query taskDefinition \
             --output json > task-definition.json
 
-      # =========================
-      # UPDATE TASK DEFINITION
-      # =========================
-      - name: Update Task Definition
+      - name: Update Task Definition (safe)
         run: |
           jq \
-            --arg IMAGE "$IMAGE_URI" \
+            --arg IMAGE "$IMAGE_SHA" \
             '
             .containerDefinitions |= map(
               if .name == env.CONTAINER_NAME then
@@ -109,10 +92,7 @@ jobs:
               )
             ' task-definition.json > task-def-updated.json
 
-      # =========================
-      # DEPLOY
-      # =========================
-      - name: Deploy ECS Task Definition
+      - name: Deploy ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-def-updated.json
