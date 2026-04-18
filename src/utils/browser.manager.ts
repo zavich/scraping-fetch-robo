@@ -16,9 +16,7 @@ export class BrowserManager {
   static async getBrowser(): Promise<Browser> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
-        executablePath:
-          process.env.PUPPETEER_EXECUTABLE_PATH ||
-          '/usr/bin/google-chrome-stable',
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
         headless: true,
         args: [
           '--no-sandbox',
