@@ -26,6 +26,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # =========================
+      # AWS CREDENTIALS
+      # =========================
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -33,23 +36,46 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # =========================
+      # LOGIN ECR
+      # =========================
       - name: Login Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       # =========================
-      # BUILD IMAGE (SEM latest)
+      # BUILD IMAGE
       # =========================
       - name: Build and Push Docker Image
         run: |
-          IMAGE_SHA=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
+          IMAGE_TAG=${GITHUB_SHA}
+          IMAGE_URI=${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}
 
-          docker build -t $IMAGE_SHA .
-          docker push $IMAGE_SHA
+          docker build -t $IMAGE_URI .
+          docker push $IMAGE_URI
 
-          echo "IMAGE_SHA=$IMAGE_SHA" >> $GITHUB_ENV
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
       # =========================
-      # GET TASK DEF
+      # VALIDATION STEP (IMPORTANTE 🔥)
+      # =========================
+      - name: Validate Redis URL (fail fast)
+        run: |
+          echo "Checking REDIS_URL from Secrets Manager..."
+
+          REDIS_URL=$(aws secretsmanager get-secret-value \
+            --secret-id scraping/prod \
+            --query SecretString \
+            --output text | jq -r .REDIS_URL)
+
+          echo "REDIS_URL=$REDIS_URL"
+
+          if [[ "$REDIS_URL" != *"scraping-redis-prod"* ]]; then
+            echo "❌ INVALID REDIS_URL detected!"
+            exit 1
+          fi
+
+      # =========================
+      # GET TASK DEFINITION
       # =========================
       - name: Download Current Task Definition
         run: |
@@ -59,12 +85,12 @@ jobs:
             --output json > task-definition.json
 
       # =========================
-      # UPDATE TASK DEF (image only)
+      # UPDATE TASK DEFINITION
       # =========================
       - name: Update Task Definition
         run: |
           jq \
-            --arg IMAGE "$IMAGE_SHA" \
+            --arg IMAGE "$IMAGE_URI" \
             '
             .containerDefinitions |= map(
               if .name == env.CONTAINER_NAME then
@@ -84,7 +110,7 @@ jobs:
             ' task-definition.json > task-def-updated.json
 
       # =========================
-      # DEPLOY TASK DEFINITION
+      # DEPLOY
       # =========================
       - name: Deploy ECS Task Definition
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -95,7 +121,7 @@ jobs:
           wait-for-service-stability: true
 
       # =========================
-      # FORCE REAL ROLLOUT (IMPORTANTE)
+      # FORCE REDEPLOY (redundância ok)
       # =========================
       - name: Force new deployment
         run: |
