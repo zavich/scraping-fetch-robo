@@ -23,7 +23,7 @@ export class GenericDocumentosWorker extends WorkerHost {
     job: Job<{
       numero: string;
       instances: ProcessosResponse[];
-      filePath: string;
+      filePath: string | undefined;
     }>,
   ) {
     const { numero, instances, filePath } = job.data;

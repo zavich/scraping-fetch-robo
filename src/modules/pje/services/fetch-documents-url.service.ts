@@ -4,7 +4,6 @@ import axios from 'axios';
 import * as fs from 'fs';
 import Redis from 'ioredis';
 import * as path from 'path';
-import { LoginErrorTrt } from 'src/utils/trt-validate';
 
 @Injectable()
 export class FetchDocumentoService {
@@ -21,9 +20,8 @@ export class FetchDocumentoService {
         this.logger.error('Parâmetros inválidos fornecidos');
         return '';
       }
-      const validatedTRT = LoginErrorTrt.includes(regionTRT) ? 2 : regionTRT; // TRT3 tem tratamento especial
 
-      const redisKey = `pje:session:${validatedTRT}`;
+      const redisKey = `pje:session:${regionTRT}`;
       const cookies = (await this.redis.get(redisKey)) || '';
       const awsWafTokenKey = `aws-waf-token:${processNumber}`;
       const awsWafToken = await this.redis.get(awsWafTokenKey);
@@ -94,8 +92,13 @@ export class FetchDocumentoService {
       const response = await axios.get(url, {
         headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos
-        responseType: 'arraybuffer',
+        // responseType: 'arraybuffer',
         withCredentials: true,
+      });
+      console.log('Resposta da API:', {
+        status: response.status,
+        headers: response.headers,
+        dataType: typeof response.data,
       });
 
       // Validação do conteúdo antes de salvar como PDF
@@ -131,7 +134,7 @@ export class FetchDocumentoService {
     } catch (error) {
       this.logger.error(
         `Erro ao buscar documento para processo ${processNumber}:`,
-        error,
+        error.message,
       );
       throw new Error('Erro ao executar DocumentoService');
     }
