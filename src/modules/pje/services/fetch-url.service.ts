@@ -2,7 +2,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
@@ -15,8 +14,6 @@ axios.defaults.timeout = 10000; // 10 segundos
 
 @Injectable()
 export class FetchUrlMovimentService {
-  private readonly documentosQueues: Record<string, Queue> = {};
-
   private readonly logger = new Logger(FetchUrlMovimentService.name);
 
   constructor(
