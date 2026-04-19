@@ -17,8 +17,6 @@ import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
-import { ScrapingService } from '../../helpers/scraping.service';
-import { WebScrapingMovimentService } from './services/web-scraping-moviment.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
 import { FetchDocumentoService } from './services/fetch-documents-url.service';
 import { ScrapingProcessService } from './services/scraping-process.service';
@@ -43,13 +41,11 @@ import { ScrapingProcessService } from './services/scraping-process.service';
   providers: [
     PjeLoginService,
     CaptchaService,
-    WebScrapingMovimentService,
     FetchUrlMovimentService,
     ConsultarProcessoQueue,
     AwsS3Service,
     PdfExtractService,
     LoginPoolService,
-    ScrapingService,
     ConsultarProcessoDocumentoQueue,
     ProcessDocumentsFindService,
     FetchDocumentoService,

@@ -11,7 +11,6 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 
 import { Response } from 'express';
-import { ScrapingService } from '../../helpers/scraping.service';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 @Controller('processos')
@@ -20,7 +19,6 @@ export class PjeController {
     private readonly consultarProcessoQueue: ConsultarProcessoQueue,
     private readonly extractService: PdfExtractService,
     private readonly loginPoolService: LoginPoolService,
-    private readonly scrapingService: ScrapingService,
   ) {}
   @Post('extract-by-id')
   @UseInterceptors(FileInterceptor('file'))
@@ -103,14 +101,6 @@ export class PjeController {
     return await this.loginPoolService.getCookies(
       5,
       '0000631-53.2025.5.05.0017',
-    );
-  }
-  @Post('/teste/trt')
-  async teste(): Promise<any> {
-    return await this.scrapingService.execute(
-      '0016495-78.2023.5.16.0023',
-      16,
-      2,
     );
   }
 }

@@ -3,12 +3,10 @@ import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
 import { Job, Queue } from 'bullmq';
 import Redis from 'ioredis';
-import { ScrapingService } from 'src/helpers/scraping.service';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
-import { WebScrapingMovimentService } from '../../services/web-scraping-moviment.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -16,10 +14,8 @@ export class GenericProcessoWorker extends WorkerHost {
   constructor(
     @Inject(LoginPoolService) // 👈 AQUI
     private readonly loginPool: LoginPoolService,
-    @Inject(WebScrapingMovimentService)
-    private readonly webScrapingMovimentService: WebScrapingMovimentService,
-    @Inject(ScrapingService)
-    private readonly scrapingService: ScrapingService,
+    // @Inject(ScrapingService)
+    // private readonly scrapingService: ScrapingService,
     @Inject(FetchUrlMovimentService)
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
@@ -115,7 +111,7 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
-      await this.scrapingService.execute(numero, regionTRT, 1);
+      // await this.scrapingService.execute(numero, regionTRT, 1);
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
