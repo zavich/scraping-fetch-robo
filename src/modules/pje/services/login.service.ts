@@ -1,14 +1,7 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import axios from 'axios';
 import Redis from 'ioredis';
 import { CaptchaService } from 'src/services/captcha.service';
-import { BrowserManager } from 'src/utils/browser.manager';
-import { scraperRequest } from 'src/utils/fetch-scraper';
-import { buildHeaders, userAgents } from 'src/utils/user-agents';
 
 export interface LoginResponse {
   instancia: string;
@@ -38,26 +31,44 @@ export class PjeLoginService {
   ): Promise<{ cookies: string }> {
     const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    const refere = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`;
-    const awswaf = await this.redis.get(`aws-waf-token:${numero}`);
-    const headers = buildHeaders(
-      numero,
-      '1',
-      regionTRT,
-      awswaf as string,
-      refere,
-    );
+    const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
 
-    const response = await scraperRequest(
+    let headersRedis: Record<string, string> = {};
+    if (headersRedisRaw) {
+      try {
+        headersRedis = JSON.parse(headersRedisRaw) as Record<string, string>;
+      } catch (e) {
+        this.logger.warn(
+          'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
+        );
+        headersRedis = {};
+      }
+    }
+    const headers = {
+      ...headersRedis,
+      referer: url,
+    };
+
+    // const response = await scraperRequest(
+    //   url,
+    //   `username`,
+    //   headers,
+    //   'POST',
+    //   {
+    //     login: username,
+    //     senha: password,
+    //   },
+    //   false,
+    // );
+    const response = await axios.post(
       url,
-      `username`,
-      headers,
-      'POST',
       {
         login: username,
         senha: password,
       },
-      false,
+      {
+        headers,
+      },
     );
     const login = response.data as LoginResponse;
     const redisKey = `pje:session:${regionTRT}`;

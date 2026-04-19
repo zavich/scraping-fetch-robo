@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -5,7 +6,7 @@ import axios from 'axios';
 import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
-import { scraperRequest } from 'src/utils/fetch-scraper';
+// import { scraperRequest } from 'src/utils/fetch-scraper';
 import { FetchDocumentoService } from './fetch-documents-url.service';
 
 // Configura um timeout global para o axios
@@ -56,23 +57,22 @@ export class FetchUrlMovimentService {
                 string,
                 string
               >;
-            } catch (e) {
+            } catch (error: any) {
               this.logger.warn(
                 'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
               );
               headersRedis = {};
             }
           }
+
           const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
           const headers = {
             ...headersRedis,
             referer: url,
           };
-          const { data } = await scraperRequest<DetalheProcesso[]>(
-            url,
-            `${numeroDoProcesso}`, // sticky session
-            headers,
-            'GET',
+          const { data } = await axios.get<DetalheProcesso[]>(
+            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+            { headers },
           );
 
           const detalheProcesso = data[0];
@@ -151,15 +151,16 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
-      // const response = await axios.get<ProcessosResponse>(url, {
-      //   headers: buildHeaders(numeroDoProcesso, instance, regionTRT),
-      // });
-      const response = await scraperRequest<ProcessosResponse>(
-        url,
-        `${numeroDoProcesso}`,
+      const response = await axios.get<ProcessosResponse>(url, {
         headers,
-        'GET',
-      );
+      });
+      // const response = await scraperRequest<ProcessosResponse>(
+      //   url,
+      //   `${numeroDoProcesso}`,
+      //   headers,
+      //   'GET',
+      //   undefined,
+      // );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
