@@ -70,7 +70,6 @@ export class FetchUrlMovimentService {
           const headers = {
             ...headersRedis,
             referer: url,
-            Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
           };
           const { data } = await axios.get<DetalheProcesso[]>(
             `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
