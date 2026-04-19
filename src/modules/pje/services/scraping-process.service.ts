@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { Page } from 'puppeteer';
 import { ProcessosResponse } from 'src/interfaces';
+import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
 import { BrowserManager } from 'src/utils/browser.manager';
@@ -15,6 +16,7 @@ export class ScrapingProcessService {
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    private readonly awsS3Service: AwsS3Service,
   ) {
     this.pool.init();
   }
@@ -630,6 +632,17 @@ export class ScrapingProcessService {
     const bodyLength = html.length;
 
     if (bodyLength < 5000) {
+      const screenshotPath =
+        `screenshots/block-detected-${Date.now()}.png` as `${string}.png`;
+      const screenshotBuffer = await page.screenshot({ path: screenshotPath });
+      await this.awsS3Service.uploadS3Object(
+        process.env.AWS_S3_BUCKET_NAME as string,
+        screenshotPath,
+        screenshotBuffer,
+        'application/png',
+      );
+      this.logger.log(`📸 Captura de tela salva em: ${screenshotPath}`);
+
       throw new Error('🚫 HTML suspeito (provável bloqueio)');
     }
   }
