@@ -76,7 +76,7 @@ export class FetchDocumentoService {
       const headers = {
         Authorization: `Bearer ${accessToken1g}`,
         'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
+        // Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
         'x-grau-instancia': instancia,
         referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
         'user-agent':
@@ -89,6 +89,9 @@ export class FetchDocumentoService {
         'sec-ch-ua-mobile': '?0',
         'sec-ch-ua-platform': '"Windows"',
       };
+      if (awsWafToken) {
+        headers['Cookie'] = `${awsWafToken}`;
+      }
       const response = await axios.get(url, {
         headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos
