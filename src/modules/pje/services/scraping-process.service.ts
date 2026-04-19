@@ -638,13 +638,13 @@ export class ScrapingProcessService {
 
     if (bodyLength < 5000) {
       const screenshotPath =
-        `screenshots/block-detected-${Date.now()}.png` as `${string}.png`;
+        `block-detected-${Date.now()}.png` as `${string}.png`;
       const screenshotBuffer = await page.screenshot({ path: screenshotPath });
       await this.awsS3Service.uploadS3Object(
         process.env.AWS_S3_BUCKET_NAME as string,
         screenshotPath,
         screenshotBuffer,
-        'application/png',
+        'image/png',
       );
       this.logger.log(`📸 Captura de tela salva em: ${screenshotPath}`);
 
