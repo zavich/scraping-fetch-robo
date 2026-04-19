@@ -1,4 +1,28 @@
 import axios, { AxiosRequestConfig, AxiosResponse, Method } from 'axios';
+const { HttpsProxyAgent } = require('https-proxy-agent');
+
+type ProxyItem = {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+};
+
+const rawProxies = [
+  '108.165.197.49:6288:cpaproxyscon:cpaproxys',
+  '45.38.89.93:6028:cpaproxyscon:cpaproxys',
+];
+
+function parseProxy(raw: string): ProxyItem {
+  const [host, port, username, password] = raw.split(':');
+  return { host, port: Number(port), username, password };
+}
+
+const proxies = rawProxies.map(parseProxy);
+
+function getProxy(session?: string): ProxyItem {
+  return proxies[Math.floor(Math.random() * proxies.length)];
+}
 
 export async function scraperRequest<T>(
   url: string,
@@ -6,76 +30,54 @@ export async function scraperRequest<T>(
   headers: Record<string, string> = {},
   method: Method = 'GET',
   data?: unknown,
-  useScraper = true, // 👈 controle importante
-  configParams?: {
-    ultra: boolean;
-  },
+  useProxy = false,
 ): Promise<AxiosResponse<T>> {
-  const SCRAPER_API_KEY = process.env.SCRAPER_API_KEY;
-
   const config: AxiosRequestConfig = {
+    url,
     method,
+    timeout: 180000,
+    validateStatus: () => true,
     headers: {
       'Content-Type': 'application/json',
       ...headers,
     },
-    timeout: 180000, // Aumente para 180 segundos para casos mais complexos
   };
 
-  // 👇 só adiciona body se for POST/PUT/PATCH
   if (['POST', 'PUT', 'PATCH'].includes(method) && data) {
-    if (typeof data === 'object' || typeof data === 'string') {
-      config.data = data;
-    } else {
-      throw new Error('Data must be an object or string');
-    }
+    config.data = data;
   }
-  const params: any = {
-    api_key: SCRAPER_API_KEY,
-    url,
-    country_code: 'br',
-    keep_headers: true,
-    render: false,
-  };
 
-  if (configParams?.ultra) {
-    params.ultra_premium = true;
-  }
-  if (session) {
-    params.session_number = session;
-  }
+  const proxy = getProxy(session);
+
   try {
-    if (useScraper) {
+    if (useProxy) {
+      console.log(`🌐 Proxy usado: ${proxy.host}:${proxy.port}`);
+
+      const proxyUrl = `http://${proxy.username}:${proxy.password}@${proxy.host}:${proxy.port}`;
+      const agent = new HttpsProxyAgent(proxyUrl);
+
       const response = await axios.request<T>({
         ...config,
-        url: 'https://api.scraperapi.com/',
-        params,
+        httpAgent: agent,
+        httpsAgent: agent,
+        proxy: false,
       });
-
       return response;
     }
 
-    // 👇 fallback direto (sem proxy)
     const response = await axios.request<T>({
       ...config,
-      url,
+      proxy: false,
     });
-
+    console.log('STATUS:', response.status);
+    console.log('HEADERS:', response.headers);
     return response;
   } catch (error: any) {
-    if (useScraper) {
-      console.warn('⚠️ Scraper falhou, fallback direto:', error.message);
+    console.warn('⚠️ Proxy falhou:', error?.message || error);
 
-      const fallback = await axios.request<T>({
-        ...config,
-        url,
-        data: config.data,
-        timeout: 180000, // Aumente para 180 segundos para casos mais complexos
-      });
-
-      return fallback;
-    }
-
-    throw error;
+    return await axios.request<T>({
+      ...config,
+      proxy: false,
+    });
   }
 }

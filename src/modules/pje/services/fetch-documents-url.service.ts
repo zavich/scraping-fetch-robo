@@ -73,22 +73,39 @@ export class FetchDocumentoService {
         throw new Error('Sessão inválida (sem access_token_1g)');
       }
       // 🔹 headers
+      const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
+      let headersRedis: Record<string, string> = {};
+      if (headersRedisRaw) {
+        try {
+          headersRedis = JSON.parse(headersRedisRaw) as Record<string, string>;
+        } catch (e) {
+          this.logger.warn(
+            'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
+          );
+          headersRedis = {};
+        }
+      }
       const headers = {
+        ...headersRedis,
+        referer: url,
         Authorization: `Bearer ${accessToken1g}`,
-        'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
-        'x-grau-instancia': instancia,
-        referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-        accept: 'application/json, text/plain, */*',
-        'sec-fetch-site': 'same-origin',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-dest': 'empty',
-        'sec-ch-ua': '"Chromium";v="146", "Not A(Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
       };
+      // const headers = {
+      //   Authorization: `Bearer ${accessToken1g}`,
+      //   'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      //   Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
+      //   'x-grau-instancia': instancia,
+      //   referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
+      //   'user-agent':
+      //     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+      //   accept: 'application/json, text/plain, */*',
+      //   'sec-fetch-site': 'same-origin',
+      //   'sec-fetch-mode': 'cors',
+      //   'sec-fetch-dest': 'empty',
+      //   'sec-ch-ua': '"Chromium";v="146", "Not A(Brand";v="99"',
+      //   'sec-ch-ua-mobile': '?0',
+      //   'sec-ch-ua-platform': '"Windows"',
+      // };
       const response = await axios.get(url, {
         headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos

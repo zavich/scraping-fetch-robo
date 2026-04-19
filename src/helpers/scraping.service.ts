@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-misused-promises */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { CDPSession, Page } from 'puppeteer';
@@ -437,7 +438,7 @@ export class ScrapingService {
         };
       }
       this.logger.log('✅ Nenhum AWS WAF detectado na página');
-
+      await this.captureRealRequest(page, regionTRT);
       // 👇 1. espera frontend inicializar
       await new Promise((r) => setTimeout(r, 2000));
       await page.reload({ waitUntil: 'networkidle0' });
@@ -484,5 +485,46 @@ export class ScrapingService {
       await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado');
     }
+  }
+  async captureRealRequest(page: Page, regionTRT: number) {
+    await page.setRequestInterception(true);
+
+    page.removeAllListeners('request');
+    page.removeAllListeners('response');
+
+    page.on('request', async (request) => {
+      try {
+        const url = request.url();
+
+        if (url.includes('/pje-consulta-api/api/propriedades')) {
+          const headers = request.headers();
+
+          // pega cookies reais armazenados no browser
+          const browserCookies = await page.cookies();
+
+          const cookieHeader = browserCookies
+            .map((c) => `${c.name}=${c.value}`)
+            .join('; ');
+
+          // console.log('🎯 REQUEST ENCONTRADA');
+          // console.log('📍 URL:', url);
+          // console.log('🔥 HEADERS:', headers);
+          // console.log('🍪 COOKIE REAL:', cookieHeader);
+
+          await this.redis.set(
+            `headers:${regionTRT}`,
+            JSON.stringify(headers),
+            'EX',
+            3600,
+          );
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!request.isInterceptResolutionHandled()) {
+          await request.continue();
+        }
+      }
+    });
   }
 }

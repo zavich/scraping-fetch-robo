@@ -108,13 +108,6 @@ export class CaptchaService {
   }
   async getBalance(): Promise<number> {
     try {
-      // const response = await axios.get('https://2captcha.com/res.php', {
-      //   params: {
-      //     key: this.apiKey,
-      //     action: 'getbalance',
-      //     json: 1,
-      //   },
-      // });
       const response = await firstValueFrom(
         this.httpService.get<TwoCaptchaResultResponse>(
           'https://2captcha.com/res.php',

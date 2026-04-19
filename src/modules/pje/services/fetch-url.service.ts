@@ -6,7 +6,6 @@ import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
 import { scraperRequest } from 'src/utils/fetch-scraper';
-import { buildHeaders } from 'src/utils/user-agents';
 import { FetchDocumentoService } from './fetch-documents-url.service';
 
 // Configura um timeout global para o axios
@@ -49,27 +48,37 @@ export class FetchUrlMovimentService {
           const tokenCaptcha = (await this.redis.get(
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
-          const redisKey = `aws-waf-token:${numeroDoProcesso}`;
-          const awsWafToken = await this.redis.get(redisKey);
-
-          const headers = buildHeaders(
-            numeroDoProcesso,
-            i.toString(),
-            regionTRT,
-            awsWafToken || undefined,
-          );
-          // const { data } = await axios.get<DetalheProcesso[]>(
-          //   `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-          //   { headers },
-          // );
+          const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
+          let headersRedis: Record<string, string> = {};
+          if (headersRedisRaw) {
+            try {
+              headersRedis = JSON.parse(headersRedisRaw) as Record<
+                string,
+                string
+              >;
+            } catch (e) {
+              this.logger.warn(
+                'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
+              );
+              headersRedis = {};
+            }
+          }
           const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
+          const headers = {
+            ...headersRedis,
+            referer: url,
+          };
           const { data } = await scraperRequest<DetalheProcesso[]>(
             url,
             `${numeroDoProcesso}`, // sticky session
             headers,
+            'GET',
           );
+
           const detalheProcesso = data[0];
-          if (!detalheProcesso) continue;
+          if (!detalheProcesso?.id) {
+            continue;
+          }
 
           let processoResponse = await this.fetchProcess(
             headers,
@@ -81,6 +90,8 @@ export class FetchUrlMovimentService {
 
           // Caso retorne captcha
           if (
+            processoResponse &&
+            typeof processoResponse === 'object' &&
             'imagem' in processoResponse &&
             'tokenDesafio' in processoResponse
           ) {
@@ -148,9 +159,6 @@ export class FetchUrlMovimentService {
         `${numeroDoProcesso}`,
         headers,
         'GET',
-        undefined,
-        true,
-        { ultra: true },
       );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
