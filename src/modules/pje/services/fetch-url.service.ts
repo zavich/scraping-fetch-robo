@@ -8,6 +8,7 @@ import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
 // import { scraperRequest } from 'src/utils/fetch-scraper';
 import { FetchDocumentoService } from './fetch-documents-url.service';
+import { ScrapingProcessService } from './scraping-process.service';
 
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
@@ -20,6 +21,7 @@ export class FetchUrlMovimentService {
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly fetchDocumentoService: FetchDocumentoService,
+    private readonly scrapingProcessService: ScrapingProcessService,
   ) {}
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
@@ -44,80 +46,123 @@ export class FetchUrlMovimentService {
 
       const grauMax = origem === 'TST' ? 3 : 2;
       const initialGrau = origem === 'TST' ? 3 : 1;
+      // for (let i = initialGrau; i <= grauMax; i++) {
+      //   try {
+      //     const tokenCaptcha = (await this.redis.get(
+      //       `pje:token:captcha:${numeroDoProcesso}:${i}`,
+      //     )) as string;
+      //     const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
+      //     let headersRedis: Record<string, string> = {};
+      //     if (headersRedisRaw) {
+      //       try {
+      //         headersRedis = JSON.parse(headersRedisRaw) as Record<
+      //           string,
+      //           string
+      //         >;
+      //       } catch (error: any) {
+      //         this.logger.warn(
+      //           'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
+      //         );
+      //         headersRedis = {};
+      //       }
+      //     }
+      //     const awsWafTokenKey = `aws-waf-token:${numeroDoProcesso}`;
+      //     const awsWafToken = await this.redis.get(awsWafTokenKey);
+      //     const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
+      //     const headers = {
+      //       ...headersRedis,
+      //       referer: url,
+      //     };
+      //     const { data } = await axios.get<DetalheProcesso[]>(
+      //       `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+      //       { headers },
+      //     );
+
+      //     const detalheProcesso = data[0];
+      //     if (!detalheProcesso?.id) {
+      //       continue;
+      //     }
+
+      //     let processoResponse = await this.fetchProcess(
+      //       headers,
+      //       numeroDoProcesso,
+      //       detalheProcesso.id,
+      //       i.toString(),
+      //       tokenCaptcha,
+      //     );
+
+      //     // Caso retorne captcha
+      //     if (
+      //       processoResponse &&
+      //       typeof processoResponse === 'object' &&
+      //       'imagem' in processoResponse &&
+      //       'tokenDesafio' in processoResponse
+      //     ) {
+      //       const resposta = await this.fetchCaptcha(processoResponse.imagem);
+      //       processoResponse = await this.fetchProcess(
+      //         headers,
+      //         numeroDoProcesso,
+      //         detalheProcesso.id,
+      //         i.toString(),
+      //         undefined,
+      //         processoResponse.tokenDesafio,
+      //         resposta,
+      //       );
+      //     }
+
+      //     instances.push(processoResponse);
+      //   } catch (err: any) {
+      //     if (i === 1) {
+      //       this.logger.error(
+      //         `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
+      //       );
+      //       break;
+      //     }
+      //     this.logger.warn(
+      //       `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
+      //     );
+      //     continue;
+      //   }
+      // }
       for (let i = initialGrau; i <= grauMax; i++) {
         try {
-          const tokenCaptcha = (await this.redis.get(
-            `pje:token:captcha:${numeroDoProcesso}:${i}`,
-          )) as string;
-          const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
-          let headersRedis: Record<string, string> = {};
-          if (headersRedisRaw) {
-            try {
-              headersRedis = JSON.parse(headersRedisRaw) as Record<
-                string,
-                string
-              >;
-            } catch (error: any) {
-              this.logger.warn(
-                'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
-              );
-              headersRedis = {};
-            }
-          }
-          const awsWafTokenKey = `aws-waf-token:${numeroDoProcesso}`;
-          const awsWafToken = await this.redis.get(awsWafTokenKey);
-          const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
-          const headers = {
-            ...headersRedis,
-            referer: url,
-          };
-          const { data } = await axios.get<DetalheProcesso[]>(
-            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            { headers },
+          const delayMs = 1000;
+          this.logger.debug(
+            `Iniciando delay de ${delayMs}ms antes de buscar instância ${i}`,
           );
+          await this.delay(delayMs);
 
-          const detalheProcesso = data[0];
-          if (!detalheProcesso?.id) {
-            continue;
-          }
-
-          let processoResponse = await this.fetchProcess(
-            headers,
-            numeroDoProcesso,
-            detalheProcesso.id,
-            i.toString(),
-            tokenCaptcha,
+          this.logger.log(
+            `Executando scraping para instância ${i}, processo: ${numeroDoProcesso}`,
           );
-
-          // Caso retorne captcha
-          if (
-            processoResponse &&
-            typeof processoResponse === 'object' &&
-            'imagem' in processoResponse &&
-            'tokenDesafio' in processoResponse
-          ) {
-            const resposta = await this.fetchCaptcha(processoResponse.imagem);
-            processoResponse = await this.fetchProcess(
-              headers,
+          const { data: processoResponse, multipleInstances } =
+            await this.scrapingProcessService.execute(
               numeroDoProcesso,
-              detalheProcesso.id,
-              i.toString(),
-              undefined,
-              processoResponse.tokenDesafio,
-              resposta,
+              regionTRT,
+              i,
             );
-          }
 
+          this.logger.debug(
+            `Resposta do scraping para instância ${i}: ${JSON.stringify(processoResponse)}`,
+          );
           instances.push(processoResponse);
+
+          if (!multipleInstances) {
+            this.logger.debug(`Instância única detectada, encerrando loop.`);
+            break;
+          }
         } catch (err: any) {
           if (i === 1) {
             this.logger.error(
-              `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
+              `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
+            );
+            this.logger.debug(
+              `Detalhes do erro: ${JSON.stringify(err.response?.data || err)}`,
             );
             break;
           }
           this.logger.warn(
-            `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
+            `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
           );
           continue;
         }

@@ -21,6 +21,7 @@ import { ScrapingService } from '../../helpers/scraping.service';
 import { WebScrapingMovimentService } from './services/web-scraping-moviment.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
 import { FetchDocumentoService } from './services/fetch-documents-url.service';
+import { ScrapingProcessService } from './services/scraping-process.service';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { FetchDocumentoService } from './services/fetch-documents-url.service';
     ConsultarProcessoDocumentoQueue,
     ProcessDocumentsFindService,
     FetchDocumentoService,
+    ScrapingProcessService,
     ...createDynamicWorkers(),
     ...createDynamicDocumentsWorkers(),
   ],
