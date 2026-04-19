@@ -111,12 +111,12 @@ export class FetchUrlMovimentService {
         } catch (err: any) {
           if (i === 1) {
             this.logger.error(
-              `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
+              `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
             );
             break;
           }
           this.logger.warn(
-            `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
+            `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
           );
           continue;
         }
