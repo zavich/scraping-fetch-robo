@@ -499,21 +499,16 @@ export class ScrapingService {
         if (url.includes('/pje-consulta-api/api/propriedades')) {
           const headers = request.headers();
 
-          // pega cookies reais armazenados no browser
-          const browserCookies = await page.cookies();
-
-          const cookieHeader = browserCookies
-            .map((c) => `${c.name}=${c.value}`)
-            .join('; ');
-
-          // console.log('🎯 REQUEST ENCONTRADA');
-          // console.log('📍 URL:', url);
-          // console.log('🔥 HEADERS:', headers);
-          // console.log('🍪 COOKIE REAL:', cookieHeader);
+          const filteredHeaders = {
+            referer: headers.referer,
+            'user-agent': headers['user-agent'],
+            'x-grau-instancia': headers['x-grau-instancia'],
+            accept: headers.accept,
+          };
 
           await this.redis.set(
             `headers:${regionTRT}`,
-            JSON.stringify(headers),
+            JSON.stringify(filteredHeaders),
             'EX',
             3600,
           );
