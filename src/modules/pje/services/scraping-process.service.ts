@@ -510,6 +510,12 @@ export class ScrapingProcessService {
               const responseBody = await response.text();
               this.logger.log(`🔍 Corpo da resposta: ${responseBody}`);
 
+              // Verifica se o corpo da resposta é uma string antes de fazer JSON.parse
+              const data: unknown =
+                typeof responseBody === 'string'
+                  ? JSON.parse(responseBody)
+                  : responseBody;
+
               // Tenta extrair o ID da resposta
               const isProcessoDadosBasicos = (
                 obj: unknown,
@@ -522,7 +528,6 @@ export class ScrapingProcessService {
                 );
               };
 
-              const data: unknown = JSON.parse(responseBody);
               if (
                 Array.isArray(data) &&
                 data.length > 0 &&
