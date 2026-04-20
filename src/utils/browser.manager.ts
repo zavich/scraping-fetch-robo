@@ -11,7 +11,6 @@ puppeteer.use(StealthPlugin());
 
 export class BrowserManager {
   private static browser: Browser | null = null;
-
   /**
    * Browser singleton
    */
@@ -19,12 +18,7 @@ export class BrowserManager {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-
-        /**
-         * Melhor modo headless atual
-         */
         headless: true,
-
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -32,12 +26,12 @@ export class BrowserManager {
           '--disable-gpu',
           '--no-zygote',
           '--disable-software-rasterizer',
-
           '--window-size=1366,768',
           '--start-maximized',
 
           '--disable-blink-features=AutomationControlled',
-
+          '--ignore-certificate-errors',
+          '--allow-insecure-localhost',
           '--disable-features=site-per-process',
           '--disable-background-timer-throttling',
           '--disable-renderer-backgrounding',
@@ -72,6 +66,16 @@ export class BrowserManager {
   }> {
     const context = await this.createContext();
     const page = await context.newPage();
+    const client = await page.target().createCDPSession();
+
+    await client.send('Security.setIgnoreCertificateErrors', {
+      ignore: true,
+    });
+
+    // await page.authenticate({
+    //   username: proxyUsername,
+    //   password: proxyPassword,
+    // });
 
     /**
      * Viewport realista
@@ -83,7 +87,6 @@ export class BrowserManager {
       isMobile: false,
       hasTouch: false,
     });
-
     /**
      * Headers reais
      */
