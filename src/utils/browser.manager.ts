@@ -30,8 +30,6 @@ export class BrowserManager {
           '--start-maximized',
 
           '--disable-blink-features=AutomationControlled',
-          '--ignore-certificate-errors',
-          '--allow-insecure-localhost',
           '--disable-features=site-per-process',
           '--disable-background-timer-throttling',
           '--disable-renderer-backgrounding',
@@ -66,17 +64,6 @@ export class BrowserManager {
   }> {
     const context = await this.createContext();
     const page = await context.newPage();
-    const client = await page.target().createCDPSession();
-
-    await client.send('Security.setIgnoreCertificateErrors', {
-      ignore: true,
-    });
-
-    // await page.authenticate({
-    //   username: proxyUsername,
-    //   password: proxyPassword,
-    // });
-
     /**
      * Viewport realista
      */
