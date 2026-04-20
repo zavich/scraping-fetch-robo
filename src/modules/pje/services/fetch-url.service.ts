@@ -29,14 +29,14 @@ export class FetchUrlMovimentService {
   async execute(
     numeroDoProcesso: string,
     origem?: string,
-  ): Promise<ProcessosResponse[]> {
+  ): Promise<Partial<ProcessosResponse>[]> {
     const regionTRT = numeroDoProcesso?.includes('.')
       ? Number(numeroDoProcesso.split('.')[3])
       : null;
     if (!regionTRT)
       throw new Error(`Invalid process number: ${numeroDoProcesso}`);
 
-    const instances: ProcessosResponse[] = [];
+    const instances: Partial<ProcessosResponse>[] = [];
 
     try {
       const balance = await this.captchaService.getBalance();
@@ -134,12 +134,26 @@ export class FetchUrlMovimentService {
       //     this.logger.log(
       //       `Executando scraping para instância ${i}, processo: ${numeroDoProcesso}`,
       //     );
-      //     const { data: processoResponse, multipleInstances } =
-      //       await this.scrapingProcessService.execute(
-      //         numeroDoProcesso,
-      //         regionTRT,
-      //         i,
+      //     const {
+      //       data: processoResponse,
+      //       multipleInstances,
+      //       segredoJusticaDetected,
+      //     } = await this.scrapingProcessService.execute(
+      //       numeroDoProcesso,
+      //       regionTRT,
+      //       i,
+      //     );
+
+      //     if (segredoJusticaDetected) {
+      //       this.logger.warn(
+      //         `⚠️ Segredo de Justiça detectado para o processo ${numeroDoProcesso}`,
       //       );
+      //       instances.push({
+      //         numeroProcesso: numeroDoProcesso,
+      //         mensagemErro: 'segredo de justiça',
+      //       } as Partial<ProcessosResponse>);
+      //       break;
+      //     }
       //     instances.push(processoResponse);
 
       //     if (!multipleInstances) {

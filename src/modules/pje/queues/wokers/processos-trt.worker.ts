@@ -7,6 +7,8 @@ import { normalizeResponse } from 'src/utils/normalizeResponse';
 import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
+import { ProcessosResponse } from 'src/interfaces';
+import { ScrapingService } from 'src/helpers/scraping.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -18,6 +20,8 @@ export class GenericProcessoWorker extends WorkerHost {
     // private readonly scrapingService: ScrapingService,
     @Inject(FetchUrlMovimentService)
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
+    @Inject(ScrapingService)
+    private readonly scrapingService: ScrapingService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
 
     // ✅ injeta todas as filas TRT
@@ -111,7 +115,7 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
-      // await this.scrapingService.execute(numero, regionTRT, 1);
+      await this.scrapingService.execute(numero, regionTRT, 1);
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
@@ -189,7 +193,13 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       // ✅ Resposta final
       // --------------------------
-      const response = normalizeResponse(numero, result, '', false, origem);
+      const response = normalizeResponse(
+        numero,
+        result as ProcessosResponse[],
+        '',
+        false,
+        origem,
+      );
 
       console.log('RESPONSE:', response);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
@@ -221,7 +231,7 @@ export class GenericProcessoWorker extends WorkerHost {
           }
           filePath = await this.fetchUrlMovimentService.fetchDocuments(
             numero,
-            instances,
+            instances as ProcessosResponse[],
             regionTRT,
           );
         }

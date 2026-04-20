@@ -35,14 +35,11 @@ export class ScrapingProcessService {
       }
       const urlBase = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/`;
       this.logger.log(`🌐 Acessando URL base: ${urlBase}`);
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-          '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      );
       await page.goto(urlBase, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'networkidle2',
         timeout: 120000, // Aumentar para 2 minutos
       });
+      await this.delay(6000);
       await page
         .waitForFunction(
           () => {
@@ -302,7 +299,10 @@ export class ScrapingProcessService {
         //   3600,
         // );
         await new Promise((r) => setTimeout(r, 1500));
-        await page.reload({ waitUntil: 'domcontentloaded' });
+        await page.reload({
+          waitUntil: 'networkidle2',
+        });
+        await this.delay(4000);
       }
       // 🔥 ESPERA REAL DO FRONT
       await page.waitForFunction(
@@ -337,7 +337,10 @@ export class ScrapingProcessService {
 
       // Simula digitação natural do número do processo
       for (const char of processNumber) {
-        await page.type(inputSelector, char);
+        await page.focus(inputSelector);
+        await page.keyboard.type(char, {
+          delay: 120 + Math.random() * 180,
+        });
         await this.delay(100 + Math.random() * 100); // Pausa aleatória entre 100ms e 300ms
       }
 
@@ -349,10 +352,13 @@ export class ScrapingProcessService {
       const submitButtonSelector = '#btnPesquisar';
       this.logger.log('🖱 Clicando no botão de submit...');
       await page.waitForSelector(submitButtonSelector, { visible: true });
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle0' }),
-        page.click(submitButtonSelector),
-      ]);
+      const btn = await page.$(submitButtonSelector);
+
+      if (btn) {
+        await btn.hover();
+        await this.delay(400);
+        await btn.click();
+      }
       this.logger.log('✅ Formulário enviado com sucesso.');
 
       // Verifica se o painel de escolha de processos existe
@@ -496,121 +502,171 @@ export class ScrapingProcessService {
         }
       });
 
-      // Variável para armazenar o ID da resposta anterior
+      let segredoJusticaDetected = false;
       let previousId: string | null = null;
 
-      // Listener para respostas (captura o ID da resposta anterior e cancela novas requisições após extração)
-      page.on('response', (response) => {
-        const url = response.url();
-        if (url.includes('/api/processos/dadosbasicos/') && !previousId) {
-          void (async () => {
-            this.logger.log(`🔍 Resposta capturada: ${url}`);
-            this.logger.log(`🔍 Status: ${response.status()}`);
-            try {
-              const responseBody = await response.text();
-              this.logger.log(`🔍 Corpo da resposta: ${responseBody}`);
-
-              // Verifica se o corpo da resposta é uma string antes de fazer JSON.parse
-              const data: unknown =
-                typeof responseBody === 'string'
-                  ? JSON.parse(responseBody)
-                  : responseBody;
-
-              // Tenta extrair o ID da resposta
-              const isProcessoDadosBasicos = (
-                obj: unknown,
-              ): obj is { id: number } => {
-                return (
-                  typeof obj === 'object' &&
-                  obj !== null &&
-                  'id' in obj &&
-                  typeof (obj as Record<string, unknown>).id === 'number'
-                );
-              };
-
-              if (
-                Array.isArray(data) &&
-                data.length > 0 &&
-                isProcessoDadosBasicos(data[0])
-              ) {
-                previousId = data[0].id.toString();
-                this.logger.log(`🔍 ID extraído: ${previousId}`);
-              } else {
-                this.logger.log('⚠️ Estrutura inesperada na resposta.');
-              }
-            } catch (err) {
-              this.logger.log(`⚠️ Erro ao obter o corpo da resposta: ${err}`);
-            }
-          })();
-        }
+      /**
+       * Aguarda resposta dos dados básicos
+       */
+      const responseDadosBasicos = await page.waitForResponse((response) => {
+        return response.url().includes('/api/processos/dadosbasicos/');
       });
-      const extractedData = await new Promise<ProcessosResponse>((resolve) => {
-        const handler = (response: import('puppeteer').HTTPResponse): void => {
-          void (async () => {
-            const url = response.url();
-            if (previousId && url.includes(`/api/processos/${previousId}`)) {
-              this.logger.log(`🔍 Resposta subsequente capturada: ${url}`);
-              this.logger.log(`🔍 Status: ${response.status()}`);
 
-              const headers = response.headers();
-              const contentType = headers['content-type'];
-              if (contentType && contentType.includes('application/pdf')) {
-                this.logger.log(
-                  '⚠️ Resposta ignorada: Tipo de conteúdo é PDF.',
-                );
-                return;
-              }
+      this.logger.log(`🔍 Resposta capturada: ${responseDadosBasicos.url()}`);
+      this.logger.log(`🔍 Status: ${responseDadosBasicos.status()}`);
 
-              // Captura o tokenCaptcha dos headers
-              const tokenCaptcha = headers['captchatoken'];
-              if (tokenCaptcha) {
-                this.logger.log(`🔑 TokenCaptcha capturado: ${tokenCaptcha}`);
+      try {
+        const data = (await responseDadosBasicos.json()) as unknown;
 
-                // Armazena o tokenCaptcha no Redis
-                const redisKey = `tokencaptcha:${processNumber}:${instance}`;
-                await this.redis.set(redisKey, tokenCaptcha, 'EX', 3600);
-                this.logger.log(
-                  `✅ TokenCaptcha armazenado no Redis com a chave: ${redisKey}`,
-                );
-              }
-
-              try {
-                const responseJson =
-                  (await response.json()) as ProcessosResponse;
-                if (
-                  typeof responseJson === 'object' &&
-                  responseJson !== null &&
-                  'id' in responseJson &&
-                  'numero' in responseJson &&
-                  'classe' in responseJson &&
-                  'poloAtivo' in responseJson
-                ) {
-                  page.off('response', handler);
-
-                  resolve(responseJson);
-                }
-              } catch (err) {
-                this.logger.log(`⚠️ Erro ao processar a resposta: ${err}`);
-              }
-            }
-
-            // Captura o tokenDesafio da URL da resposta subsequente
-            const tokenDesafioMatch = url.match(/tokenDesafio=([^&]+)/);
-            const tokenDesafio = tokenDesafioMatch
-              ? tokenDesafioMatch[1]
-              : null;
-            if (tokenDesafio) {
-              this.logger.log(`🔑 TokenDesafio capturado: ${tokenDesafio}`);
-            }
-          })();
+        type ProcessoBasico = {
+          id: number;
+          segredoJustica?: boolean;
+          numero?: string;
         };
 
-        page.on('response', handler);
-      });
-      await page.waitForNetworkIdle({ idleTime: 500 }).catch(() => {});
-      // Finaliza a extensão (fecha a página e o contexto do navegador)
+        const isProcessoDadosBasicos = (
+          obj: unknown,
+        ): obj is ProcessoBasico => {
+          return (
+            typeof obj === 'object' &&
+            obj !== null &&
+            'id' in obj &&
+            typeof (obj as Record<string, unknown>).id === 'number'
+          );
+        };
 
-      return { data: extractedData, multipleInstances };
+        if (
+          Array.isArray(data) &&
+          data.length > 0 &&
+          isProcessoDadosBasicos(data[0])
+        ) {
+          const processo = data[0];
+
+          /**
+           * 🔒 Processo em segredo de justiça
+           */
+          if (processo.segredoJustica === true) {
+            this.logger.warn(
+              `🔒 Processo ${
+                processo.numero || processNumber
+              } está em segredo de justiça.`,
+            );
+
+            segredoJusticaDetected = true;
+
+            return {
+              data: {} as ProcessosResponse,
+              multipleInstances,
+              segredoJusticaDetected,
+            };
+          }
+
+          previousId = processo.id.toString();
+
+          this.logger.log(`🔍 ID extraído: ${previousId}`);
+        } else {
+          this.logger.warn('⚠️ Estrutura inesperada na resposta.');
+        }
+      } catch (err) {
+        this.logger.error(`⚠️ Erro ao obter resposta: ${err}`);
+      }
+
+      /**
+       * Aguarda resposta completa do processo
+       */
+      const extractedData = await new Promise<ProcessosResponse>(
+        (resolve, reject) => {
+          const handler = (
+            response: import('puppeteer').HTTPResponse,
+          ): void => {
+            void (async () => {
+              try {
+                const url = response.url();
+
+                if (
+                  previousId &&
+                  url.includes(`/api/processos/${previousId}`)
+                ) {
+                  this.logger.log(`🔍 Resposta subsequente capturada: ${url}`);
+
+                  this.logger.log(`🔍 Status: ${response.status()}`);
+
+                  const headers = response.headers();
+                  const contentType = headers['content-type'];
+
+                  if (contentType && contentType.includes('application/pdf')) {
+                    this.logger.log(
+                      '⚠️ Resposta ignorada: Tipo de conteúdo é PDF.',
+                    );
+                    return;
+                  }
+
+                  /**
+                   * Captura tokenCaptcha
+                   */
+                  const tokenCaptcha = headers['captchatoken'];
+
+                  if (tokenCaptcha) {
+                    const redisKey = `tokencaptcha:${processNumber}:${instance}`;
+
+                    await this.redis.set(redisKey, tokenCaptcha, 'EX', 3600);
+
+                    this.logger.log(`✅ TokenCaptcha salvo: ${redisKey}`);
+                  }
+
+                  /**
+                   * Captura tokenDesafio
+                   */
+                  const tokenDesafioMatch = url.match(/tokenDesafio=([^&]+)/);
+
+                  const tokenDesafio = tokenDesafioMatch
+                    ? tokenDesafioMatch[1]
+                    : null;
+
+                  if (tokenDesafio) {
+                    this.logger.log(`🔑 TokenDesafio: ${tokenDesafio}`);
+                  }
+
+                  const responseJson =
+                    (await response.json()) as ProcessosResponse;
+
+                  if (
+                    typeof responseJson === 'object' &&
+                    responseJson !== null &&
+                    'id' in responseJson &&
+                    'numero' in responseJson &&
+                    'classe' in responseJson &&
+                    'poloAtivo' in responseJson
+                  ) {
+                    page.off('response', handler);
+                    resolve(responseJson);
+                  }
+                }
+              } catch (err) {
+                page.off('response', handler);
+                reject(err);
+              }
+            })();
+          };
+
+          page.on('response', handler);
+        },
+      );
+
+      await page
+        .waitForNetworkIdle({
+          idleTime: 500,
+        })
+        .catch(() => {});
+
+      /**
+       * Retorno final
+       */
+      return {
+        data: extractedData,
+        multipleInstances,
+        segredoJusticaDetected,
+      };
     } finally {
       // 3. O PULO DO GATO: Fechar a página antes de liberar o contexto
       if (page) await page.close().catch(() => {});
@@ -626,11 +682,13 @@ export class ScrapingProcessService {
 
     if (
       html.includes('awswaf') ||
+      html.includes('captcha') ||
+      html.includes('challenge') ||
       html.includes('Access Denied') ||
-      url.includes('error') ||
-      url.includes('blocked')
+      html.includes('Request blocked') ||
+      url.includes('error')
     ) {
-      throw new Error('🚫 BLOQUEADO (WAF)');
+      throw new Error('🚫 BLOQUEADO');
     }
 
     // 🔥 verifica se o body está vazio ou estranho
