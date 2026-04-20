@@ -85,10 +85,7 @@ export class LoginPoolService {
     }
   }
 
-  async getCookies(
-    trt: number,
-    numero: string,
-  ): Promise<{
+  async getCookies(trt: number): Promise<{
     cookies: string;
     account: { username: string; password: string };
   }> {
@@ -114,7 +111,7 @@ export class LoginPoolService {
         this.logger.warn(
           `⚠️ Cookie TRT-${trt} não existe no Redis. Renovando...`,
         );
-        return await this.renovarSessao(trt, redisKey, readyKey, numero);
+        return await this.renovarSessao(trt, redisKey, readyKey);
       }
 
       // 2) Verifica se cookie tem tokens essenciais
@@ -127,7 +124,7 @@ export class LoginPoolService {
           `⚠️ Cookie TRT-${trt} inválido (faltam tokens). Renovando sessão...`,
         );
         await this.redis.del(redisKey, readyKey);
-        return await this.getCookies(trt, numero);
+        return await this.getCookies(trt);
       }
 
       // 3) Cookie válido
@@ -166,7 +163,6 @@ export class LoginPoolService {
               trt,
               username,
               password,
-              numero,
             );
 
             if (!loginResult?.cookies || loginResult.cookies.length === 0)
@@ -239,7 +235,6 @@ export class LoginPoolService {
         trt,
         account.username,
         account.password,
-        numero,
       );
 
       cookies = loginResult.cookies;
@@ -252,24 +247,16 @@ export class LoginPoolService {
     return { cookies: cookies, account: usedAccount! };
   }
 
-  async forceRefreshCookies(
-    trt: number,
-    numero: string,
-  ): Promise<{
+  async forceRefreshCookies(trt: number): Promise<{
     cookies: string;
     account: { username: string; password: string };
   }> {
     const redisKey = `pje:session:${trt}`;
     const readyKey = `${redisKey}:ready`;
     await this.redis.del(redisKey, readyKey);
-    return this.getCookies(trt, numero); // Isso vai gerar um novo login
+    return this.getCookies(trt); // Isso vai gerar um novo login
   }
-  private async renovarSessao(
-    trt: number,
-    redisKey: string,
-    readyKey: string,
-    numero: string,
-  ) {
+  private async renovarSessao(trt: number, redisKey: string, readyKey: string) {
     await this.redis.del(redisKey, readyKey);
 
     const account = this.getConta(true);
@@ -278,7 +265,6 @@ export class LoginPoolService {
       trt,
       account.username,
       account.password,
-      numero,
     );
 
     const newCookies = loginResult.cookies;

@@ -209,13 +209,6 @@ export class FetchUrlMovimentService {
       const response = await axios.get<ProcessosResponse>(url, {
         headers,
       });
-      // const response = await scraperRequest<ProcessosResponse>(
-      //   url,
-      //   `${numeroDoProcesso}`,
-      //   headers,
-      //   'GET',
-      //   undefined,
-      // );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,

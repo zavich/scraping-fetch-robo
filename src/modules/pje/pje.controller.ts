@@ -96,11 +96,8 @@ export class PjeController {
       priority,
     );
   }
-  @Post('/auth/login')
-  async loginPje(): Promise<any> {
-    return await this.loginPoolService.getCookies(
-      5,
-      '0000631-53.2025.5.05.0017',
-    );
+  @Post('/auth/login/:trt')
+  async loginPje(@Param('trt') trt: number): Promise<any> {
+    return await this.loginPoolService.getCookies(trt);
   }
 }

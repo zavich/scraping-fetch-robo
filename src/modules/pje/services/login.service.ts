@@ -27,7 +27,6 @@ export class PjeLoginService {
     regionTRT: number,
     username: string,
     password: string,
-    numero: string,
   ): Promise<{ cookies: string }> {
     const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
     await new Promise((resolve) => setTimeout(resolve, 1000));
