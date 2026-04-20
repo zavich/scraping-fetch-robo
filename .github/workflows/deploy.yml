@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: us-east-2
-      ECR_REGISTRY: 339340413604.dkr.ecr.us-east-2.amazonaws.com
+      AWS_REGION: sa-east-1
+      ECR_REGISTRY: 339340413604.dkr.ecr.sa-east-1.amazonaws.com
       ECR_REPOSITORY: scraping
-      ECS_CLUSTER: scraping-cluster
+      ECS_CLUSTER: robo-cluster
       ECS_SERVICE: scraping-task-service
       TASK_FAMILY: scraping-task
       CONTAINER_NAME: scraping-container

@@ -12,7 +12,7 @@ async function bootstrap() {
   const port = 8081;
 
   app.enableCors({
-    origin: ['https://robo-api-prd.juri.capital'],
+    origin: ['https://robo-api.juri.capital'],
     credentials: true,
   });
 
