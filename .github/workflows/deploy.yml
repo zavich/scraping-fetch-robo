@@ -58,7 +58,7 @@ jobs:
 
           echo "REDIS_URL=$REDIS_URL"
 
-          if [[ "$REDIS_URL" != *"scraping-redis-prod"* ]]; then
+          if [[ "$REDIS_URL" != *"robo-redis"* ]]; then
             echo "❌ INVALID REDIS_URL detected!"
             exit 1
           fi
