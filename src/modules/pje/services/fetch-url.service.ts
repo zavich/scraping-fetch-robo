@@ -7,7 +7,6 @@ import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
 import { FetchDocumentoService } from './fetch-documents-url.service';
-import { ScrapingProcessService } from './scraping-process.service';
 
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
@@ -20,7 +19,6 @@ export class FetchUrlMovimentService {
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly fetchDocumentoService: FetchDocumentoService,
-    private readonly scrapingProcessService: ScrapingProcessService,
   ) {}
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
@@ -71,6 +69,7 @@ export class FetchUrlMovimentService {
           const headers = {
             ...headersRedis,
             referer: url,
+            Cookie: `${awsWafToken || ''}`,
           };
           const { data } = await axios.get<DetalheProcesso[]>(
             `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
