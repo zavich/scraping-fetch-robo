@@ -7,6 +7,7 @@ import Redis from 'ioredis';
 import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
 import { FetchDocumentoService } from './fetch-documents-url.service';
+import { userAgents } from 'src/utils/user-agents';
 
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
@@ -62,6 +63,14 @@ export class FetchUrlMovimentService {
               );
               headersRedis = {};
             }
+          } else {
+            headersRedis = {
+              'x-grau-instancia': i.toString(),
+              referer: `https://pje.${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
+              accept: 'application/json, text/plain, */*',
+              userAgents:
+                userAgents[Math.floor(Math.random() * userAgents.length)],
+            };
           }
           const awsWafTokenKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(awsWafTokenKey);
