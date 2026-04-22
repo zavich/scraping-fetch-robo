@@ -14,7 +14,7 @@ export function createDynamicWorkers(): Provider[] {
       lockDuration: 900000,
       stalledInterval: 120000,
       limiter: {
-        max: 1,
+        max: 5,
         duration: 2000,
       },
     };
