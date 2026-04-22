@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import Redis from 'ioredis';
 import { CaptchaService } from 'src/services/captcha.service';
+import { userAgents } from 'src/utils/user-agents';
 
 export interface LoginResponse {
   instancia: string;
@@ -27,6 +28,7 @@ export class PjeLoginService {
     regionTRT: number,
     username: string,
     password: string,
+    number: string,
   ): Promise<{ cookies: string }> {
     const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -42,23 +44,21 @@ export class PjeLoginService {
         );
         headersRedis = {};
       }
+    } else {
+      headersRedis = {
+        'x-grau-instancia': '1',
+        accept: 'application/json, text/plain, */*',
+        userAgents: userAgents[Math.floor(Math.random() * userAgents.length)],
+        'content-type': 'application/json',
+      };
     }
+    const awsWafTokenKey = `aws-waf-token:${number}`;
+    const awsWafToken = await this.redis.get(awsWafTokenKey);
     const headers = {
       ...headersRedis,
-      referer: url,
+      referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`,
+      Cookie: `${awsWafToken || ''}`,
     };
-
-    // const response = await scraperRequest(
-    //   url,
-    //   `username`,
-    //   headers,
-    //   'POST',
-    //   {
-    //     login: username,
-    //     senha: password,
-    //   },
-    //   false,
-    // );
     const response = await axios.post(
       url,
       {

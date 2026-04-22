@@ -213,8 +213,10 @@ export class GenericProcessoWorker extends WorkerHost {
         let filePath: string | undefined = undefined;
         const validatedTRT = LoginErrorTrt.includes(regionTRT); // TRT3 tem tratamento especial
         if (!validatedTRT) {
-          const { cookies, account } =
-            await this.loginPool.getCookies(regionTRT);
+          const { cookies, account } = await this.loginPool.getCookies(
+            regionTRT,
+            numero,
+          );
 
           // Se não tiver cookies, significa que nenhuma conta está disponível
           if (!cookies || !account) {

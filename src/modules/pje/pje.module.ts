@@ -6,6 +6,7 @@ import {
   ALL_TRT_DOCUMENT_QUEUES,
   ALL_TRT_QUEUES,
 } from 'src/helpers/getTRTQueue';
+import { ScrapingService } from 'src/helpers/scraping.service';
 import { createDynamicDocumentsWorkers } from 'src/providers/dynamic-document-workers.provider';
 import { createDynamicWorkers } from 'src/providers/dynamic-workers.provider';
 import { AwsS3Service } from 'src/services/aws-s3.service';
@@ -14,13 +15,11 @@ import { PjeController } from './pje.controller';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { ConsultarProcessoDocumentoQueue } from './queues/service/consultar-processo-documento';
 import { PdfExtractService } from './services/extract.service';
+import { FetchDocumentoService } from './services/fetch-documents-url.service';
+import { FetchUrlMovimentService } from './services/fetch-url.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
-import { FetchUrlMovimentService } from './services/fetch-url.service';
-import { FetchDocumentoService } from './services/fetch-documents-url.service';
-import { ScrapingProcessService } from './services/scraping-process.service';
-import { ScrapingService } from 'src/helpers/scraping.service';
 
 @Module({
   imports: [
@@ -50,7 +49,6 @@ import { ScrapingService } from 'src/helpers/scraping.service';
     ConsultarProcessoDocumentoQueue,
     ProcessDocumentsFindService,
     FetchDocumentoService,
-    ScrapingProcessService,
     ScrapingService,
     ...createDynamicWorkers(),
     ...createDynamicDocumentsWorkers(),
