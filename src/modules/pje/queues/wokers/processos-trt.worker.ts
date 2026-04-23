@@ -206,7 +206,7 @@ export class GenericProcessoWorker extends WorkerHost {
       console.log('RESPONSE:', response);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
-      await axios.post(webhookUrl, response);
+      // await axios.post(webhookUrl, response);
       if (documents) {
         await new Promise((resolve) => setTimeout(resolve, 2000)); // pequena pausa para garantir que o webhook seja processado antes de iniciar a consulta de documentos
         console.log(

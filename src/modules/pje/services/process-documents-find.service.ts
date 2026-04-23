@@ -6,7 +6,7 @@ import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
 import { PdfExtractService } from './extract.service';
-import pLimit from 'p-limit';
+
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
@@ -123,20 +123,16 @@ export class ProcessDocumentsFindService {
           processedDocumentIds.add(bookmark.id);
         };
 
-        const limit = pLimit(4); // 4 simultâneos
-
-        const tasks: Promise<void>[] = [];
+        const tasks: (() => Promise<void>)[] = [];
 
         for (const bookmark of bookmarksFiltrados) {
           if (processedDocumentIds.has(bookmark.id)) continue;
 
           const index = bookmarks.findIndex((b) => b.id === bookmark.id);
 
-          tasks.push(
-            limit(async () => {
-              await processarBookmark(bookmark);
-            }),
-          );
+          tasks.push(async () => {
+            await processarBookmark(bookmark);
+          });
 
           const proximo = bookmarks[index + 1];
 
@@ -145,15 +141,13 @@ export class ProcessDocumentsFindService {
               `📎 Pegando também o documento seguinte a "${bookmark.title}": "${proximo.title}"`,
             );
 
-            tasks.push(
-              limit(async () => {
-                await processarBookmark(proximo);
-              }),
-            );
+            tasks.push(async () => {
+              await processarBookmark(proximo);
+            });
           }
         }
 
-        await Promise.all(tasks);
+        await this.runInBatches(tasks, 4);
       } catch (pdfError: any) {
         this.logger.error(
           `❌ Erro ao processar PDF da instância: ${(pdfError as Error).message}`,
@@ -174,5 +168,14 @@ export class ProcessDocumentsFindService {
     }
 
     return uploadedDocuments;
+  }
+  private async runInBatches(
+    tasks: (() => Promise<void>)[],
+    limit = 4,
+  ): Promise<void> {
+    for (let i = 0; i < tasks.length; i += limit) {
+      const batch = tasks.slice(i, i + limit);
+      await Promise.all(batch.map((task) => task()));
+    }
   }
 }
