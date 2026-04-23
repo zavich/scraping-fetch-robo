@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import Redis from 'ioredis';
 import { CaptchaService } from 'src/services/captcha.service';
+import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { userAgents } from 'src/utils/user-agents';
 
 export interface LoginResponse {
@@ -30,7 +31,8 @@ export class PjeLoginService {
     password: string,
     number: string,
   ): Promise<{ cookies: string }> {
-    const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/auth`;
+    const regionTRTValidate = LoginErrorTrt.includes(regionTRT) ? 2 : regionTRT;
+    const url = `https://pje.trt${regionTRTValidate}.jus.br/pje-consulta-api/api/auth`;
     await new Promise((resolve) => setTimeout(resolve, 1000));
     const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
 
@@ -56,7 +58,7 @@ export class PjeLoginService {
     const awsWafToken = await this.redis.get(awsWafTokenKey);
     const headers = {
       ...headersRedis,
-      referer: `https://pje.trt${regionTRT}.jus.br/consultaprocessual/login`,
+      referer: `https://pje.trt${regionTRTValidate}.jus.br/consultaprocessual/login`,
       Cookie: `${awsWafToken || ''}`,
     };
     const response = await axios.post(
@@ -70,7 +72,7 @@ export class PjeLoginService {
       },
     );
     const login = response.data as LoginResponse;
-    const redisKey = `pje:session:${regionTRT}`;
+    const redisKey = `pje:session:${regionTRTValidate}`;
     const cookieString = `access_token_1g=${login.access_token}; refresh_token_1g=${login.refresh_token}; instancia=${login.instancia}`;
     await this.redis.set(
       redisKey,

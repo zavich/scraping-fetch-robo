@@ -211,30 +211,33 @@ export class GenericProcessoWorker extends WorkerHost {
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
         let filePath: string | undefined = undefined;
-        const validatedTRT = LoginErrorTrt.includes(regionTRT); // TRT3 tem tratamento especial
-        if (!validatedTRT) {
-          const { cookies, account } = await this.loginPool.getCookies(
-            regionTRT,
-            numero,
-          );
+        const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
+          ? 2
+          : regionTRT;
 
-          // Se não tiver cookies, significa que nenhuma conta está disponível
-          if (!cookies || !account) {
-            const resp = normalizeResponse(
-              numero,
-              [],
-              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
-              true,
-            );
-            await axios.post(webhookUrl, resp);
-            return;
-          }
-          filePath = await this.fetchUrlMovimentService.fetchDocuments(
+        // if (!validatedTRT) {
+        const { cookies, account } = await this.loginPool.getCookies(
+          regionTRTValidate,
+          numero,
+        );
+
+        // Se não tiver cookies, significa que nenhuma conta está disponível
+        if (!cookies || !account) {
+          const resp = normalizeResponse(
             numero,
-            instances as ProcessosResponse[],
-            regionTRT,
+            [],
+            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+            true,
           );
+          await axios.post(webhookUrl, resp);
+          return;
         }
+        filePath = await this.fetchUrlMovimentService.fetchDocuments(
+          numero,
+          instances as ProcessosResponse[],
+          regionTRT,
+        );
+        // }
         const queueName = `trt${regionTRT}`;
         const documentosQueue = this.documentosQueues[queueName];
         await documentosQueue.add(
