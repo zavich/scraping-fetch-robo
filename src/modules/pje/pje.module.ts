@@ -20,6 +20,7 @@ import { FetchUrlMovimentService } from './services/fetch-url.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
+import { RedisService } from 'src/services/redis.service';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { ProcessDocumentsFindService } from './services/process-documents-find.s
     ProcessDocumentsFindService,
     FetchDocumentoService,
     ScrapingService,
+    RedisService,
     ...createDynamicWorkers(),
     ...createDynamicDocumentsWorkers(),
   ],

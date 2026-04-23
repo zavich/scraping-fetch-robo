@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Param,
   Post,
   Res,
@@ -13,12 +14,14 @@ import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { Response } from 'express';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
+import { RedisService } from 'src/services/redis.service';
 @Controller('processos')
 export class PjeController {
   constructor(
     private readonly consultarProcessoQueue: ConsultarProcessoQueue,
     private readonly extractService: PdfExtractService,
     private readonly loginPoolService: LoginPoolService,
+    private readonly redisService: RedisService,
   ) {}
   @Post('extract-by-id')
   @UseInterceptors(FileInterceptor('file'))
@@ -102,5 +105,9 @@ export class PjeController {
       trt,
       '0011054-02.2024.5.03.0102',
     );
+  }
+  @Delete('redis/:queue/clear')
+  async clearRedis(@Param('queue') queue: string): Promise<any> {
+    return await this.redisService.deleteQueue(queue);
   }
 }
