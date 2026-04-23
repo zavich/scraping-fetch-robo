@@ -78,7 +78,7 @@ export class GenericDocumentosWorker extends WorkerHost {
       }
       const result = documentos.slice(0, 2);
       const response = normalizeResponse(numero, result, '', true);
-      // await axios.post(webhookUrl, response);
+      await axios.post(webhookUrl, response);
     } catch (error: any) {
       this.logger.error(error);
 
