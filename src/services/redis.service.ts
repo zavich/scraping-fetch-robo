@@ -7,7 +7,8 @@ export class RedisService {
 
   async deleteQueue(queueName: string): Promise<void> {
     try {
-      const keys = await this.redisClient.keys(`${queueName}:*`);
+      // Ajusta o padrão para buscar as filas corretamente
+      const keys = await this.redisClient.keys(`*${queueName}*`);
       if (keys.length > 0) {
         await this.redisClient.del(...keys);
         console.log(`Fila ${queueName} deletada com sucesso.`);
