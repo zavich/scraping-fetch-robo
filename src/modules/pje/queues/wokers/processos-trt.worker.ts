@@ -115,7 +115,9 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response);
         return;
       }
-      await this.scrapingService.execute(numero, regionTRT, 1);
+      if (regionTRT === 31) {
+        await this.scrapingService.execute(numero, regionTRT, 1);
+      }
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
