@@ -13,10 +13,10 @@ export function createDynamicWorkers(): Provider[] {
       concurrency,
       lockDuration: 900000,
       stalledInterval: 120000,
-      limiter: {
-        max: 5,
-        duration: 2000,
-      },
+      // limiter: {
+      //   max: 5,
+      //   duration: 2000,
+      // },
     };
 
     @Processor(queueName, processorOptions)
