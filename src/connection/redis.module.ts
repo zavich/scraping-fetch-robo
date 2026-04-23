@@ -7,21 +7,18 @@ import Redis from 'ioredis';
     {
       provide: 'REDIS_CLIENT',
       useFactory: () => {
-        const client = new Redis(process.env.REDIS_URL!, {
-          maxRetriesPerRequest: null,
+        if (!process.env.REDIS_URL) {
+          throw new Error('REDIS_URL não está definido!');
+        }
 
-          tls: {},
-
-          enableReadyCheck: false,
-
-          retryStrategy(times) {
-            return Math.min(times * 1000, 5000);
-          },
+        const client = new Redis(process.env.REDIS_URL, {
+          maxRetriesPerRequest: null, // obrigatório para BullMQ
         });
 
-        client.on('connect', () => console.log('Redis conectado'));
-        client.on('ready', () => console.log('Redis pronto'));
-        client.on('error', (err) => console.log('Redis erro:', err.message));
+        // Evita logs de "Unhandled error event"
+        client.on('error', (err) => {
+          console.warn('[Redis] error event:', err.message);
+        });
 
         return client;
       },

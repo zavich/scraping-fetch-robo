@@ -1,9 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
-import * as fs from 'fs';
 import Redis from 'ioredis';
-import * as path from 'path';
 import { LoginErrorTrt } from 'src/utils/trt-validate';
 
 @Injectable()
@@ -110,29 +108,8 @@ export class FetchDocumentoService {
         );
         throw new Error('Invalid PDF structure.');
       }
-
       const buffer = Buffer.from(response.data);
-
-      // cria pasta temp se não existir
-      const tempDir = path.join(process.cwd(), 'tmp');
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      const sanitizedProcessNumber = processNumber.replace(/\D+/g, '');
-
-      const fileName = `proc_${sanitizedProcessNumber}_${instancia}_${processId}_${Date.now()}_${Math.random()
-        .toString(36)
-        .slice(2, 8)}.pdf`;
-
-      const filePath = path.join(tempDir, fileName);
-
-      // salva no disco
-      fs.writeFileSync(filePath, buffer);
-
-      this.logger.log(`PDF salvo em: ${filePath}`);
-
-      return filePath;
+      return buffer.toString('base64');
     } catch (error) {
       this.logger.error(
         `Erro ao buscar documento para processo ${processNumber}:`,

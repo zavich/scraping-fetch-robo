@@ -23,10 +23,10 @@ export class GenericDocumentosWorker extends WorkerHost {
     job: Job<{
       numero: string;
       instances: ProcessosResponse[];
-      filePath: string | undefined;
+      pdfBase64: string | undefined;
     }>,
   ) {
-    const { numero, instances, filePath } = job.data;
+    const { numero, instances, pdfBase64 } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
 
     this.logger.log(`📄 [${job.queueName}] Documentos → ${numero}`);
@@ -47,8 +47,8 @@ export class GenericDocumentosWorker extends WorkerHost {
         return;
       }
 
-      if (!filePath) {
-        this.logger.error(`❌ filePath undefined para ${numero}`);
+      if (!pdfBase64) {
+        this.logger.error(`❌ pdfBase64 undefined para ${numero}`);
         const resp = normalizeResponse(
           numero,
           [],
@@ -63,7 +63,7 @@ export class GenericDocumentosWorker extends WorkerHost {
       const documentos = await this.processDocsService.execute(
         numero,
         instances,
-        filePath,
+        pdfBase64,
       );
       if (documentos[0].documentos.length === 0) {
         this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
@@ -78,14 +78,6 @@ export class GenericDocumentosWorker extends WorkerHost {
       }
       const result = documentos.slice(0, 2);
       const response = normalizeResponse(numero, result, '', true);
-      this.logger.log(`✅ Documentos finalizados → ${numero}`);
-      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
-
-      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
       await axios.post(webhookUrl, response);
     } catch (error: any) {
       this.logger.error(error);
@@ -97,6 +89,15 @@ export class GenericDocumentosWorker extends WorkerHost {
         true,
       );
       await axios.post(webhookUrl, resp);
+    } finally {
+      this.logger.log(`✅ Documentos finalizados → ${numero}`);
+      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
+
+      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+        log: (msg) => this.logger.debug(msg),
+      });
     }
   }
 }

@@ -1,32 +1,24 @@
 // src/modules/pje/services/process-find.service.ts
 
-import {
-  BadGatewayException,
-  Inject,
-  Injectable,
-  Logger,
-} from '@nestjs/common';
-import * as fs from 'fs';
-import Redis from 'ioredis';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
 import { PdfExtractService } from './extract.service';
-
+import pLimit from 'p-limit';
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
   constructor(
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   async execute(
     numeroDoProcesso: string,
     instances: ProcessosResponse[],
-    filePath: string,
+    pdfBase64: string,
   ): Promise<ProcessosResponse[]> {
     try {
       const instancesWithGrau = instances.map((instance, i) => {
@@ -40,7 +32,7 @@ export class ProcessDocumentsFindService {
       if (!instancesWithGrau || instancesWithGrau.length === 0) return [];
       const documentosRestritos = await this.uploadDocumentosRestritos(
         numeroDoProcesso,
-        filePath,
+        pdfBase64,
       );
 
       const newInstances = instancesWithGrau.map((instance) => ({
@@ -60,40 +52,13 @@ export class ProcessDocumentsFindService {
 
   async uploadDocumentosRestritos(
     processNumber: string,
-    filePath: string,
+    pdfBase64: string,
   ): Promise<Documento[]> {
     this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
     const uploadedDocuments: Documento[] = [];
     const processedDocumentIds = new Set<string>();
     try {
-      if (!filePath || !fs.existsSync(filePath)) {
-        throw new BadGatewayException(
-          `O arquivo ${filePath} não foi encontrado.`,
-        );
-      }
-      const fileBuffer = fs.readFileSync(filePath);
-
-      // Validação do PDF antes de processar
-      if (!fileBuffer || fileBuffer.length === 0) {
-        this.logger.error(
-          `❌ O arquivo ${filePath} está vazio ou corrompido. Não é possível processar.`,
-        );
-        throw new BadGatewayException(
-          `O arquivo ${filePath} está vazio ou corrompido. Não é possível processar.`,
-        );
-      }
-
-      // remove o arquivo temporário
-      try {
-        await fs.promises.unlink(filePath);
-        this.logger.debug(
-          `🗑️ Arquivo temporário ${filePath} deletado com sucesso`,
-        );
-      } catch (err) {
-        this.logger.warn(
-          `⚠️ Não foi possível deletar ${filePath}: ${(err as Error).message}`,
-        );
-      }
+      const fileBuffer = Buffer.from(pdfBase64, 'base64');
 
       // tenta extrair bookmarks e processar
       try {
@@ -109,7 +74,7 @@ export class ProcessDocumentsFindService {
 
         if (!bookmarks || bookmarks.length === 0) {
           this.logger.warn(
-            `⚠️ Nenhum bookmark encontrado no arquivo ${filePath}. Verifique o conteúdo do PDF.`,
+            `⚠️ Nenhum bookmark encontrado no arquivo. Verifique o conteúdo do PDF.`,
           );
           return uploadedDocuments;
         }
@@ -120,7 +85,7 @@ export class ProcessDocumentsFindService {
 
         if (bookmarksFiltrados.length === 0) {
           this.logger.warn(
-            `⚠️ Nenhum bookmark relevante encontrado no arquivo ${filePath}.`,
+            `⚠️ Nenhum bookmark relevante encontrado no arquivo`,
           );
           return uploadedDocuments;
         }
@@ -158,30 +123,43 @@ export class ProcessDocumentsFindService {
           processedDocumentIds.add(bookmark.id);
         };
 
+        const limit = pLimit(4); // 4 simultâneos
+
+        const tasks: Promise<void>[] = [];
+
         for (const bookmark of bookmarksFiltrados) {
           if (processedDocumentIds.has(bookmark.id)) continue;
 
-          // ✅ 1. Encontrar índice real do bookmark na lista original
           const index = bookmarks.findIndex((b) => b.id === bookmark.id);
 
-          // ✅ 2. Extrair o bookmark atual
-          await processarBookmark(bookmark);
+          tasks.push(
+            limit(async () => {
+              await processarBookmark(bookmark);
+            }),
+          );
 
-          // ✅ 3. Tentar pegar o próximo bookmark (se existir)
           const proximo = bookmarks[index + 1];
+
           if (proximo && !processedDocumentIds.has(proximo.id)) {
             this.logger.debug(
               `📎 Pegando também o documento seguinte a "${bookmark.title}": "${proximo.title}"`,
             );
-            await processarBookmark(proximo);
+
+            tasks.push(
+              limit(async () => {
+                await processarBookmark(proximo);
+              }),
+            );
           }
         }
+
+        await Promise.all(tasks);
       } catch (pdfError: any) {
         this.logger.error(
-          `❌ Erro ao processar PDF da instância ${filePath}: ${(pdfError as Error).message}`,
+          `❌ Erro ao processar PDF da instância: ${(pdfError as Error).message}`,
         );
         throw new BadGatewayException(
-          `Erro ao processar PDF da instância ${filePath}: ${(pdfError as Error).message}`,
+          `Erro ao processar PDF da instância: ${(pdfError as Error).message}`,
         );
       }
     } catch (error: unknown) {

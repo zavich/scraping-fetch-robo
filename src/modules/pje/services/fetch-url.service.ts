@@ -310,16 +310,16 @@ export class FetchUrlMovimentService {
       }
 
       await this.delay(this.delayMs);
-      const filePath = await this.fetchDocumentoService.execute(
+      const pdfBase64 = await this.fetchDocumentoService.execute(
         ultimaInstancia.id,
         regionTRT,
         ultimaInstancia.instance,
         processNumber,
       );
-      if (!filePath) {
-        throw new Error('filePath não gerado');
+      if (!pdfBase64) {
+        throw new Error('pdfBase64 não gerado');
       }
-      return filePath;
+      return pdfBase64;
     } catch (error) {
       this.logger.error(
         `Erro ao buscar documentos para ${processNumber}:`,

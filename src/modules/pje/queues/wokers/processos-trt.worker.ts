@@ -212,12 +212,10 @@ export class GenericProcessoWorker extends WorkerHost {
         console.log(
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
-        let filePath: string | undefined = undefined;
         const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
           ? 2
           : regionTRT;
 
-        // if (!validatedTRT) {
         const { cookies, account } = await this.loginPool.getCookies(
           regionTRTValidate,
           numero,
@@ -234,17 +232,16 @@ export class GenericProcessoWorker extends WorkerHost {
           await axios.post(webhookUrl, resp);
           return;
         }
-        filePath = await this.fetchUrlMovimentService.fetchDocuments(
+        const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
           numero,
           instances as ProcessosResponse[],
           regionTRT,
         );
-        // }
         const queueName = `trt${regionTRT}`;
         const documentosQueue = this.documentosQueues[queueName];
         await documentosQueue.add(
           'consulta-processo-documento',
-          { numero, instances, filePath },
+          { numero, instances, pdfBase64 },
           {
             jobId: numero,
             attempts: 2,
