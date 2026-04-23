@@ -74,7 +74,8 @@ export class FetchUrlMovimentService {
           }
           const awsWafTokenKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(awsWafTokenKey);
-          const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
+
+          const url = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
           const headers = {
             ...headersRedis,
             referer: url,
@@ -87,6 +88,17 @@ export class FetchUrlMovimentService {
 
           const detalheProcesso = data[0];
           if (!detalheProcesso?.id) {
+            continue;
+          }
+
+          if (
+            instances.some(
+              (instance) => instance.id === Number(detalheProcesso.id),
+            )
+          ) {
+            this.logger.warn(
+              `ID ${detalheProcesso.id} já existe na instância ${i}. Ignorando duplicata.`,
+            );
             continue;
           }
 
@@ -131,59 +143,6 @@ export class FetchUrlMovimentService {
           continue;
         }
       }
-      // for (let i = initialGrau; i <= grauMax; i++) {
-      //   try {
-      //     const delayMs = 1000;
-      //     this.logger.debug(
-      //       `Iniciando delay de ${delayMs}ms antes de buscar instância ${i}`,
-      //     );
-      //     await this.delay(delayMs);
-
-      //     this.logger.log(
-      //       `Executando scraping para instância ${i}, processo: ${numeroDoProcesso}`,
-      //     );
-      //     const {
-      //       data: processoResponse,
-      //       multipleInstances,
-      //       segredoJusticaDetected,
-      //     } = await this.scrapingProcessService.execute(
-      //       numeroDoProcesso,
-      //       regionTRT,
-      //       i,
-      //     );
-
-      //     if (segredoJusticaDetected) {
-      //       this.logger.warn(
-      //         `⚠️ Segredo de Justiça detectado para o processo ${numeroDoProcesso}`,
-      //       );
-      //       instances.push({
-      //         numeroProcesso: numeroDoProcesso,
-      //         mensagemErro: 'segredo de justiça',
-      //       } as Partial<ProcessosResponse>);
-      //       break;
-      //     }
-      //     instances.push(processoResponse);
-
-      //     if (!multipleInstances) {
-      //       this.logger.debug(`Instância única detectada, encerrando loop.`);
-      //       break;
-      //     }
-      //   } catch (err: any) {
-      //     if (i === 1) {
-      //       this.logger.error(
-      //         `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
-      //       );
-      //       this.logger.debug(
-      //         `Detalhes do erro: ${JSON.stringify(err.response?.data || err)}`,
-      //       );
-      //       break;
-      //     }
-      //     this.logger.warn(
-      //       `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
-      //     );
-      //     continue;
-      //   }
-      // }
       return instances;
     } catch (error: any) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
