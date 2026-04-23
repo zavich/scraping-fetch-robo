@@ -7,15 +7,15 @@ export function createDynamicWorkers(): Provider[] {
   const queues = [...ALL_TRT_QUEUES, 'pje-tst'];
 
   return queues.map((queueName) => {
-    const concurrency = queueName === 'pje-trt3' ? 1 : 2;
+    const concurrency = 2;
 
     const processorOptions = {
       concurrency,
       lockDuration: 900000,
       stalledInterval: 120000,
       limiter: {
-        max: 5,
-        duration: 2000,
+        max: queueName === 'pje-trt3' ? 2 : 5,
+        duration: 3000,
       },
     };
 
