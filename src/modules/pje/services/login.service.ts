@@ -50,7 +50,7 @@ export class PjeLoginService {
       headersRedis = {
         'x-grau-instancia': '1',
         accept: 'application/json, text/plain, */*',
-        userAgents: userAgents[Math.floor(Math.random() * userAgents.length)],
+        'user-agent': userAgents[Math.floor(Math.random() * userAgents.length)],
         'content-type': 'application/json',
       };
     }
@@ -61,6 +61,8 @@ export class PjeLoginService {
       referer: `https://pje.trt${regionTRTValidate}.jus.br/consultaprocessual/login`,
       Cookie: `${awsWafToken || ''}`,
     };
+    console.log('Headers usados para login:', headers);
+
     const response = await axios.post(
       url,
       {
