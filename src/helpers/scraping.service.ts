@@ -1,15 +1,16 @@
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 /* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-misused-promises */
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
 import { CDPSession, Page } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
 
 @Injectable()
-export class ScrapingService {
+export class ScrapingService implements OnModuleInit {
   private readonly logger = new Logger(ScrapingService.name);
 
   private readonly pool = new BrowserPool(10); // exemplo: 30 contexts simultâneos
@@ -17,8 +18,9 @@ export class ScrapingService {
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-  ) {
-    this.pool.init(); // inicializa o pool
+  ) {}
+  async onModuleInit() {
+    await this.pool.init();
   }
   async execute(
     processNumber: string,
@@ -30,13 +32,20 @@ export class ScrapingService {
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
     const context = await this.pool.acquire();
+    const pages = await context.pages();
+    for (const p of pages) {
+      if (!p.isClosed()) await p.close();
+    }
     const page = await context.newPage();
     this.logger.log('✅ Contexto adquirido do pool');
 
     this.logger.log('✅ Nova página aberta');
 
     let processCaptured = false;
+    let onResponse: any = null;
+    let onRequest: any = null;
     const requestMap = new Map<string, string>();
+    const MAX_MAP_SIZE = 1000;
 
     const retry = async <T>(
       fn: () => Promise<T>,
@@ -70,65 +79,66 @@ export class ScrapingService {
       const client: CDPSession = await pg.target().createCDPSession();
       await client.send('Network.enable');
 
-      client.on('Network.requestWillBeSent', (event) => {
-        if (event.requestId && event.request?.url) {
-          requestMap.set(event.requestId, event.request.url);
+      onRequest = (event: any) => {
+        if (requestMap.size > MAX_MAP_SIZE) {
+          const firstKey = requestMap.keys().next().value;
+          requestMap.delete(firstKey);
         }
-      });
 
-      client.on('Network.responseReceived', (event) => {
-        void (async () => {
-          try {
-            const url =
-              event.response?.url ?? requestMap.get(event.requestId) ?? '';
-            // this.logger.debug(
-            //   `⬅ Response recebida: ${url} [${event.response?.status}]`,
-            // );
+        requestMap.set(event.requestId, event.request.url);
+      };
 
-            if (
-              !processCaptured &&
-              url.match(/\/pje-consulta-api\/api\/processos\/\d+/)
-            ) {
-              this.logger.debug(
-                `📥 Tentando capturar JSON do processo em: ${url}`,
-              );
+      client.on('Network.requestWillBeSent', onRequest);
 
-              for (let attempt = 0; attempt < 6; attempt++) {
+      onResponse = async (event: any) => {
+        try {
+          const url = (event.response?.url ??
+            requestMap.get(event.requestId) ??
+            '') as string;
+
+          if (
+            !processCaptured &&
+            url.match(/\/pje-consulta-api\/api\/processos\/\d+/)
+          ) {
+            this.logger.debug(
+              `📥 Tentando capturar JSON do processo em: ${url}`,
+            );
+
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                const body = await client.send('Network.getResponseBody', {
+                  requestId: event.requestId,
+                });
+
+                const text = body.base64Encoded
+                  ? Buffer.from(body.body, 'base64').toString('utf8')
+                  : body.body;
+
+                let json: any;
+
                 try {
-                  const body = await client.send('Network.getResponseBody', {
-                    requestId: event.requestId,
-                  });
-                  const text = body.base64Encoded
-                    ? Buffer.from(body.body, 'base64').toString('utf8')
-                    : body.body;
-
-                  try {
-                    const json: unknown = JSON.parse(text);
-
-                    const valid =
-                      (Array.isArray(json) && json.length > 0) ||
-                      (typeof json === 'object' &&
-                        json !== null &&
-                        'id' in json);
-                    if (valid) {
-                      // capturedResponseData = json;
-                      processCaptured = true;
-                      this.logger.log('✅ Processo capturado via CDP!');
-                      this.logger.debug(
-                        JSON.stringify(json, null, 2).slice(0, 500),
-                      );
-                      break;
-                    }
-                  } catch {}
-                } catch {}
-                await new Promise((r) => setTimeout(r, 200));
-              }
+                  json = JSON.parse(text);
+                } catch {
+                  return;
+                }
+                if (
+                  (Array.isArray(json) && json.length > 0) ||
+                  (typeof json === 'object' && json !== null && 'id' in json)
+                ) {
+                  processCaptured = true;
+                  this.logger.log('✅ Processo capturado via CDP!');
+                  break;
+                }
+              } catch {}
+              await new Promise((r) => setTimeout(r, 200));
             }
-          } catch (e) {
-            this.logger.error(`Erro no handler de response: ${e}`);
           }
-        })();
-      });
+        } catch (e) {
+          this.logger.error(`Erro no handler de response: ${e}`);
+        }
+      };
+
+      client.on('Network.responseReceived', onResponse);
 
       return client;
     };
@@ -479,11 +489,23 @@ export class ScrapingService {
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
       try {
+        await client.detach();
+      } catch {}
+
+      try {
         await client.send('Network.disable');
       } catch {}
       try {
-        if (page && !page.isClosed()) await page.close();
+        if (page && !page.isClosed()) {
+          try {
+            await page.close({ runBeforeUnload: true });
+          } catch {
+            await page.close();
+          }
+        }
       } catch {}
+      client.off('Network.responseReceived', onResponse);
+      client.off('Network.requestWillBeSent', onRequest);
       this.pool.release(context);
       this.logger.log('✅ Contexto liberado');
     }

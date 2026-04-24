@@ -24,16 +24,21 @@ export class BrowserPool {
     console.log(`✅ Pool inicializado com ${this.maxContexts} contexts`);
   }
 
-  async acquire(): Promise<BrowserContext> {
-    while (true) {
+  async acquire(timeoutMs = 10000): Promise<BrowserContext> {
+    const start = Date.now();
+
+    while (Date.now() - start < timeoutMs) {
       const free = this.pool.find((c) => !c.busy);
+
       if (free) {
         free.busy = true;
         return free.context;
       }
-      // espera 100ms se não houver context livre
+
       await new Promise((r) => setTimeout(r, 100));
     }
+
+    throw new Error('Timeout ao adquirir BrowserContext');
   }
 
   release(context: BrowserContext) {
