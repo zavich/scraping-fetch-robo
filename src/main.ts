@@ -35,14 +35,14 @@ async function bootstrap() {
     const bullQueues: Queue[] = [];
 
     // 24 TRTs
-    for (let i = 1; i <= 24; i++) {
+    for (let i = 1; i <= 5; i++) {
       const queueName = `BullQueue_pje-trt${i}`;
       try {
         const queue = app.get<Queue>(queueName);
         if (queue) bullQueues.push(queue);
       } catch {}
     }
-    for (let i = 1; i <= 24; i++) {
+    for (let i = 1; i <= 5; i++) {
       const queueName = `BullQueue_pje-documentos-trt${i}`;
       try {
         const queue = app.get<Queue>(queueName);
