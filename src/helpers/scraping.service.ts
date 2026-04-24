@@ -13,7 +13,7 @@ import { BrowserPool } from 'src/utils/browser-pool';
 export class ScrapingService implements OnModuleInit {
   private readonly logger = new Logger(ScrapingService.name);
 
-  private readonly pool = new BrowserPool(10); // exemplo: 30 contexts simultâneos
+  private readonly pool = new BrowserPool(15); // exemplo: 15 contexts simultâneos
 
   constructor(
     private readonly captchaService: CaptchaService,
