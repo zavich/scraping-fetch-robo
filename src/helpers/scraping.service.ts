@@ -497,21 +497,19 @@ export class ScrapingService {
         const url = request.url();
 
         if (url.includes('/pje-consulta-api/api/propriedades')) {
-          const headers = request.headers();
-
-          const filteredHeaders = {
-            referer: headers.referer,
-            'user-agent': headers['user-agent'],
-            'x-grau-instancia': headers['x-grau-instancia'],
-            accept: headers.accept,
-          };
-
-          await this.redis.set(
-            `headers:${regionTRT}`,
-            JSON.stringify(filteredHeaders),
-            'EX',
-            3600,
-          );
+          // const headers = request.headers();
+          // const filteredHeaders = {
+          //   referer: headers.referer,
+          //   'user-agent': headers['user-agent'],
+          //   'x-grau-instancia': headers['x-grau-instancia'],
+          //   accept: headers.accept,
+          // };
+          // await this.redis.set(
+          //   `headers:${regionTRT}`,
+          //   JSON.stringify(filteredHeaders),
+          //   'EX',
+          //   3600,
+          // );
         }
       } catch (err) {
         console.error(err);
