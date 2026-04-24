@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { CDPSession, Page } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserPool } from 'src/utils/browser-pool';
-import { BrowserManager } from 'src/utils/browser.manager';
 
 @Injectable()
 export class ScrapingService {
@@ -27,7 +29,8 @@ export class ScrapingService {
     this.logger.log(
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
-    const { page, context } = await BrowserManager.createPage();
+    const context = await this.pool.acquire();
+    const page = await context.newPage();
     this.logger.log('✅ Contexto adquirido do pool');
 
     this.logger.log('✅ Nova página aberta');
@@ -222,7 +225,6 @@ export class ScrapingService {
 
       // Detecta se é uma página de WAF
       const wafParams = await page.evaluate(() => {
-        // @ts-ignore
         const w = window as any;
 
         // Tenta pegar diretamente do objeto gokuProps, se existir
@@ -482,7 +484,7 @@ export class ScrapingService {
       try {
         if (page && !page.isClosed()) await page.close();
       } catch {}
-      await BrowserManager.closeContext(context);
+      this.pool.release(context);
       this.logger.log('✅ Contexto liberado');
     }
   }
