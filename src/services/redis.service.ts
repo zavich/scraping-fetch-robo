@@ -20,4 +20,8 @@ export class RedisService {
       throw error;
     }
   }
+  async flushAll(): Promise<void> {
+    await this.redisClient.flushall();
+    console.log('Redis limpo completamente.');
+  }
 }

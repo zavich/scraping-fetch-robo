@@ -110,4 +110,8 @@ export class PjeController {
   async clearRedis(@Param('queue') queue: string): Promise<any> {
     return await this.redisService.deleteQueue(queue);
   }
+  @Delete('redis/flush-all')
+  async flushAllRedis(): Promise<any> {
+    return await this.redisService.flushAll();
+  }
 }
