@@ -114,4 +114,21 @@ export class PjeController {
   async flushAllRedis(): Promise<any> {
     return await this.redisService.flushAll();
   }
+  @Post('redis/reprocess-failed')
+  async reprocessFailedJobs(): Promise<any> {
+    try {
+      await this.redisService.reprocessAllFailedJobs(async (jobData) => {
+        // Aqui você pode definir como cada job será processado
+        console.log('Processando job:', jobData);
+        // Simulação de processamento
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      });
+      return {
+        message: 'Reprocessamento concluído.',
+      };
+    } catch (error) {
+      console.error('Erro ao reprocessar jobs:', error);
+      throw error;
+    }
+  }
 }

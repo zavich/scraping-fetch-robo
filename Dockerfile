@@ -72,4 +72,4 @@ COPY package*.json ./
 EXPOSE 8081
 
 # Inicia com dumb-init (evita processos zumbi)
-CMD ["dumb-init", "node", "dist/main"]
+CMD ["dumb-init", "node", "--max-old-space-size=4096", "dist/main"]
