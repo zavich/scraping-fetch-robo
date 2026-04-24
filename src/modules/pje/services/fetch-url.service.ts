@@ -68,7 +68,7 @@ export class FetchUrlMovimentService {
               'x-grau-instancia': i.toString(),
               referer: `https://pje.${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
               accept: 'application/json, text/plain, */*',
-              userAgents:
+              'user-agent':
                 userAgents[Math.floor(Math.random() * userAgents.length)],
             };
           }
