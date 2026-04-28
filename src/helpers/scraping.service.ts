@@ -13,7 +13,7 @@ import { BrowserPool } from 'src/utils/browser-pool';
 export class ScrapingService implements OnModuleInit {
   private readonly logger = new Logger(ScrapingService.name);
 
-  private readonly pool = new BrowserPool(15); // exemplo: 15 contexts simultâneos
+  private readonly pool = new BrowserPool(3); // exemplo: 3 contexts simultâneos
 
   constructor(
     private readonly captchaService: CaptchaService,
@@ -308,10 +308,7 @@ export class ScrapingService implements OnModuleInit {
           };
         });
 
-        this.logger.log(
-          '🧩 Parâmetros AWS WAF extraídos:',
-          JSON.stringify(wafParamsExtracted, null, 2),
-        );
+        this.logger.log('🧩 Parâmetros AWS WAF extraídos:');
 
         if (!wafParamsExtracted?.websiteKey) {
           throw new Error('Não foi possível extrair parâmetros do AWS WAF');

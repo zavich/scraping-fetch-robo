@@ -24,13 +24,16 @@ export class BrowserManager {
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-gpu',
-          '--no-zygote',
           '--disable-software-rasterizer',
-          '--window-size=1366,768',
-          '--start-maximized',
+          '--no-zygote',
+          '--single-process',
+          '--no-first-run',
+          '--no-default-browser-check',
+
+          '--window-size=1280,720',
 
           '--disable-blink-features=AutomationControlled',
-          '--disable-features=site-per-process',
+
           '--disable-background-timer-throttling',
           '--disable-renderer-backgrounding',
           '--disable-backgrounding-occluded-windows',
