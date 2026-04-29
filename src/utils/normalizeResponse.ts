@@ -53,9 +53,11 @@ export function normalizeResponse(
       },
     };
   }
+  const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
 
-  const regionTRT = Number(body[0]?.numero.split('.')[3]);
-  const isTrabalhista = Number(body[0]?.numero.split('.')[2]);
+  const regionTRT = match ? Number(match[1]) : null;
+
+  const isTrabalhista = Number(numero.split('.')[2]);
 
   const instancias = body.map((instance, index) => {
     const grauInstanciaMap = ['PRIMEIRO_GRAU', 'SEGUNDO_GRAU'];
