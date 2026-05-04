@@ -98,11 +98,18 @@ export class CndtScraperService {
       const buffer = fs.readFileSync(fileName);
 
       // S3 Upload
-      const url = await this.awsS3Service.uploadPdf(
+      // const url = await this.awsS3Service.uploadPdf(
+      //   buffer,
+      //   path.basename(fileName),
+      // );
+      const fileKey = `${cnpj}_cndt_${Date.now()}.pdf`;
+      await this.awsS3Service.uploadS3Object(
+        process.env.AWS_S3_BUCKET_NAME as string,
+        fileKey,
         buffer,
-        path.basename(fileName),
+        'application/pdf',
       );
-      this.logger.log(`PDF enviado para S3: ${url}`);
+      this.logger.log(`PDF enviado para S3: ${fileKey}`);
 
       fs.unlinkSync(fileName);
 
@@ -112,14 +119,14 @@ export class CndtScraperService {
         webhookUrl,
         {
           cnpj,
-          temp_link: url,
+          temp_link: fileKey,
         },
         {
           headers: { Authorization: `${process.env.AUTHORIZATION_ESCAVADOR}` },
         },
       );
 
-      return { cnpj, url };
+      return { cnpj, url: fileKey };
     } catch (error) {
       this.logger.error('Erro no scraping CNDt:', error);
       throw error;
