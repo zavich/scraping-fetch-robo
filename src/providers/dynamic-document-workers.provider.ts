@@ -9,7 +9,7 @@ export function createDynamicDocumentsWorkers(): Provider[] {
   return queues.map((queueName) => {
     // Configura concurrency e rate limiter para TRT15
     const processorOptions = {
-      lockDuration: 120_000,
+      lockDuration: 10 * 60 * 1000, // 10 minutos
       concurrency: 100,
     };
 
