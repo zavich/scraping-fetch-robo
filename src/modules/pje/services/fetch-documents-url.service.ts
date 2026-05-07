@@ -94,6 +94,8 @@ export class FetchDocumentoService {
       if (awsWafToken) {
         headers['Cookie'] = `${awsWafToken}`;
       }
+      console.log('HEADERS PARA REQUISIÇÃO:', headers);
+
       const response = await axios.get(url, {
         headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos

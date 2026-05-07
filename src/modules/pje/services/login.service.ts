@@ -61,7 +61,6 @@ export class PjeLoginService {
       referer: `https://pje.trt${regionTRTValidate}.jus.br/consultaprocessual/login`,
       Cookie: `${awsWafToken || ''}`,
     };
-    console.log('Headers usados para login:', headers);
 
     const response = await axios.post(
       url,
