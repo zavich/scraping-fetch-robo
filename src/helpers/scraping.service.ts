@@ -5,22 +5,22 @@
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
-import { CDPSession, Page } from 'puppeteer';
+import { CDPSession, Page, BrowserContext } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
-import { BrowserPool } from 'src/utils/browser-pool';
+import { BrowserManager } from 'src/utils/browser.manager';
 
 @Injectable()
 export class ScrapingService implements OnModuleInit {
   private readonly logger = new Logger(ScrapingService.name);
 
-  private readonly pool = new BrowserPool(3); // exemplo: 3 contexts simultâneos
+  // BrowserPool removido: usaremos BrowserManager e criaremos um BrowserContext novo por execução
 
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
   async onModuleInit() {
-    await this.pool.init();
+    // Inicialização do pool removida. O BrowserManager é lazy e será usado por execução.
   }
   async execute(
     processNumber: string,
@@ -31,7 +31,7 @@ export class ScrapingService implements OnModuleInit {
     this.logger.log(
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
-    let context = await this.pool.acquire();
+    let context: BrowserContext | null = null;
 
     // Hoisted para permitir cleanup seguro no finally
     let page!: Page;
@@ -42,14 +42,29 @@ export class ScrapingService implements OnModuleInit {
     const createPageWithRecovery = async (maxAttempts = 3) => {
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const pages = await context.pages();
-          for (const p of pages) {
-            if (!p.isClosed()) await p.close();
+          // Se existir um contexto anterior, tente fechar páginas abertas antes de criar novo contexto
+          if (context) {
+            try {
+              const pages = await context.pages();
+              for (const p of pages) {
+                if (!p.isClosed()) await p.close();
+              }
+            } catch (e) {
+              /* ignore */
+            }
+            // fecha o contexto anterior de forma segura
+            try {
+              await BrowserManager.closeContext(context);
+            } catch (e) {
+              /* ignore */
+            }
+            context = null;
           }
 
-          page = await context.newPage();
-          this.logger.log('✅ Contexto adquirido do pool');
-          this.logger.log('✅ Nova página aberta');
+          const created = await BrowserManager.createPage();
+          context = created.context;
+          page = created.page;
+          this.logger.log('✅ Contexto criado e página pronta');
           return;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -59,13 +74,23 @@ export class ScrapingService implements OnModuleInit {
 
           // Tenta liberar o contexto possivelmente corrompido e reaquece um novo
           try {
-            this.pool.release(context);
-          } catch {}
+            // fechar o context corrompido
+            if (context) {
+              try {
+                await BrowserManager.closeContext(context);
+              } catch (e) {
+                /* ignore */
+              }
+              context = null;
+            }
+          } catch {
+            /* ignore */
+          }
 
           if (attempt === maxAttempts) throw err;
 
           await new Promise((r) => setTimeout(r, 500));
-          context = await this.pool.acquire();
+          // próxima iteração irá criar novo contexto via BrowserManager.createPage()
         }
       }
     };
@@ -160,7 +185,9 @@ export class ScrapingService implements OnModuleInit {
                   this.logger.log('✅ Processo capturado via CDP!');
                   break;
                 }
-              } catch {}
+              } catch {
+                /* ignore */
+              }
               await new Promise((r) => setTimeout(r, 200));
             }
           }
@@ -212,7 +239,7 @@ export class ScrapingService implements OnModuleInit {
 
       this.logger.log(`🌐 Acessando URL base: ${urlBase}`);
       await retry(
-        () => page.goto(urlBase, { waitUntil: 'networkidle0' }),
+        () => page.goto(urlBase, { waitUntil: 'domcontentloaded' }),
         3,
         1000,
         'Abrir consulta',
@@ -418,9 +445,19 @@ export class ScrapingService implements OnModuleInit {
           this.logger.log('🧹 Cookies AWS WAF removidos.');
         }
 
-        await page.evaluate(() => {
+        await page.evaluate(async () => {
           localStorage.clear();
           sessionStorage.clear();
+
+          // Limpa caches do Service Worker / Cache API como segurança adicional
+          if ('caches' in window) {
+            try {
+              const keys = await caches.keys();
+              await Promise.all(keys.map((k) => caches.delete(k)));
+            } catch (e) {
+              /* ignore */
+            }
+          }
         });
 
         //
@@ -469,7 +506,7 @@ export class ScrapingService implements OnModuleInit {
           180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes
         );
         await new Promise((r) => setTimeout(r, 1500));
-        await page.reload({ waitUntil: 'networkidle0' });
+        await page.reload({ waitUntil: 'domcontentloaded' });
         this.logger.log('🔁 Página recarregada — AWS WAF liberado!');
         return {
           integra: null,
@@ -478,10 +515,13 @@ export class ScrapingService implements OnModuleInit {
         };
       }
       this.logger.log('✅ Nenhum AWS WAF detectado na página');
-      await this.captureRealRequest(page, regionTRT);
+      // await this.captureRealRequest(page, regionTRT);
       // 👇 1. espera frontend inicializar
-      await new Promise((r) => setTimeout(r, 2000));
-      await page.reload({ waitUntil: 'networkidle0' });
+      // await new Promise((r) => setTimeout(r, 2000));
+      // 👇 1. espera frontend inicializar (delay randômico)
+      const delay = Math.floor(Math.random() * (3500 - 1500 + 1)) + 1500;
+      await new Promise((r) => setTimeout(r, delay));
+      await page.reload({ waitUntil: 'domcontentloaded' });
       // 👇 2. aguarda o cookie aparecer (isso é o segredo)
       this.logger.log('⏳ Aguardando aws-waf-token...');
 
@@ -520,11 +560,13 @@ export class ScrapingService implements OnModuleInit {
       // Detach / disable no client somente se foi inicializado
       if (client) {
         try {
-          await client.detach();
-        } catch {}
-        try {
           await client.send('Network.disable');
         } catch {}
+        try {
+          await client.detach();
+        } catch {
+          /* ignore */
+        }
       }
 
       // Fecha a página com segurança
@@ -533,10 +575,16 @@ export class ScrapingService implements OnModuleInit {
           try {
             await page.close({ runBeforeUnload: true });
           } catch {
-            await page.close();
+            try {
+              await page.close();
+            } catch {
+              /* ignore */
+            }
           }
         }
-      } catch {}
+      } catch {
+        /* ignore */
+      }
 
       // Remove listeners se o client existir
       try {
@@ -544,21 +592,26 @@ export class ScrapingService implements OnModuleInit {
           if (onResponse) client.off('Network.responseReceived', onResponse);
           if (onRequest) client.off('Network.requestWillBeSent', onRequest);
         }
-      } catch {}
+      } catch {
+        /* ignore */
+      }
 
-      // Garante release do contexto caso exista
+      // Garante fechamento do contexto caso exista
       try {
-        if (context) this.pool.release(context);
-      } catch {}
+        if (context) await BrowserManager.closeContext(context);
+      } catch {
+        /* ignore */
+      }
 
       this.logger.log('✅ Contexto liberado');
     }
   }
-  async captureRealRequest(page: Page, regionTRT: number) {
-    await page.setRequestInterception(true);
-
-    page.removeAllListeners('request');
-    page.removeAllListeners('response');
+  async captureRealRequest(page: Page) {
+    // Atenção: evitar remover listeners globais ou setar interception múltiplas vezes.
+    // Se necessário, setRequestInterception deve ser feito uma única vez na stack.
+    try {
+      await page.setRequestInterception(true);
+    } catch {}
 
     page.on('request', async (request) => {
       try {

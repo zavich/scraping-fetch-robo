@@ -91,9 +91,6 @@ export class FetchDocumentoService {
         'sec-ch-ua-mobile': '?0',
         'sec-ch-ua-platform': '"Windows"',
       };
-      if (awsWafToken) {
-        headers['Cookie'] = `${awsWafToken}`;
-      }
       console.log('HEADERS PARA REQUISIÇÃO:', headers);
 
       const response = await axios.get(url, {
