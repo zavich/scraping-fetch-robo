@@ -2,6 +2,22 @@ import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 
+// Interfaces globais para tipagem
+interface CreateTaskResponse {
+  errorId: number;
+  errorCode?: string;
+  errorDescription?: string;
+  taskId?: string;
+}
+
+interface TaskResult {
+  status: string;
+  solution?: {
+    captcha_voucher?: string;
+    existing_token?: string;
+  };
+}
+
 interface TwoCaptchaSendResponse {
   status: number;
   request: string; // pode ser id ou mensagem de erro
@@ -166,7 +182,8 @@ export class CaptchaService {
       }),
     });
 
-    const createTaskResult = await createTaskResp.json();
+    const createTaskResult =
+      (await createTaskResp.json()) as CreateTaskResponse;
 
     if (createTaskResult.errorId !== 0) {
       throw new Error(
@@ -174,11 +191,11 @@ export class CaptchaService {
       );
     }
 
-    const taskId = createTaskResult.taskId;
+    const taskId = createTaskResult.taskId!;
     this.logger.log(`📡 Task criada no 2Captcha com ID: ${taskId}`);
 
     // 2️⃣ Esperar até o CAPTCHA ser resolvido
-    let result;
+    let result: TaskResult = { status: '' };
     for (let attempt = 0; attempt < 40; attempt++) {
       await new Promise((r) => setTimeout(r, 5000)); // espera 5s
 
@@ -191,7 +208,16 @@ export class CaptchaService {
         }),
       });
 
-      result = await checkResp.json();
+      try {
+        result = (await checkResp.json()) as TaskResult;
+      } catch (error) {
+        this.logger.error(
+          'Erro ao fazer parsing do JSON retornado pela API 2Captcha:',
+          error,
+        );
+        this.logger.debug('Resposta inválida:', await checkResp.text());
+        throw new Error('Resposta inválida da API 2Captcha');
+      }
 
       if (result.status === 'ready') break;
 
@@ -206,7 +232,7 @@ export class CaptchaService {
     this.logger.debug('🧾 Resultado:', result.solution);
 
     // 3️⃣ Extrair o cookie de resposta
-    const { captcha_voucher, existing_token } = result.solution;
+    const { captcha_voucher, existing_token } = result.solution || {};
 
     if (!captcha_voucher && !existing_token) {
       throw new Error('Não foi possível obter o token do AWS WAF');

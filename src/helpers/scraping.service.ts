@@ -31,15 +31,46 @@ export class ScrapingService implements OnModuleInit {
     this.logger.log(
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
-    const context = await this.pool.acquire();
-    const pages = await context.pages();
-    for (const p of pages) {
-      if (!p.isClosed()) await p.close();
-    }
-    const page = await context.newPage();
-    this.logger.log('✅ Contexto adquirido do pool');
+    let context = await this.pool.acquire();
 
-    this.logger.log('✅ Nova página aberta');
+    // Hoisted para permitir cleanup seguro no finally
+    let page!: Page;
+    let client: CDPSession | null = null;
+
+    // Função resiliente para criar uma nova página; em caso de erro de conexão
+    // tenta liberar o contexto atual e reaquiri-lo antes de tentar novamente.
+    const createPageWithRecovery = async (maxAttempts = 3) => {
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const pages = await context.pages();
+          for (const p of pages) {
+            if (!p.isClosed()) await p.close();
+          }
+
+          page = await context.newPage();
+          this.logger.log('✅ Contexto adquirido do pool');
+          this.logger.log('✅ Nova página aberta');
+          return;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          this.logger.warn(
+            `❌ Erro ao criar nova página (tentativa ${attempt}/${maxAttempts}): ${msg}`,
+          );
+
+          // Tenta liberar o contexto possivelmente corrompido e reaquece um novo
+          try {
+            this.pool.release(context);
+          } catch {}
+
+          if (attempt === maxAttempts) throw err;
+
+          await new Promise((r) => setTimeout(r, 500));
+          context = await this.pool.acquire();
+        }
+      }
+    };
+
+    await createPageWithRecovery();
 
     let processCaptured = false;
     let onResponse: any = null;
@@ -143,7 +174,7 @@ export class ScrapingService implements OnModuleInit {
       return client;
     };
 
-    const client = await initCDP(page);
+    client = await initCDP(page);
 
     try {
       const cacheKey = `pje:session:${regionTRT}`;
@@ -485,13 +516,18 @@ export class ScrapingService implements OnModuleInit {
       );
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
-      try {
-        await client.detach();
-      } catch {}
 
-      try {
-        await client.send('Network.disable');
-      } catch {}
+      // Detach / disable no client somente se foi inicializado
+      if (client) {
+        try {
+          await client.detach();
+        } catch {}
+        try {
+          await client.send('Network.disable');
+        } catch {}
+      }
+
+      // Fecha a página com segurança
       try {
         if (page && !page.isClosed()) {
           try {
@@ -501,9 +537,20 @@ export class ScrapingService implements OnModuleInit {
           }
         }
       } catch {}
-      client.off('Network.responseReceived', onResponse);
-      client.off('Network.requestWillBeSent', onRequest);
-      this.pool.release(context);
+
+      // Remove listeners se o client existir
+      try {
+        if (client && typeof client.off === 'function') {
+          if (onResponse) client.off('Network.responseReceived', onResponse);
+          if (onRequest) client.off('Network.requestWillBeSent', onRequest);
+        }
+      } catch {}
+
+      // Garante release do contexto caso exista
+      try {
+        if (context) this.pool.release(context);
+      } catch {}
+
       this.logger.log('✅ Contexto liberado');
     }
   }
