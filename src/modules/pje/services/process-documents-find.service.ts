@@ -137,9 +137,9 @@ export class ProcessDocumentsFindService {
           const proximo = bookmarks[index + 1];
 
           if (proximo && !processedDocumentIds.has(proximo.id)) {
-            this.logger.debug(
-              `📎 Pegando também o documento seguinte a "${bookmark.title}": "${proximo.title}"`,
-            );
+            // this.logger.debug(
+            //   `📎 Pegando também o documento seguinte a "${bookmark.title}": "${proximo.title}"`,
+            // );
 
             tasks.push(async () => {
               await processarBookmark(proximo);

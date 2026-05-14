@@ -57,9 +57,9 @@ export class PdfExtractService {
     pages.forEach((p) => newPdf.addPage(p));
 
     const pdfBytes = await newPdf.save();
-    this.logger.debug(
-      `✅ Documento "${bookmark.title}" extraído com sucesso (páginas ${startIndex + 1}-${endIndex + 1})`,
-    );
+    // this.logger.debug(
+    //   `✅ Documento "${bookmark.title}" extraído com sucesso (páginas ${startIndex + 1}-${endIndex + 1})`,
+    // );
 
     return Buffer.from(pdfBytes);
   }

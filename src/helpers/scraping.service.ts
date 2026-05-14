@@ -5,7 +5,7 @@
 /* eslint-disable @typescript-eslint/no-misused-promises */
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
-import { CDPSession, Page, BrowserContext } from 'puppeteer';
+import { CDPSession, Page, BrowserContext, HTTPRequest } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserManager } from 'src/utils/browser.manager';
 
@@ -102,6 +102,8 @@ export class ScrapingService implements OnModuleInit {
     let onRequest: any = null;
     const requestMap = new Map<string, string>();
     const MAX_MAP_SIZE = 1000;
+    // limite de bytes para considerar o body seguro para baixar/parsear
+    const MAX_BODY_BYTES = 1_000_000; // 1 MB
 
     const retry = async <T>(
       fn: () => Promise<T>,
@@ -160,6 +162,23 @@ export class ScrapingService implements OnModuleInit {
               `📥 Tentando capturar JSON do processo em: ${url}`,
             );
 
+            // Proteções de tamanho antes de requisitar o body via CDP
+            const headers = event.response?.headers || {};
+            const contentLengthHeader = Number(
+              headers['content-length'] || headers['Content-Length'] || 0,
+            );
+            const encodedLen = Number(event.response?.encodedDataLength || 0);
+
+            if (
+              contentLengthHeader > MAX_BODY_BYTES ||
+              encodedLen > MAX_BODY_BYTES
+            ) {
+              this.logger.warn(
+                `⚠️ Ignorando body grande (${contentLengthHeader || encodedLen} bytes) em ${url}`,
+              );
+              return;
+            }
+
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
                 const body = await client.send('Network.getResponseBody', {
@@ -170,13 +189,21 @@ export class ScrapingService implements OnModuleInit {
                   ? Buffer.from(body.body, 'base64').toString('utf8')
                   : body.body;
 
-                let json: any;
+                // Proteção adicional contra textos enormes
+                if (!text || text.length > 2_000_000) {
+                  this.logger.warn(
+                    `⚠️ Body muito grande (texto ${text ? text.length : 0} chars), ignorando`,
+                  );
+                  return;
+                }
 
+                let json: any;
                 try {
                   json = JSON.parse(text);
                 } catch {
                   return;
                 }
+
                 if (
                   (Array.isArray(json) && json.length > 0) ||
                   (typeof json === 'object' && json !== null && 'id' in json)
@@ -294,32 +321,59 @@ export class ScrapingService implements OnModuleInit {
       // Detecta se é uma página de WAF
       const wafParams = await page.evaluate(() => {
         const w = window as any;
+        const g = w.gokuProps;
+        if (g) {
+          const q1 = document.querySelector(
+            'script[src*="token.awswaf.com"]',
+          ) as any;
+          const q2 = document.querySelector(
+            'script[src*="captcha.awswaf.com"]',
+          ) as any;
+          return {
+            websiteKey: g.key || null,
+            iv: g.iv || null,
+            context: g.context || null,
+            challengeScript: q1 ? q1.src : null,
+            captchaScript: q2 ? q2.src : null,
+          };
+        }
 
-        // Tenta pegar diretamente do objeto gokuProps, se existir
-        const key = w.gokuProps?.key || null;
-        const iv = w.gokuProps?.iv || null;
-        const context = w.gokuProps?.context || null;
+        // fallback: examina apenas scripts (pequeno slice do texto) para evitar innerHTML gigante
+        const scriptEls = Array.from(
+          document.scripts || [],
+        ) as HTMLScriptElement[];
+        const scripts = scriptEls.map((s) => ({
+          src: s.src || null,
+          text: s.textContent ? s.textContent.slice(0, 2000) : '',
+        }));
+        const challengeScript =
+          scripts.find((s) => s.src && s.src.includes('token.awswaf.com'))
+            ?.src || null;
+        const captchaScript =
+          scripts.find((s) => s.src && s.src.includes('captcha.awswaf.com'))
+            ?.src || null;
 
-        // Se não tiver, tenta extrair do HTML como fallback
-        const html = document.documentElement.innerHTML;
-        const backupKey =
-          (html.match(/"key"\s*:\s*"([^"]+)"/i) || [])[1] ||
-          (html.match(/"sitekey"\s*:\s*"([^"]+)"/i) || [])[1];
-
-        const backupIv = (html.match(/"iv"\s*:\s*"([^"]+)"/i) || [])[1];
-        const backupContext = (html.match(/"context"\s*:\s*"([^"]+)"/i) ||
-          [])[1];
-
-        const scripts = Array.from(document.querySelectorAll('script')).map(
-          (s) => s.src,
-        );
-        const challengeScript = scripts.find((s) => s.includes('challenge'));
-        const captchaScript = scripts.find((s) => s.includes('captcha'));
+        let websiteKey: string | null = null;
+        let iv: string | null = null;
+        let contextVal: string | null = null;
+        for (const s of scripts.slice(0, 10)) {
+          const t = s.text || '';
+          if (!t) continue;
+          const mKey =
+            t.match(/"key"\s*:\s*"([^"]+)"/) ||
+            t.match(/sitekey\s*:\s*"([^"]+)"/);
+          if (mKey) websiteKey = websiteKey || (mKey[1] as string);
+          const mIv = t.match(/"iv"\s*:\s*"([^"]+)"/);
+          if (mIv) iv = iv || (mIv[1] as string);
+          const mC = t.match(/"context"\s*:\s*"([^"]+)"/);
+          if (mC) contextVal = contextVal || (mC[1] as string);
+          if (websiteKey && iv && contextVal) break;
+        }
 
         return {
-          websiteKey: key || backupKey,
-          iv: iv || backupIv,
-          context: context || backupContext,
+          websiteKey,
+          iv,
+          context: contextVal,
           challengeScript,
           captchaScript,
         };
@@ -420,9 +474,28 @@ export class ScrapingService implements OnModuleInit {
 
         let voucherResponse: any = null;
         try {
-          voucherResponse = JSON.parse(voucherResponseText);
+          const mem = process.memoryUsage();
+          this.logger.debug(
+            `MEM before voucher parse: heapUsed=${Math.round(mem.heapUsed / 1024 / 1024)}MB`,
+          );
+
+          const MAX_VOUCHER_CHARS = 200000; // 200 KB
+          if (
+            typeof voucherResponseText === 'string' &&
+            voucherResponseText.length > MAX_VOUCHER_CHARS
+          ) {
+            this.logger.warn(
+              `⚠️ voucherResponseText muito grande (${voucherResponseText.length} chars), ignorando parse`,
+            );
+          } else {
+            try {
+              voucherResponse = JSON.parse(voucherResponseText);
+            } catch {
+              this.logger.warn('⚠️ Resposta /voucher não é JSON válido');
+            }
+          }
         } catch {
-          this.logger.warn('⚠️ Resposta /voucher não é JSON válido');
+          this.logger.warn('⚠️ Erro ao processar voucherResponseText');
         }
 
         const newToken = voucherResponse?.token;
@@ -611,13 +684,16 @@ export class ScrapingService implements OnModuleInit {
     // Se necessário, setRequestInterception deve ser feito uma única vez na stack.
     try {
       await page.setRequestInterception(true);
-    } catch {}
+    } catch {
+      /* ignore */
+    }
 
-    page.on('request', async (request) => {
+    const onRequestIntercept = async (request: HTTPRequest) => {
       try {
         const url = request.url();
 
         if (url.includes('/pje-consulta-api/api/propriedades')) {
+          // Exemplo de captura de headers (comentado de forma segura)
           // const headers = request.headers();
           // const filteredHeaders = {
           //   referer: headers.referer,
@@ -625,20 +701,33 @@ export class ScrapingService implements OnModuleInit {
           //   'x-grau-instancia': headers['x-grau-instancia'],
           //   accept: headers.accept,
           // };
-          // await this.redis.set(
-          //   `headers:${regionTRT}`,
-          //   JSON.stringify(filteredHeaders),
-          //   'EX',
-          //   3600,
-          // );
+          // await this.redis.set(`headers:${regionTRT}`, JSON.stringify(filteredHeaders), 'EX', 3600);
         }
-      } catch (err) {
-        console.error(err);
+      } catch {
+        /* ignore */
       } finally {
-        if (!request.isInterceptResolutionHandled()) {
-          await request.continue();
+        try {
+          if (!request.isInterceptResolutionHandled()) {
+            await request.continue();
+          }
+        } catch {
+          /* ignore */
         }
       }
-    });
+    };
+
+    page.on('request', onRequestIntercept);
+    // remover automaticamente quando a página fechar
+    try {
+      page.once('close', () => {
+        try {
+          page.off('request', onRequestIntercept);
+        } catch {
+          /* ignore */
+        }
+      });
+    } catch {
+      /* ignore */
+    }
   }
 }
