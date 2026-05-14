@@ -12,7 +12,7 @@ export function createDynamicWorkers(): Provider[] {
       queueName === 'pje-trt9' ||
       queueName === 'pje-tst'
         ? 1
-        : 3; // TST com concorrência 1, TRT com 3
+        : 5; // TST com concorrência 1, TRT com 5
 
     const processorOptions = {
       concurrency,
