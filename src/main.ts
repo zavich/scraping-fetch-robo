@@ -28,6 +28,16 @@ async function bootstrap() {
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
+  // EST-008: OOM guard — log and exit if RSS exceeds threshold
+  const OOM_THRESHOLD_MB = Number(process.env.OOM_THRESHOLD_MB ?? 1800);
+  setInterval(() => {
+    const rssMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    if (rssMB >= OOM_THRESHOLD_MB) {
+      console.error(`[OOM] RSS=${rssMB}MB >= ${OOM_THRESHOLD_MB}MB. Exiting for container restart.`);
+      process.exit(1);
+    }
+  }, 30_000); // check every 30 seconds
+
   // Previne crash do processo por promises nao tratadas
   process.on('unhandledRejection', (reason: unknown) => {
     console.error('[unhandledRejection] Promise rejeitada sem handler:', reason);

@@ -641,7 +641,7 @@ export class ScrapingService implements OnModuleInit {
         `aws-waf-token:${processNumber}`,
         `aws-waf-token=${token}`,
         'EX',
-        18000, // 5 minutos de validade no Redis, para evitar reCAPTCHA frequentes
+        7200, // 2 horas de validade no Redis (sessão WAF dura ~1h)
       );
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');

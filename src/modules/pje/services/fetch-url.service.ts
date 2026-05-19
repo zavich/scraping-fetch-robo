@@ -191,7 +191,7 @@ export class FetchUrlMovimentService {
         catchaTokenRedisKey,
         captchaToken,
         'EX',
-        60 * 60 * 24, // expira em 24 horas
+        600, // expira em 10 minutos (captcha válido por ~5 min)
       );
       return response.data;
     } catch (error: unknown) {

@@ -611,7 +611,7 @@ export class ScrapingProcessService {
                   if (tokenCaptcha) {
                     const redisKey = `tokencaptcha:${processNumber}:${instance}`;
 
-                    await this.redis.set(redisKey, tokenCaptcha, 'EX', 3600);
+                    await this.redis.set(redisKey, tokenCaptcha, 'EX', 600); // 10 minutos (captcha válido por ~5 min)
 
                     this.logger.log(`✅ TokenCaptcha salvo: ${redisKey}`);
                   }
