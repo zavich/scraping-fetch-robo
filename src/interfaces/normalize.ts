@@ -6,10 +6,10 @@ export interface Root {
   numero_processo?: string;
   resposta?: Resposta;
   status?: string;
-  motivo_erro?: any;
-  status_callback?: any;
+  motivo_erro?: string | null;
+  status_callback?: string | null;
   tipo?: string;
-  opcoes?: any;
+  opcoes?: Record<string, unknown>;
   tribunal?: Tribunal;
   valor?: string;
   event?: string;
@@ -41,7 +41,7 @@ export interface DocumentoRestrito {
   possivel_restrito: boolean;
   paginas: number;
   updated_at: string;
-  movid: any;
+  movid: string | number | null;
   link_api: string;
   hash: string;
 }
@@ -51,10 +51,10 @@ export interface Instancia {
   sistema: string;
   instancia: string;
   extra_instancia: string;
-  tipo_precatorio: any;
+  tipo_precatorio: string | null;
   segredo: boolean;
-  numero: any;
-  numeros_alternativos: any[];
+  numero: string | null;
+  numeros_alternativos: string[];
   assunto: string;
   classe: string;
   area: string;
@@ -64,9 +64,9 @@ export interface Instancia {
   valor_causa: string;
   arquivado: boolean;
   data_arquivamento: string;
-  fisico: any;
+  fisico: boolean | null;
   last_update_time: string;
-  situacoes: any[];
+  situacoes: unknown[];
   dados: Dado[];
   partes: Parte[];
   movimentacoes: Movimentacoes[];
@@ -113,7 +113,7 @@ export interface Audiencia {
   audiencia: string;
   situacao: string;
   numero_pessoas: number;
-  informacoes_adicionais: any;
+  informacoes_adicionais: unknown;
 }
 
 export interface Tribunal {

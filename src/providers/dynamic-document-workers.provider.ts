@@ -7,10 +7,11 @@ export function createDynamicDocumentsWorkers(): Provider[] {
   const queues = [...ALL_TRT_DOCUMENT_QUEUES];
 
   return queues.map((queueName) => {
-    // Configura concurrency e rate limiter para TRT15
+    // PERF-002: concurrency reduzida para não saturar o browser pool (capacity ~15)
+    const browserPoolSize = Number(process.env.BROWSER_POOL_SIZE ?? 3);
     const processorOptions = {
       lockDuration: 10 * 60 * 1000, // 10 minutos
-      concurrency: 100,
+      concurrency: browserPoolSize * 5, // 5 páginas por browser instance
     };
 
     @Processor(queueName, processorOptions)

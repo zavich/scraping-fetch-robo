@@ -2,12 +2,15 @@ import {
   Body,
   Controller,
   Delete,
+  Logger,
   Param,
   Post,
   Res,
   UploadedFile,
+  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import { ApiKeyAuthGuard } from 'src/guards/api-key.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 
@@ -17,6 +20,8 @@ import { LoginPoolService } from './services/login-pool.service';
 import { RedisService } from 'src/services/redis.service';
 @Controller('processos')
 export class PjeController {
+  private readonly logger = new Logger(PjeController.name);
+
   constructor(
     private readonly consultarProcessoQueue: ConsultarProcessoQueue,
     private readonly extractService: PdfExtractService,
@@ -53,7 +58,7 @@ export class PjeController {
       );
       return res.send(pdfBuffer);
     } catch (err) {
-      console.error(err);
+      this.logger.error('Erro ao processar PDF:', err);
       return res.status(500).json({ error: 'Erro ao processar PDF' });
     }
   }
@@ -75,11 +80,12 @@ export class PjeController {
       const bookmarks = await this.extractService.extractBookmarks(file.buffer);
       return res.json(bookmarks);
     } catch (err) {
-      console.error(err);
+      this.logger.error('Erro ao extrair bookmarks:', err);
       return res.status(500).json({ error: 'Erro ao extrair bookmarks' });
     }
   }
   @Post('/:numero')
+  @UseGuards(ApiKeyAuthGuard)
   async getFindProcess(
     @Param('numero') numero: string,
     @Body()
@@ -89,7 +95,7 @@ export class PjeController {
       webhook?: string;
       priority?: boolean;
     },
-  ): Promise<any> {
+  ) {
     const { documents, origem, webhook, priority } = body || {};
     return this.consultarProcessoQueue.execute(
       numero,
@@ -100,34 +106,40 @@ export class PjeController {
     );
   }
   @Post('/auth/login/:trt')
-  async loginPje(@Param('trt') trt: number): Promise<any> {
-    return await this.loginPoolService.getCookies(
-      trt,
-      '0011054-02.2024.5.03.0102',
-    );
+  @UseGuards(ApiKeyAuthGuard)
+  async loginPje(
+    @Param('trt') trt: number,
+    @Body('numero') numero: string,
+  ) {
+    if (!numero) {
+      return { success: false, error: 'Campo "numero" obrigatório no body' };
+    }
+    await this.loginPoolService.getCookies(trt, numero);
+    return { success: true };
   }
   @Delete('redis/:queue/clear')
-  async clearRedis(@Param('queue') queue: string): Promise<any> {
+  @UseGuards(ApiKeyAuthGuard)
+  async clearRedis(@Param('queue') queue: string) {
     return await this.redisService.deleteQueue(queue);
   }
   @Delete('redis/flush-all')
-  async flushAllRedis(): Promise<any> {
+  @UseGuards(ApiKeyAuthGuard)
+  async flushAllRedis() {
     return await this.redisService.flushAll();
   }
   @Post('redis/reprocess-failed')
-  async reprocessFailedJobs(): Promise<any> {
+  @UseGuards(ApiKeyAuthGuard)
+  async reprocessFailedJobs() {
     try {
       await this.redisService.reprocessAllFailedJobs(async (jobData) => {
-        // Aqui você pode definir como cada job será processado
-        console.log('Processando job:', jobData);
-        // Simulação de processamento
+        this.logger.debug(`Processando job: ${JSON.stringify(jobData)}`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       });
       return {
         message: 'Reprocessamento concluído.',
       };
     } catch (error) {
-      console.error('Erro ao reprocessar jobs:', error);
+      this.logger.error('Erro ao reprocessar jobs:', error);
       throw error;
     }
   }

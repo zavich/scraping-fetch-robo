@@ -91,7 +91,7 @@ export class FetchDocumentoService {
         'sec-ch-ua-mobile': '?0',
         'sec-ch-ua-platform': '"Windows"',
       };
-      console.log('HEADERS PARA REQUISIÇÃO:', headers);
+      this.logger.debug(`HEADERS PARA REQUISIÇÃO: ${JSON.stringify(headers)}`);
 
       const response = await axios.get(url, {
         headers,

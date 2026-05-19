@@ -2,6 +2,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Queue } from 'bullmq';
 import { getTRTQueue } from 'src/helpers/getTRTQueue';
+import { ProcessosResponse } from 'src/interfaces';
 
 @Injectable()
 export class ConsultarProcessoDocumentoQueue {
@@ -64,7 +65,7 @@ export class ConsultarProcessoDocumentoQueue {
     };
   }
 
-  async execute(numero: string, instances: any[]) {
+  async execute(numero: string, instances: ProcessosResponse[]) {
     if (!instances?.length) {
       throw new BadRequestException(
         'Sem instâncias para consultar documentos.',
@@ -90,8 +91,8 @@ export class ConsultarProcessoDocumentoQueue {
         jobId: `${numero}-docs`,
         attempts: 3,
         backoff: { type: 'fixed', delay: 5000 },
-        removeOnComplete: true,
-        removeOnFail: false,
+        removeOnComplete: { count: 1000 },
+        removeOnFail: { count: 500, age: 7 * 24 * 3600 },
       },
     );
 

@@ -93,6 +93,9 @@ export class GenericProcessoWorker extends WorkerHost {
     this.logger.log(`📄 [${job.queueName}] Consultando processo ${numero}`);
 
     const webhookUrl = webhook ?? `${process.env.WEBHOOK_URL}/process/webhook`;
+    // ARQ-005: propagate correlation ID across services
+    const correlationId = String(job.id ?? `job-${Date.now()}`);
+    const webhookHeaders = { 'x-correlation-id': correlationId };
 
     // Extrai TRT do CNJ
     const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
@@ -112,7 +115,7 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
         );
 
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
       if (regionTRT === 3 || regionTRT === 9) {
@@ -137,7 +140,7 @@ export class GenericProcessoWorker extends WorkerHost {
           origem,
         );
 
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -146,7 +149,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       const segredo = result.some((i) => {
         if (!i) return false; // protege contra null/undefined
-        const maybeMsg = (i as any).mensagemErro as unknown;
+        const maybeMsg: unknown = i.mensagemErro;
         if (typeof maybeMsg !== 'string') return false;
         const msg = maybeMsg;
         if (!msg) return false;
@@ -166,15 +169,15 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
           origem,
         );
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
       const erroMensagem = result.find(
         (i) =>
           i &&
-          typeof (i as any).mensagemErro === 'string' &&
-          (i as any).mensagemErro.length > 0,
+          typeof i.mensagemErro === 'string' &&
+          i.mensagemErro.length > 0,
       );
 
       if (erroMensagem) {
@@ -188,7 +191,7 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
           origem,
         );
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -203,13 +206,13 @@ export class GenericProcessoWorker extends WorkerHost {
         origem,
       );
 
-      console.log('RESPONSE:', response);
+      this.logger.debug(`RESPONSE: ${JSON.stringify(response)}`);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
-      await axios.post(webhookUrl, response);
+      await axios.post(webhookUrl, response, { headers: webhookHeaders });
       if (documents) {
         await new Promise((resolve) => setTimeout(resolve, 2000)); // pequena pausa para garantir que o webhook seja processado antes de iniciar a consulta de documentos
-        console.log(
+        this.logger.log(
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
         const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
@@ -229,7 +232,7 @@ export class GenericProcessoWorker extends WorkerHost {
             `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
             true,
           );
-          await axios.post(webhookUrl, resp);
+          await axios.post(webhookUrl, resp, { headers: webhookHeaders });
           return;
         }
         const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
@@ -244,24 +247,29 @@ export class GenericProcessoWorker extends WorkerHost {
           { numero, instances, pdfBase64 },
           {
             jobId: numero,
-            attempts: 2,
-            backoff: { type: 'fixed', delay: 5000 },
-            removeOnFail: false,
-            removeOnComplete: true,
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnFail: { count: 500, age: 7 * 24 * 3600 }, // retém últimos 500 por 7 dias (EST-006)
+            removeOnComplete: { count: 1000 },
           },
         );
       }
     } catch (error) {
       this.logger.error(error);
 
-      if (axios.isAxiosError(error) && error.status === 503) {
-        const response = normalizeResponse(
-          numero,
-          [],
-          'Erro temporário, tente novamente mais tarde',
-          true,
+      const mensagem = axios.isAxiosError(error)
+        ? `Erro PJE (HTTP ${error.status ?? 'sem status'}): ${error.message}`
+        : `Erro inesperado: ${error instanceof Error ? error.message : String(error)}`;
+
+      const response = normalizeResponse(numero, [], mensagem, true);
+
+      try {
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+      } catch (webhookError) {
+        this.logger.error(
+          `Falha ao enviar webhook de erro para ${numero}:`,
+          webhookError,
         );
-        await axios.post(webhookUrl, response);
       }
     }
   }

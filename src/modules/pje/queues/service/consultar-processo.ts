@@ -108,8 +108,8 @@ export class ConsultarProcessoQueue {
         attempts: 3,
         priority: priority ? 0 : 5,
         backoff: { type: 'fixed', delay: 5000 },
-        removeOnFail: false,
-        removeOnComplete: true,
+        removeOnFail: { count: 500, age: 7 * 24 * 3600 },
+        removeOnComplete: { count: 1000 },
       },
     );
 

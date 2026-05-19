@@ -9,6 +9,12 @@ import { CaptchaService } from 'src/services/captcha.service';
 import { FetchDocumentoService } from './fetch-documents-url.service';
 import { userAgents } from 'src/utils/user-agents';
 
+interface AxiosLikeError {
+  response?: { status?: number };
+  code?: string;
+  message?: string;
+}
+
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
 
@@ -57,7 +63,7 @@ export class FetchUrlMovimentService {
                 string,
                 string
               >;
-            } catch (error: any) {
+            } catch (error: unknown) {
               this.logger.warn(
                 'Falha ao fazer parse dos headers do Redis, usando objeto vazio.',
               );
@@ -130,7 +136,7 @@ export class FetchUrlMovimentService {
           }
 
           instances.push(processoResponse);
-        } catch (err: any) {
+        } catch (err: unknown) {
           if (i === 1) {
             this.logger.error(
               `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
@@ -144,7 +150,7 @@ export class FetchUrlMovimentService {
         }
       }
       return instances;
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
       return [];
     }
@@ -188,13 +194,14 @@ export class FetchUrlMovimentService {
         60 * 60 * 24, // expira em 24 horas
       );
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       const isTRT15 = regionTRT === 15;
       const retryStatus = [429, 403];
       const maxAttempts = isTRT15 ? 7 : 5;
+      const axiosError = error as AxiosLikeError;
 
       if (
-        retryStatus.includes(error.response?.status) &&
+        retryStatus.includes(axiosError.response?.status ?? 0) &&
         attempt < maxAttempts
       ) {
         // REFRESH token CAPTCHA a cada tentativa TRT15
@@ -231,16 +238,17 @@ export class FetchUrlMovimentService {
         this.logger.warn(
           `Captcha vazio ou inválido na tentativa ${attempt}/${MAX_RETRIES}`,
         );
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const nodeError = error as AxiosLikeError;
         // Erro clássico do DNS do Railway
-        if (error.code === 'ENOTFOUND') {
+        if (nodeError.code === 'ENOTFOUND') {
           this.logger.warn(
             `⚠️ DNS falhou ao resolver 2captcha.com (ENOTFOUND) — tentativa ${attempt}/${MAX_RETRIES}`,
           );
         } else {
           this.logger.error(
             `Erro ao buscar captcha (tentativa ${attempt}/${MAX_RETRIES}):`,
-            error.message,
+            nodeError.message,
           );
           throw error;
         }

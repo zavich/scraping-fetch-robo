@@ -97,9 +97,25 @@ export class ScrapingService implements OnModuleInit {
 
     await createPageWithRecovery();
 
+    interface CdpRequestEvent {
+      requestId: string;
+      request: { url: string };
+    }
+    interface CdpResponseEvent {
+      requestId: string;
+      response?: {
+        url?: string;
+        headers?: Record<string, string>;
+        encodedDataLength?: number;
+      };
+    }
+    interface VoucherResponse {
+      token?: string;
+    }
+
     let processCaptured = false;
-    let onResponse: any = null;
-    let onRequest: any = null;
+    let onResponse: ((event: CdpResponseEvent) => Promise<void>) | null = null;
+    let onRequest: ((event: CdpRequestEvent) => void) | null = null;
     const requestMap = new Map<string, string>();
     const MAX_MAP_SIZE = 1000;
     // limite de bytes para considerar o body seguro para baixar/parsear
@@ -137,7 +153,7 @@ export class ScrapingService implements OnModuleInit {
       const client: CDPSession = await pg.target().createCDPSession();
       await client.send('Network.enable');
 
-      onRequest = (event: any) => {
+      onRequest = (event: CdpRequestEvent) => {
         if (requestMap.size > MAX_MAP_SIZE) {
           const firstKey = requestMap.keys().next().value;
           requestMap.delete(firstKey);
@@ -148,7 +164,7 @@ export class ScrapingService implements OnModuleInit {
 
       client.on('Network.requestWillBeSent', onRequest);
 
-      onResponse = async (event: any) => {
+      onResponse = async (event: CdpResponseEvent) => {
         try {
           const url = (event.response?.url ??
             requestMap.get(event.requestId) ??
@@ -197,7 +213,7 @@ export class ScrapingService implements OnModuleInit {
                   return;
                 }
 
-                let json: any;
+                let json: unknown;
                 try {
                   json = JSON.parse(text);
                 } catch {
@@ -320,15 +336,15 @@ export class ScrapingService implements OnModuleInit {
 
       // Detecta se é uma página de WAF
       const wafParams = await page.evaluate(() => {
-        const w = window as any;
+        const w = window as Window & typeof globalThis & { gokuProps?: { key?: string; iv?: string; context?: string } };
         const g = w.gokuProps;
         if (g) {
           const q1 = document.querySelector(
             'script[src*="token.awswaf.com"]',
-          ) as any;
+          ) as HTMLScriptElement | null;
           const q2 = document.querySelector(
             'script[src*="captcha.awswaf.com"]',
-          ) as any;
+          ) as HTMLScriptElement | null;
           return {
             websiteKey: g.key || null,
             iv: g.iv || null,
@@ -394,7 +410,7 @@ export class ScrapingService implements OnModuleInit {
         // 1. EXTRAIR PARÂMETROS DO WAF
         //
         const wafParamsExtracted = await page.evaluate(() => {
-          const goku = (window as any).gokuProps;
+          const goku = (window as Window & typeof globalThis & { gokuProps: { key: string; iv: string; context: string } | undefined }).gokuProps;
           if (!goku) return null;
 
           const challengeScript =
@@ -472,7 +488,7 @@ export class ScrapingService implements OnModuleInit {
           },
         );
 
-        let voucherResponse: any = null;
+        let voucherResponse: VoucherResponse | null = null;
         try {
           const mem = process.memoryUsage();
           this.logger.debug(
@@ -489,7 +505,7 @@ export class ScrapingService implements OnModuleInit {
             );
           } else {
             try {
-              voucherResponse = JSON.parse(voucherResponseText);
+              voucherResponse = JSON.parse(voucherResponseText) as VoucherResponse;
             } catch {
               this.logger.warn('⚠️ Resposta /voucher não é JSON válido');
             }
@@ -545,7 +561,7 @@ export class ScrapingService implements OnModuleInit {
 
           await page.setCookie({
             name: 'aws-waf-token',
-            value: newToken,
+            value: newToken ?? '',
             domain: finalDomain,
             path: '/',
             httpOnly: false,
@@ -576,7 +592,7 @@ export class ScrapingService implements OnModuleInit {
           `aws-waf-token:${processNumber}`,
           originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
-          180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes
+          180, // 3 minutos de validade no Redis (PERF-010)
         );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({ waitUntil: 'domcontentloaded' });

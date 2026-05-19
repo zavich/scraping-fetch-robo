@@ -65,10 +65,9 @@ export class CaptchaService {
       );
 
       if (sendResponse.data.status !== 1) {
-        this.logger.error(
-          'Erro ao enviar captcha: ' + sendResponse.data.request,
+        throw new Error(
+          'Erro ao enviar captcha ao 2Captcha: ' + sendResponse.data.request,
         );
-        return {} as CaptchaResult;
       }
 
       const captchaId = sendResponse.data.request;
@@ -80,8 +79,9 @@ export class CaptchaService {
 
       while (true) {
         if (Date.now() - startTime > timeoutMs) {
-          this.logger.error('Timeout aguardando resposta do captcha');
-          return {} as CaptchaResult;
+          throw new Error(
+            'Timeout aguardando resposta do 2Captcha (2 minutos)',
+          );
         }
 
         this.logger.log(
@@ -112,14 +112,15 @@ export class CaptchaService {
             resposta: data.request,
           };
         } else if (data.request !== 'CAPCHA_NOT_READY') {
-          this.logger.error('Erro na resolução do captcha: ' + data.request);
-          return {} as CaptchaResult;
+          throw new Error(
+            'Erro na resolução do captcha pelo 2Captcha: ' + data.request,
+          );
         }
         // Se CAPCHA_NOT_READY, continua no loop
       }
     } catch (error) {
       this.logger.error('Erro no método resolveCaptcha', error);
-      return {} as CaptchaResult;
+      throw error;
     }
   }
   async getBalance(): Promise<number> {

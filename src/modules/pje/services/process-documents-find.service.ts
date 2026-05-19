@@ -148,7 +148,7 @@ export class ProcessDocumentsFindService {
         }
 
         await this.runInBatches(tasks, 4);
-      } catch (pdfError: any) {
+      } catch (pdfError: unknown) {
         this.logger.error(
           `❌ Erro ao processar PDF da instância: ${(pdfError as Error).message}`,
         );

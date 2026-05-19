@@ -28,6 +28,8 @@ export class GenericDocumentosWorker extends WorkerHost {
   ) {
     const { numero, instances, pdfBase64 } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
+    // ARQ-005: propagate job ID as correlation ID
+    const webhookHeaders = { 'x-correlation-id': String(job.id ?? `doc-${Date.now()}`) };
 
     this.logger.log(`📄 [${job.queueName}] Documentos → ${numero}`);
 
@@ -43,7 +45,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           `Número inválido para consulta de documentos`,
           true,
         );
-        await axios.post(webhookUrl, resp);
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         return;
       }
 
@@ -55,7 +57,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           `Erro ao gerar arquivo para consulta de documentos, tente novamente mais tarde.`,
           true,
         );
-        await axios.post(webhookUrl, resp);
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         return;
       }
 
@@ -73,13 +75,13 @@ export class GenericDocumentosWorker extends WorkerHost {
           `Nenhum documento encontrado, tente novamente mais tarde.`,
           true,
         );
-        await axios.post(webhookUrl, resp);
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         return;
       }
       const result = documentos.slice(0, 2);
       const response = normalizeResponse(numero, result, '', true);
-      await axios.post(webhookUrl, response);
-    } catch (error: any) {
+      await axios.post(webhookUrl, response, { headers: webhookHeaders });
+    } catch (error: unknown) {
       this.logger.error(error);
 
       const resp = normalizeResponse(
@@ -88,7 +90,15 @@ export class GenericDocumentosWorker extends WorkerHost {
         'Erro ao consultar documentos, tente novamente mais tarde.',
         true,
       );
-      await axios.post(webhookUrl, resp);
+      try {
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+      } catch (webhookError) {
+        this.logger.error(
+          `Falha crítica: erro no processamento E no envio do webhook para ${numero}:`,
+          webhookError,
+        );
+        throw webhookError; // deixa BullMQ marcar como falha para retry
+      }
     } finally {
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
       await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {

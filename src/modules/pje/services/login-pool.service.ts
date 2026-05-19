@@ -18,44 +18,30 @@ export class LoginPoolService {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  private contas = [
-    {
-      username: process.env.PJE_USER_FIRST as string,
-      password: process.env.PJE_PASS_FIRST as string,
-    },
-    {
-      username: process.env.PJE_USER_SECOND as string,
-      password: process.env.PJE_PASS_SECOND as string,
-    },
-    {
-      username: process.env.PJE_USER_THIRD as string,
-      password: process.env.PJE_PASS_THIRD as string,
-    },
-    {
-      username: process.env.PJE_USER_FOURTH as string,
-      password: process.env.PJE_PASS_FOURTH as string,
-    },
-    {
-      username: process.env.PJE_USER_FIFTH as string,
-      password: process.env.PJE_PASS_FIFTH as string,
-    },
-    {
-      username: process.env.PJE_USER_SIXTH as string,
-      password: process.env.PJE_PASS_SIXTH as string,
-    },
-  ];
+  // SEG-007: não armazenar credenciais como propriedade persistente — usar getter
+  // para que os valores residam apenas em process.env (não duplicados no heap)
+  private get contas(): { username: string; password: string }[] {
+    return [
+      { username: process.env.PJE_USER_FIRST as string, password: process.env.PJE_PASS_FIRST as string },
+      { username: process.env.PJE_USER_SECOND as string, password: process.env.PJE_PASS_SECOND as string },
+      { username: process.env.PJE_USER_THIRD as string, password: process.env.PJE_PASS_THIRD as string },
+      { username: process.env.PJE_USER_FOURTH as string, password: process.env.PJE_PASS_FOURTH as string },
+      { username: process.env.PJE_USER_FIFTH as string, password: process.env.PJE_PASS_FIFTH as string },
+      { username: process.env.PJE_USER_SIXTH as string, password: process.env.PJE_PASS_SIXTH as string },
+    ];
+  }
   private contaIndex = 0;
   private contadorProcessos = 0;
   getConta(force = false): { username: string; password: string } {
+    const contas = this.contas;
     if (force || this.contadorProcessos >= 5) {
-      this.contaIndex = (this.contaIndex + 1) % this.contas.length;
+      this.contaIndex = (this.contaIndex + 1) % contas.length;
       this.contadorProcessos = 0;
-      this.logger.debug(
-        `🔄 Alternando para a conta: ${this.contas[this.contaIndex].username}`,
-      );
+      // SEG-007: não logar credenciais — apenas o índice
+      this.logger.debug(`🔄 Alternando para conta #${this.contaIndex + 1}`);
     }
     this.contadorProcessos++;
-    return this.contas[this.contaIndex];
+    return contas[this.contaIndex];
   }
 
   // Adicione um parâmetro opcional "simulateDown" para testes
@@ -140,12 +126,12 @@ export class LoginPoolService {
     await this.checkSiteAvailability(trt);
 
     // ✅ 3) LOCK para garantir somente 1 login simultâneo
-    const lockAcquired = await (this.redis as any).set(
+    const lockAcquired = await this.redis.set(
       lockKey,
       '1',
-      'NX',
       'PX',
       lockTTL,
+      'NX',
     );
 
     if (lockAcquired) {
@@ -185,7 +171,7 @@ export class LoginPoolService {
             await this.redis.set(readyKey, '1', 'EX', 30);
 
             success = true;
-          } catch (err: any) {
+          } catch (err: unknown) {
             if (
               err instanceof ServiceUnavailableException &&
               /fora do ar/.test(err.message)
@@ -224,6 +210,14 @@ export class LoginPoolService {
           usedAccount = this.getConta(true); // fallback
           break;
         }
+      }
+      // Se o lock sumiu mas readyKey não foi setado, o holder falhou
+      const lockStillExists = await this.redis.exists(lockKey);
+      if (!lockStillExists) {
+        this.logger.warn(
+          `⚠️ Lock TRT ${trt} expirou sem readyKey — holder falhou. Tentando login próprio.`,
+        );
+        break;
       }
       await new Promise((r) => setTimeout(r, waitInterval));
     }

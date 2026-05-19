@@ -15,14 +15,32 @@ async function bootstrap() {
     credentials: true,
   });
 
-  // 🧹 Encerra browser ao finalizar
-  process.on('SIGINT', () => {
-    (async () => {
-      console.log('🧹 Encerrando browser...');
+  // Fecha browser ao receber sinal de terminacao (Docker stop, Kubernetes)
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`[${signal}] Encerrando servico gracefully...`);
+    try {
       const browser = await BrowserManager.getBrowser();
       await browser.close().catch(() => {});
-      process.exit(0);
-    })();
+    } catch {}
+    process.exit(0);
+  };
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+  // Previne crash do processo por promises nao tratadas
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.error('[unhandledRejection] Promise rejeitada sem handler:', reason);
+    // Log mas nao crasha — deixa o NestJS/BullMQ tratar o job
+  });
+
+  process.on('uncaughtException', async (error: Error) => {
+    console.error('[uncaughtException] Excecao nao capturada:', error);
+    try {
+      const browser = await BrowserManager.getBrowser();
+      await browser.close().catch(() => {});
+    } catch {}
+    process.exit(1);
   });
   // 🔥 Bull Board apenas fora de produção
   if (process.env?.ENVIRONMENT !== 'production') {

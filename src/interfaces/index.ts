@@ -1,7 +1,7 @@
 export interface DetalheProcesso {
   id: string;
 
-  [key: string]: any;
+  [key: string]: unknown;
 }
 export interface ItensProcesso {
   documento: boolean;
@@ -49,7 +49,8 @@ export interface ProcessosResponse {
   instance: string;
   imagem: string; // base64 da imagem
   resposta: string; // resposta do captcha
-  [key: string]: any;
+  mensagemErro?: string;
+  [key: string]: unknown;
   id: number;
   numero: string;
   classe: string;
@@ -63,7 +64,7 @@ export interface ProcessosResponse {
   poloAtivo: Polo[]; // pode substituir `any` pelo tipo correto
   poloPassivo: Polo[];
   assuntos: Assunto[];
-  expedientes: any[];
+  expedientes: unknown[];
   juizoDigital: boolean;
   documentos_restritos?: DocumentosRestritos[];
   documentos: Documento[];

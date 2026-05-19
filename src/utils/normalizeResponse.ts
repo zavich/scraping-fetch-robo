@@ -13,7 +13,7 @@ export function normalizeResponse(
   isDocument = false,
   origem?: string,
 ): Root {
-  const opcoes: { [key: string]: any } = {
+  const opcoes: Record<string, unknown> = {
     documento: false,
   };
   function generateId(length = 11) {
@@ -107,7 +107,7 @@ export function normalizeResponse(
               advogado_de: parte.id,
               // oabs: (rep.papeis || [])
               //   .filter((p: Papeis) => p.identificador === 'advogado')
-              //   .map((_: any) => ({
+              //   .map((_: unknown) => ({
               //     numero: '', // substituir pelo número real da OAB
               //     uf: rep.endereco?.estado ?? '', // garantir que seja sempre string
               //   })),
