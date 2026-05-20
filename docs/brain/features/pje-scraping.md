@@ -32,7 +32,7 @@ Use este mapa quando a task envolver scraping de processos via PJE, filas por TR
 3. Job adicionado a fila `pje-trt{N}` via BullMQ.
 4. Worker consome job, obtem sessao via `LoginPoolService`.
 5. LoginPool rotaciona contas a cada 5 processos, cacheia sessao no Redis.
-6. Se sessao invalida, faz novo login com lock de 15s por TRT.
+6. Se sessao invalida, faz novo login com lock de 60s por TRT.
 7. Scraping via Puppeteer (stealth) ou API direta do PJE.
 8. Dados extraidos: numero, classe, orgao julgador, partes, movimentos, documentos.
 9. Resultado enviado via webhook para robo-api.
@@ -52,4 +52,4 @@ Use este mapa quando a task envolver scraping de processos via PJE, filas por TR
 - Contas PJE podem ser bloqueadas por excesso de requisicoes.
 - AWS WAF pode exigir novo token a qualquer momento.
 - Sessao expirada causa falha silenciosa se nao detectada.
-- Lock de 15s por TRT impede login concorrente mas pode causar espera.
+- Lock de 60s por TRT evita corrida em TRTs lentos e reduz re-login concorrente.

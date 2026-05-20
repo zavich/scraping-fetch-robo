@@ -4,28 +4,18 @@ import { Page, ElementHandle } from 'puppeteer';
 import { ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
-import { BrowserPool } from 'src/utils/browser-pool';
 import { BrowserManager } from 'src/utils/browser.manager';
 
 @Injectable()
 export class ScrapingProcessService {
   private readonly logger = new Logger(ScrapingProcessService.name);
-
-  private readonly pool = new BrowserPool(5); // Reduzir o limite
-  private isInitialized = false;
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly awsS3Service: AwsS3Service,
-  ) {
-    this.pool.init();
-  }
+  ) {}
 
   async execute(processNumber: string, regionTRT: number, instance: number) {
-    if (!this.isInitialized) {
-      await this.pool.init();
-      this.isInitialized = true;
-    }
     const { page, context } = await BrowserManager.createPage();
     let on403: ((res: import('puppeteer').HTTPResponse) => void) | null = null;
 
@@ -292,13 +282,13 @@ export class ScrapingProcessService {
         //
         // 6. RECARREGAR PARA VALIDAR O TOKEN
         //
-        // const originalCookies = await page.cookies();
-        // await this.redis.set(
-        //   `aws-waf-token:${regionTRT}`,
-        //   originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
-        //   'EX',
-        //   3600,
-        // );
+        const originalCookies = await page.cookies();
+        await this.redis.set(
+          `aws-waf-token:${processNumber}`,
+          originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
+          'EX',
+          3600,
+        );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({
           waitUntil: 'networkidle2',
@@ -679,8 +669,8 @@ export class ScrapingProcessService {
       // 3. O PULO DO GATO: Fechar a página antes de liberar o contexto
       if (page) await page.close().catch(() => {});
 
-      // 4. Libera o contexto para o próximo job da fila
-      this.pool.release(context);
+      // 4. Fecha o contexto real criado pelo BrowserManager
+      await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado e aba fechada');
     }
   }

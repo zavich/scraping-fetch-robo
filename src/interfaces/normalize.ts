@@ -1,5 +1,6 @@
 export interface Root {
   id: number;
+  webhookId?: string;
   created_at?: CreatedAt;
   enviar_callback?: string;
   link_api?: string;

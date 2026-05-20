@@ -93,6 +93,10 @@
           "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:WEBHOOK_URL::"
         },
         {
+          "name": "WEBHOOK_SERVICE_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:WEBHOOK_SERVICE_KEY::"
+        },
+        {
           "name": "REDIS_URL",
           "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:REDIS_URL::"
         }

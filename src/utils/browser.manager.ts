@@ -22,7 +22,9 @@ const BROWSER_POOL_SIZE = Math.max(
 interface BrowserSlot {
   browser: Browser | null;
   contextCount: number;
+  activeContexts: number;
   index: number;
+  recyclePending: boolean;
 }
 
 /**
@@ -34,9 +36,16 @@ export class BrowserManager {
   private static readonly logger = new Logger('BrowserManager');
   private static slots: BrowserSlot[] = Array.from(
     { length: BROWSER_POOL_SIZE },
-    (_, i) => ({ browser: null, contextCount: 0, index: i }),
+    (_, i) => ({
+      browser: null,
+      contextCount: 0,
+      activeContexts: 0,
+      index: i,
+      recyclePending: false,
+    }),
   );
   private static roundRobinIndex = 0;
+  private static readonly contextSlotIndex = new WeakMap<BrowserContext, number>();
 
   private static readonly LAUNCH_ARGS = [
     '--no-sandbox',
@@ -46,7 +55,7 @@ export class BrowserManager {
     '--disable-software-rasterizer',
     '--no-first-run',
     '--no-default-browser-check',
-    '--window-size=1280,720',
+    '--window-size=1366,768',
     '--disable-blink-features=AutomationControlled',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
@@ -72,19 +81,28 @@ export class BrowserManager {
     if (!slot.browser || !slot.browser.isConnected()) {
       slot.browser = await BrowserManager.launchBrowser(slotIndex);
       slot.contextCount = 0;
+      slot.recyclePending = false;
     }
 
     if (slot.contextCount >= MAX_CONTEXTS_PER_BROWSER) {
-      BrowserManager.logger.log(
-        `[slot-${slotIndex}] ${slot.contextCount} contextos criados — reiniciando browser para evitar zombies`,
-      );
-      try {
-        await slot.browser.close();
-      } catch {
-        // ignore close errors
+      if (slot.activeContexts > 0) {
+        slot.recyclePending = true;
+        BrowserManager.logger.warn(
+          `[slot-${slotIndex}] reciclagem adiada: ${slot.activeContexts} contextos ainda ativos`,
+        );
+      } else {
+        BrowserManager.logger.log(
+          `[slot-${slotIndex}] ${slot.contextCount} contextos criados — reiniciando browser para evitar zombies`,
+        );
+        try {
+          await slot.browser.close();
+        } catch {
+          // ignore close errors
+        }
+        slot.browser = await BrowserManager.launchBrowser(slotIndex);
+        slot.contextCount = 0;
+        slot.recyclePending = false;
       }
-      slot.browser = await BrowserManager.launchBrowser(slotIndex);
-      slot.contextCount = 0;
     }
 
     return slot;
@@ -112,7 +130,10 @@ export class BrowserManager {
 
     const slot = await BrowserManager.getOrCreateBrowserSlot(slotIndex);
     slot.contextCount++;
-    return slot.browser!.createBrowserContext();
+    slot.activeContexts++;
+    const context = await slot.browser!.createBrowserContext();
+    BrowserManager.contextSlotIndex.set(context, slotIndex);
+    return context;
   }
 
   /**
@@ -209,10 +230,32 @@ export class BrowserManager {
    * Fecha contexto
    */
   static async closeContext(context: BrowserContext): Promise<void> {
+    const slotIndex = BrowserManager.contextSlotIndex.get(context);
+    BrowserManager.contextSlotIndex.delete(context);
+
     try {
       await context.close();
     } catch {
       // ignore
+    }
+
+    if (slotIndex === undefined) {
+      return;
+    }
+
+    const slot = BrowserManager.slots[slotIndex];
+    slot.activeContexts = Math.max(0, slot.activeContexts - 1);
+
+    if (slot.recyclePending && slot.activeContexts === 0 && slot.browser) {
+      try {
+        await slot.browser.close();
+      } catch {
+        // ignore close errors
+      } finally {
+        slot.browser = null;
+        slot.contextCount = 0;
+        slot.recyclePending = false;
+      }
     }
   }
 
@@ -227,6 +270,9 @@ export class BrowserManager {
             await slot.browser.close();
           } finally {
             slot.browser = null;
+            slot.contextCount = 0;
+            slot.activeContexts = 0;
+            slot.recyclePending = false;
           }
         }
       }),
@@ -238,5 +284,28 @@ export class BrowserManager {
    */
   static async closeBrowser(): Promise<void> {
     return BrowserManager.closeAll();
+  }
+
+  static getHealthSnapshot(): {
+    connectedSlots: number;
+    totalSlots: number;
+    roundRobinIndex: number;
+    activeContexts: number;
+    recyclePendingSlots: number;
+  } {
+    return {
+      connectedSlots: BrowserManager.slots.filter(
+        (slot) => slot.browser?.isConnected(),
+      ).length,
+      totalSlots: BrowserManager.slots.length,
+      roundRobinIndex: BrowserManager.roundRobinIndex,
+      activeContexts: BrowserManager.slots.reduce(
+        (total, slot) => total + slot.activeContexts,
+        0,
+      ),
+      recyclePendingSlots: BrowserManager.slots.filter(
+        (slot) => slot.recyclePending,
+      ).length,
+    };
   }
 }

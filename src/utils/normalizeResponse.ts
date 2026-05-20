@@ -1,20 +1,30 @@
 import { ItensProcesso, Partes, Polo, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
+import { randomUUID } from 'crypto';
 
 type Assunto = {
   principal: boolean;
   descricao: string;
 };
 
+type NormalizeResponseOptions = {
+  documento?: boolean;
+  autos?: boolean;
+  origem?: string;
+  webhookId?: string;
+  status?: 'SUCESSO' | 'NAO_ENCONTRADO' | 'ERRO';
+  motivoErro?: string | null;
+  tribunalSigla?: string;
+};
+
 export function normalizeResponse(
   numero: string,
   body: ProcessosResponse[],
   message = 'processo não encontrado',
-  isDocument = false,
-  origem?: string,
+  options: NormalizeResponseOptions = {},
 ): Root {
   const opcoes: Record<string, unknown> = {
-    documento: false,
+    documento: options.documento ?? false,
   };
   function generateId(length = 11) {
     const chars = '0123456789';
@@ -24,16 +34,14 @@ export function normalizeResponse(
     }
     return Number(resposta);
   }
-  if (origem) {
-    opcoes['origem'] = origem;
-  }
-  if (isDocument) {
-    opcoes['documento'] = true;
+  if (options.origem) {
+    opcoes['origem'] = options.origem;
   }
   const now = new Date();
   if (!body || body.length === 0) {
     return {
       id: generateId(),
+      webhookId: options.webhookId ?? randomUUID(),
       created_at: {
         date: now.toISOString()?.replace('T', ' ').substring(0, 19),
         timezone_type: 3,
@@ -41,13 +49,13 @@ export function normalizeResponse(
       },
       numero_processo: numero,
       resposta: { message },
-      status: 'NAO_ENCONTRADO',
-      motivo_erro: 'SEM_DADOS',
+      status: options.status ?? 'NAO_ENCONTRADO',
+      motivo_erro: options.motivoErro ?? 'SEM_DADOS',
       status_callback: null,
       tipo: 'BUSCA_PROCESSO',
       opcoes,
       tribunal: {
-        sigla: origem ? 'TST' : 'TRT',
+        sigla: options.tribunalSigla ?? (options.origem ? 'TST' : 'TRT'),
         nome: 'Tribunal Regional do Trabalho',
         busca_processo: 1,
       },
@@ -170,24 +178,24 @@ export function normalizeResponse(
       movimentacoes,
     };
 
-    if (isDocument) {
+    if (options.autos) {
       resposta['documentos_restritos'] = instance.documentos_restritos;
       resposta['documentos'] = instance.documentos;
     }
 
     return resposta;
   });
-  if (origem) {
-    opcoes['origem'] = origem;
+  if (options.origem) {
+    opcoes['origem'] = options.origem;
   }
-  if (isDocument) {
+  if (options.autos) {
     opcoes['autos'] = true;
   }
   const resposta =
     body.length > 0
       ? {
           numero_unico: body[0]?.numero,
-          origem: origem ? 'TST' : `TRT-${regionTRT}`,
+          origem: options.origem ? 'TST' : `TRT-${regionTRT}`,
           instancias,
           id: generateId(),
         }
@@ -197,6 +205,7 @@ export function normalizeResponse(
         };
   return {
     id: generateId(),
+    webhookId: options.webhookId ?? randomUUID(),
     created_at: {
       date: now.toISOString()?.replace('T', ' ').substring(0, 19),
       timezone_type: 3,
@@ -204,13 +213,13 @@ export function normalizeResponse(
     },
     numero_processo: body[0]?.numero,
     resposta,
-    status: body.length > 0 ? 'SUCESSO' : 'NAO_ENCONTRADO',
-    motivo_erro: null,
+    status: options.status ?? (body.length > 0 ? 'SUCESSO' : 'NAO_ENCONTRADO'),
+    motivo_erro: options.motivoErro ?? null,
     status_callback: null,
     tipo: 'BUSCA_PROCESSO',
     opcoes,
     tribunal: {
-      sigla: origem ? 'TST' : `TRT`,
+      sigla: options.tribunalSigla ?? (options.origem ? 'TST' : `TRT`),
       nome: 'Tribunal Regional do Trabalho',
       busca_processo: 1,
     },

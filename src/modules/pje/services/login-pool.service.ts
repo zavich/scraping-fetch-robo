@@ -81,7 +81,7 @@ export class LoginPoolService {
     const redisKey = `pje:session:${trt}`;
     const readyKey = `${redisKey}:ready`;
     const lockKey = `pje:lock:${trt}`;
-    const lockTTL = 15000;
+    const lockTTL = 60000;
     const waitInterval = 500;
     const maxWait = 60000;
 
@@ -104,8 +104,8 @@ export class LoginPoolService {
       }
 
       // 2) Verifica se cookie tem tokens essenciais
-      const hasAccess = /access_token/.test(cookies);
-      const hasRefresh = /refresh_token/.test(cookies);
+      const hasAccess = this.hasValidJwtCookie(cookies, 'access_token');
+      const hasRefresh = this.hasValidJwtCookie(cookies, 'refresh_token');
 
       // Se cookie existe no Redis mas está quebrado → renovar
       if (!hasAccess || !hasRefresh) {
@@ -161,8 +161,8 @@ export class LoginPoolService {
             cookies = loginResult.cookies;
             usedAccount = account;
 
-            const hasAccess = /access_token/.test(cookies);
-            const hasRefresh = /refresh_token/.test(cookies);
+            const hasAccess = this.hasValidJwtCookie(cookies, 'access_token');
+            const hasRefresh = this.hasValidJwtCookie(cookies, 'refresh_token');
 
             if (!hasAccess || !hasRefresh) {
               throw new Error(`Login TRT ${trt} retornou cookies inválidos.`);
@@ -284,5 +284,29 @@ export class LoginPoolService {
     await this.redis.set(readyKey, '1', 'EX', 30);
 
     return { cookies: newCookies, account };
+  }
+
+  private hasValidJwtCookie(cookieHeader: string, cookieName: string): boolean {
+    const match = cookieHeader.match(new RegExp(`${cookieName}=([^;]+)`));
+
+    if (!match?.[1]) {
+      return false;
+    }
+
+    const token = match[1];
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(
+        Buffer.from(parts[1], 'base64url').toString('utf8'),
+      ) as { exp?: number };
+
+      return typeof payload.exp === 'number' && payload.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
   }
 }

@@ -23,13 +23,13 @@ Redis e o backbone de estado do scraping-fetch-robo. Usado para filas BullMQ, se
 
 | Chave | Tipo | TTL | Operacao SET | Conteudo | Descricao |
 |-------|------|-----|-------------|----------|-----------|
-| `pje:lock:{trt}` | String | 15000ms | `SET ... NX PX 15000` | `'1'` | Mutex para evitar login concorrente no mesmo TRT. Flag NX = so seta se nao existe |
+| `pje:lock:{trt}` | String | 60000ms | `SET ... NX PX 60000` | `'1'` | Mutex para evitar login concorrente no mesmo TRT. Flag NX = so seta se nao existe |
 
 ### Cache WAF
 
 | Chave | Tipo | TTL | Operacao SET | Conteudo | Descricao |
 |-------|------|-----|-------------|----------|-----------|
-| `aws-waf-token:{processNumber}` | String | **180000s** (path WAF detectado) ou **18000s** (path sem WAF) | `SET ... EX {ttl}` | Cookie string: `aws-waf-token={value}` | Token WAF resolvido. **NOTA**: TTL de 180000s (50h) parece bug — provavelmente deveria ser 1800s (30min) |
+| `aws-waf-token:{processNumber}` | String | **7200s** | `SET ... EX 7200` | Cookie string: `aws-waf-token={value}` | Token WAF resolvido e reutilizado entre scraping de movimentos/documentos |
 
 ### Cache Captcha
 
@@ -73,15 +73,15 @@ Total: 49 filas.
 |-------|-------------|-------------|-----------------|---------|
 | `pje-trt3`, `pje-trt9`, `pje-tst` | 1 | 120000ms (2 min) | 30000ms | 3 req/1000ms |
 | Demais TRTs | 3 | 120000ms (2 min) | 30000ms | 3 req/1000ms |
-| Documentos (todos) | **100** | **600000ms (10 min)** | Nao configurado | Nao configurado |
+| Documentos (todos) | `BROWSER_POOL_SIZE * 5` | **600000ms (10 min)** | Nao configurado | Nao configurado |
 
 ### Job options por tipo
 
 | Tipo | attempts | backoff | removeOnFail | removeOnComplete |
 |------|----------|---------|-------------|-----------------|
-| Processo (via ConsultarProcessoQueue) | 3 | fixed 5000ms | false | true |
-| Documento (via ConsultarProcessoDocumentoQueue) | 3 | fixed 5000ms | false | true |
-| Documento (inline do process worker) | **2** | fixed 5000ms | false | true |
+| Processo (via ConsultarProcessoQueue) | 3 | fixed 5000ms | 500 jobs / 7 dias | 1000 jobs |
+| Documento (via ConsultarProcessoDocumentoQueue) | 3 | fixed 5000ms | 500 jobs / 7 dias | 1000 jobs |
+| Documento (inline do process worker) | **3** | exponential 5000ms | 500 jobs / 7 dias | 1000 jobs |
 
 ## Debug
 

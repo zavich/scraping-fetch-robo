@@ -21,15 +21,18 @@ export class AppController {
 
     // Verifica Redis
     try {
-      const pong = await this.redis.ping();
+      const pong = await Promise.race([
+        this.redis.ping(),
+        new Promise<string>((_, reject) =>
+          setTimeout(() => reject(new Error('Redis ping timeout')), 3000),
+        ),
+      ]);
       checks.redis = pong === 'PONG';
     } catch {}
 
     // Verifica browser
-    try {
-      const browser = await BrowserManager.getBrowser();
-      checks.browser = browser.isConnected();
-    } catch {}
+    const browserSnapshot = BrowserManager.getHealthSnapshot();
+    checks.browser = browserSnapshot.connectedSlots > 0;
 
     // Verifica memoria (alerta se heap > 85%)
     const { heapUsed, heapTotal } = process.memoryUsage();
@@ -40,6 +43,7 @@ export class AppController {
       throw new ServiceUnavailableException({
         status: 'unhealthy',
         checks,
+        browserSnapshot,
         heapUsedMB: Math.round(heapUsed / 1024 / 1024),
       });
     }
@@ -47,6 +51,7 @@ export class AppController {
     return {
       status: 'ok',
       checks,
+      browserSnapshot,
       heapUsedMB: Math.round(heapUsed / 1024 / 1024),
     };
   }

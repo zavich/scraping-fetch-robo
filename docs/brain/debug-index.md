@@ -69,7 +69,7 @@ Checar:
 - Credenciais no Secrets Manager (PJE_USER_*, PJE_PASS_*).
 - Se a conta nao foi bloqueada pelo tribunal.
 - Se o endpoint de login do PJE esta acessivel.
-- Lock `pje:lock:{trt}` (15s) para evitar login concorrente.
+- Lock `pje:lock:{trt}` (60s) para evitar login concorrente.
 
 ## Documento nao encontrado
 

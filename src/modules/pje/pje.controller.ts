@@ -29,6 +29,7 @@ export class PjeController {
     private readonly redisService: RedisService,
   ) {}
   @Post('extract-by-id')
+  @UseGuards(ApiKeyAuthGuard)
   @UseInterceptors(FileInterceptor('file'))
   async extractById(
     @UploadedFile() file: Express.Multer.File,
@@ -67,6 +68,7 @@ export class PjeController {
    * Endpoint para listar bookmarks do PDF
    */
   @Post('list-bookmarks')
+  @UseGuards(ApiKeyAuthGuard)
   @UseInterceptors(FileInterceptor('file'))
   async listBookmarks(
     @UploadedFile() file: Express.Multer.File,

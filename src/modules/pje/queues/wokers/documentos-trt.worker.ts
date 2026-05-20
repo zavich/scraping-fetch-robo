@@ -29,7 +29,14 @@ export class GenericDocumentosWorker extends WorkerHost {
     const { numero, instances, pdfBase64 } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
     // ARQ-005: propagate job ID as correlation ID
-    const webhookHeaders = { 'x-correlation-id': String(job.id ?? `doc-${Date.now()}`) };
+    const correlationId = String(job.id ?? `doc-${Date.now()}`);
+    const webhookHeaders = {
+      'x-correlation-id': correlationId,
+      ...(process.env.WEBHOOK_SERVICE_KEY
+        ? { 'x-service-key': process.env.WEBHOOK_SERVICE_KEY }
+        : {}),
+    };
+    let completed = false;
 
     this.logger.log(`📄 [${job.queueName}] Documentos → ${numero}`);
 
@@ -43,7 +50,12 @@ export class GenericDocumentosWorker extends WorkerHost {
           numero,
           [],
           `Número inválido para consulta de documentos`,
-          true,
+          {
+            autos: true,
+            webhookId: `${correlationId}:invalid-number`,
+            status: 'ERRO',
+            motivoErro: 'NUMERO_INVALIDO',
+          },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         return;
@@ -55,7 +67,12 @@ export class GenericDocumentosWorker extends WorkerHost {
           numero,
           [],
           `Erro ao gerar arquivo para consulta de documentos, tente novamente mais tarde.`,
-          true,
+          {
+            autos: true,
+            webhookId: `${correlationId}:pdf-missing`,
+            status: 'ERRO',
+            motivoErro: 'PDF_NAO_GERADO',
+          },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         return;
@@ -73,14 +90,21 @@ export class GenericDocumentosWorker extends WorkerHost {
           numero,
           [],
           `Nenhum documento encontrado, tente novamente mais tarde.`,
-          true,
+          {
+            autos: true,
+            webhookId: `${correlationId}:docs-empty`,
+          },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         return;
       }
       const result = documentos.slice(0, 2);
-      const response = normalizeResponse(numero, result, '', true);
+      const response = normalizeResponse(numero, result, '', {
+        autos: true,
+        webhookId: `${correlationId}:autos-success`,
+      });
       await axios.post(webhookUrl, response, { headers: webhookHeaders });
+      completed = true;
     } catch (error: unknown) {
       this.logger.error(error);
 
@@ -88,7 +112,12 @@ export class GenericDocumentosWorker extends WorkerHost {
         numero,
         [],
         'Erro ao consultar documentos, tente novamente mais tarde.',
-        true,
+        {
+          autos: true,
+          webhookId: `${correlationId}:autos-error`,
+          status: 'ERRO',
+          motivoErro: 'DOCUMENTOS_ERRO',
+        },
       );
       try {
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
@@ -101,13 +130,18 @@ export class GenericDocumentosWorker extends WorkerHost {
       }
     } finally {
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
-      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
+      const maxAttempts = job.opts.attempts ?? 1;
+      const isLastAttempt = job.attemptsMade + 1 >= maxAttempts;
 
-      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
+      if (completed || isLastAttempt) {
+        await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+          log: (msg) => this.logger.debug(msg),
+        });
+
+        await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+          log: (msg) => this.logger.debug(msg),
+        });
+      }
     }
   }
 }

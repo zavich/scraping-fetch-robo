@@ -4,9 +4,11 @@ import { ExpressAdapter } from '@bull-board/express';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { Queue } from 'bullmq';
+import { Logger } from '@nestjs/common';
 import { BrowserManager } from './utils/browser.manager';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
   const port = 8081;
 
@@ -17,10 +19,10 @@ async function bootstrap() {
 
   // Fecha browser ao receber sinal de terminacao (Docker stop, Kubernetes)
   const gracefulShutdown = async (signal: string) => {
-    console.log(`[${signal}] Encerrando servico gracefully...`);
+    logger.log(`[${signal}] Encerrando servico gracefully...`);
     try {
-      const browser = await BrowserManager.getBrowser();
-      await browser.close().catch(() => {});
+      await app.close().catch(() => {});
+      await BrowserManager.closeAll().catch(() => {});
     } catch {}
     process.exit(0);
   };
@@ -30,25 +32,26 @@ async function bootstrap() {
 
   // EST-008: OOM guard — log and exit if RSS exceeds threshold
   const OOM_THRESHOLD_MB = Number(process.env.OOM_THRESHOLD_MB ?? 1800);
-  setInterval(() => {
+  const oomInterval = setInterval(() => {
     const rssMB = Math.round(process.memoryUsage().rss / 1024 / 1024);
     if (rssMB >= OOM_THRESHOLD_MB) {
-      console.error(`[OOM] RSS=${rssMB}MB >= ${OOM_THRESHOLD_MB}MB. Exiting for container restart.`);
+      logger.error(`[OOM] RSS=${rssMB}MB >= ${OOM_THRESHOLD_MB}MB. Exiting for container restart.`);
       process.exit(1);
     }
   }, 30_000); // check every 30 seconds
+  oomInterval.unref();
 
   // Previne crash do processo por promises nao tratadas
   process.on('unhandledRejection', (reason: unknown) => {
-    console.error('[unhandledRejection] Promise rejeitada sem handler:', reason);
+    logger.error('[unhandledRejection] Promise rejeitada sem handler:', reason);
     // Log mas nao crasha — deixa o NestJS/BullMQ tratar o job
   });
 
   process.on('uncaughtException', async (error: Error) => {
-    console.error('[uncaughtException] Excecao nao capturada:', error);
+    logger.error('[uncaughtException] Excecao nao capturada:', error);
     try {
-      const browser = await BrowserManager.getBrowser();
-      await browser.close().catch(() => {});
+      await app.close().catch(() => {});
+      await BrowserManager.closeAll().catch(() => {});
     } catch {}
     process.exit(1);
   });
@@ -89,12 +92,12 @@ async function bootstrap() {
 
     app.use('/bull-board', serverAdapter.getRouter());
 
-    console.log(
+    logger.log(
       `✅ Bull Board carregado com ${bullQueues.length} filas registradas`,
     );
   }
   await app.listen(port, '0.0.0.0');
-  console.log(`🚀 API rodando na porta ${port}`);
+  logger.log(`🚀 API rodando na porta ${port}`);
 }
 
 bootstrap();

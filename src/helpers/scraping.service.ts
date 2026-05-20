@@ -9,6 +9,8 @@ import { CDPSession, Page, BrowserContext, HTTPRequest } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserManager } from 'src/utils/browser.manager';
 
+const WAF_TOKEN_TTL_SECONDS = 7200;
+
 @Injectable()
 export class ScrapingService implements OnModuleInit {
   private readonly logger = new Logger(ScrapingService.name);
@@ -329,9 +331,9 @@ export class ScrapingService implements OnModuleInit {
         );
 
       if (!wafFrame) {
-        console.log('❌ Nenhum frame AWS WAF encontrado');
+        this.logger.warn('❌ Nenhum frame AWS WAF encontrado');
       } else {
-        console.log('✅ Frame AWS WAF detectado:', wafFrame.url());
+        this.logger.log(`✅ Frame AWS WAF detectado: ${wafFrame.url()}`);
       }
 
       // Detecta se é uma página de WAF
@@ -395,7 +397,7 @@ export class ScrapingService implements OnModuleInit {
         };
       });
 
-      console.log('wafFrame URL:', wafFrame?.url() || '❌ não encontrado');
+      this.logger.log(`wafFrame URL: ${wafFrame?.url() || '❌ não encontrado'}`);
       const urlObj = new URL(urlBase);
 
       const correctDomain = urlObj.hostname;
@@ -592,7 +594,7 @@ export class ScrapingService implements OnModuleInit {
           `aws-waf-token:${processNumber}`,
           originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
-          180, // 3 minutos de validade no Redis (PERF-010)
+          WAF_TOKEN_TTL_SECONDS,
         );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({ waitUntil: 'domcontentloaded' });
@@ -641,7 +643,7 @@ export class ScrapingService implements OnModuleInit {
         `aws-waf-token:${processNumber}`,
         `aws-waf-token=${token}`,
         'EX',
-        7200, // 2 horas de validade no Redis (sessão WAF dura ~1h)
+        WAF_TOKEN_TTL_SECONDS,
       );
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');

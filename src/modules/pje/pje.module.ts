@@ -22,6 +22,13 @@ import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
 import { RedisService } from 'src/services/redis.service';
 
+const defaultQueueOptions = {
+  attempts: 3,
+  backoff: { type: 'fixed' as const, delay: 5000 },
+  removeOnComplete: { count: 1000 },
+  removeOnFail: { count: 500, age: 7 * 24 * 3600 },
+};
+
 @Module({
   imports: [
     HttpModule,
@@ -29,13 +36,19 @@ import { RedisService } from 'src/services/redis.service';
 
     BullModule.registerQueue(
       // fila geral
-      { name: 'pje-tst' },
+      { name: 'pje-tst', defaultJobOptions: defaultQueueOptions },
 
       // filas de processos por TRT
-      ...ALL_TRT_QUEUES.map((q) => ({ name: q })),
+      ...ALL_TRT_QUEUES.map((q) => ({
+        name: q,
+        defaultJobOptions: defaultQueueOptions,
+      })),
 
       // filas de documentos por TRT
-      ...ALL_TRT_DOCUMENT_QUEUES.map((q) => ({ name: q })),
+      ...ALL_TRT_DOCUMENT_QUEUES.map((q) => ({
+        name: q,
+        defaultJobOptions: defaultQueueOptions,
+      })),
     ),
   ],
   controllers: [PjeController],

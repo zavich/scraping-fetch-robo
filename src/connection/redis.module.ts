@@ -1,5 +1,7 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
+
+const logger = new Logger('RedisModule');
 
 @Global()
 @Module({
@@ -15,25 +17,33 @@ import Redis from 'ioredis';
           maxRetriesPerRequest: null, // obrigatorio para BullMQ
           retryStrategy: (times: number) => {
             if (times > 20) {
-              console.error('[Redis] Maximo de tentativas atingido. Desistindo.');
+              logger.error('[Redis] Maximo de tentativas atingido. Desistindo.');
               return null; // para de tentar
             }
             const delay = Math.min(times * 200, 5000);
-            console.warn(`[Redis] Tentativa ${times} de reconexao em ${delay}ms`);
+            logger.warn(`[Redis] Tentativa ${times} de reconexao em ${delay}ms`);
             return delay;
+          },
+          reconnectOnError: (err: Error) => {
+            const message = err.message.toLowerCase();
+            return message.includes('readonly') ||
+              message.includes('econnrefused') ||
+              message.includes('connection is closed')
+              ? 1
+              : false;
           },
         });
 
         client.on('error', (err) => {
-          console.error('[Redis] Erro de conexao:', err.message);
+          logger.error('[Redis] Erro de conexao:', err.message);
         });
 
         client.on('reconnecting', (ms: number) => {
-          console.warn(`[Redis] Reconectando em ${ms}ms...`);
+          logger.warn(`[Redis] Reconectando em ${ms}ms...`);
         });
 
         client.on('ready', () => {
-          console.log('[Redis] Conexao estabelecida com sucesso');
+          logger.log('[Redis] Conexao estabelecida com sucesso');
         });
 
         return client;
