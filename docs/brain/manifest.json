@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "entrypoint": "docs/brain/INDEX.md",
+  "adapters": [],
+  "core": {
+    "project": "docs/brain/project.md",
+    "architecture": "docs/brain/architecture.md",
+    "applicationMap": "docs/brain/application-map.md",
+    "coverage": "docs/brain/coverage.md",
+    "debugIndex": "docs/brain/debug-index.md",
+    "riskMap": "docs/brain/risk-map.md",
+    "taskRouter": "docs/brain/task-router.md",
+    "testMatrix": "docs/brain/test-matrix.md"
+  },
+  "specs": {
+    "apiContracts": "docs/brain/specs/api-contracts.md",
+    "queueContracts": "docs/brain/specs/queue-contracts.md",
+    "dataContracts": "docs/brain/specs/data-contracts.md",
+    "envVars": "docs/brain/specs/env-vars.md",
+    "interService": "docs/brain/specs/inter-service.md",
+    "browserConfig": "docs/brain/specs/browser-config.md",
+    "dependencyGraph": "docs/brain/specs/dependency-graph.md"
+  },
+  "features": {
+    "pje-scraping": {
+      "docs": ["docs/brain/features/pje-scraping.md"],
+      "workflows": ["docs/brain/workflows/debug-scraping-pje.md"],
+      "entrypoints": [
+        "src/modules/pje/pje.controller.ts",
+        "src/modules/pje/services/scraping-process.service.ts",
+        "src/modules/pje/services/login-pool.service.ts"
+      ]
+    },
+    "pje-documents": {
+      "docs": ["docs/brain/features/pje-documents.md"],
+      "entrypoints": [
+        "src/modules/pje/services/extract.service.ts",
+        "src/modules/pje/services/fetch-documents-url.service.ts"
+      ]
+    },
+    "receita-federal": {
+      "docs": ["docs/brain/features/receita-federal.md"],
+      "entrypoints": [
+        "src/modules/receita-federal/receita-federal.controller.ts"
+      ]
+    },
+    "captcha-resolution": {
+      "docs": ["docs/brain/features/captcha-resolution.md"],
+      "entrypoints": [
+        "src/services/captcha.service.ts",
+        "src/modules/receita-federal/services/recaptcha.service.ts"
+      ]
+    }
+  },
+  "engineering": {
+    "conventions": "docs/brain/engineering/conventions.md",
+    "testing": "docs/brain/engineering/testing.md",
+    "infrastructure": "docs/brain/engineering/infrastructure.md",
+    "browserAutomation": "docs/brain/engineering/browser-automation.md"
+  },
+  "runtimeDocs": {
+    "redis": "docs/brain/runtime/redis.md"
+  },
+  "runbooks": [
+    "docs/brain/runbooks/README.md",
+    "docs/brain/runbooks/browser-crash.md",
+    "docs/brain/runbooks/captcha-service-down.md"
+  ],
+  "decisions": [
+    "docs/brain/decisions/README.md",
+    "docs/brain/decisions/ADR-0001-brain-progressivo.md"
+  ],
+  "templates": [
+    "docs/brain/templates/runbook.md",
+    "docs/brain/templates/decision.md",
+    "docs/brain/templates/incident.md"
+  ],
+  "globalWorkflows": [
+    "docs/brain/workflows/investigacao-progressiva.md",
+    "docs/brain/workflows/debug-scraping-pje.md",
+    "docs/brain/workflows/debug-fila-jobs.md"
+  ]
+}
