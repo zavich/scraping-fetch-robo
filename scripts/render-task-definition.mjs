@@ -1,7 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
-const rootDir = path.resolve(import.meta.dirname, '..');
+const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const inputPath = path.join(rootDir, 'task-definition.json');
 const outputPath = process.argv[2]
   ? path.resolve(process.argv[2])
