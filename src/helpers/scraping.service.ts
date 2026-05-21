@@ -698,13 +698,7 @@ export class ScrapingService implements OnModuleInit {
     }
   }
   async captureRealRequest(page: Page) {
-    // Atenção: evitar remover listeners globais ou setar interception múltiplas vezes.
-    // Se necessário, setRequestInterception deve ser feito uma única vez na stack.
-    try {
-      await page.setRequestInterception(true);
-    } catch {
-      /* ignore */
-    }
+    await BrowserManager.ensureRequestInterception(page);
 
     const onRequestIntercept = async (request: HTTPRequest) => {
       try {

@@ -263,9 +263,9 @@ export class GenericProcessoWorker extends WorkerHost {
         const documentosQueue = this.documentosQueues[queueName];
         await documentosQueue.add(
           'consulta-processo-documento',
-          { numero, instances, pdfBase64 },
+          { numero, instances, pdfBase64, correlationId },
           {
-            jobId: numero,
+            jobId: `${numero}:${correlationId}`,
             attempts: 3,
             backoff: { type: 'exponential', delay: 5000 },
             removeOnFail: { count: 500, age: 7 * 24 * 3600 }, // retém últimos 500 por 7 dias (EST-006)
@@ -276,7 +276,7 @@ export class GenericProcessoWorker extends WorkerHost {
     } catch (error) {
       this.logger.error(error);
 
-      if (documents && successWebhookSent) {
+      if (successWebhookSent) {
         throw error instanceof Error ? error : new Error(String(error));
       }
 

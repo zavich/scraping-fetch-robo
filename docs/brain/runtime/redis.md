@@ -86,8 +86,13 @@ Total: 49 filas.
 ## Debug
 
 - `redis-cli` para inspecionar chaves.
-- `KEYS pje:session:*` para listar sessoes ativas.
+- `SCAN 0 MATCH pje:session:* COUNT 100` para listar sessoes ativas sem bloquear o Redis.
 - `TTL pje:lock:{trt}` para verificar se lock esta ativo.
-- `KEYS aws-waf-token:*` para listar tokens WAF cacheados.
-- `KEYS tokencaptcha:*` para listar tokens captcha cacheados.
+- `SCAN 0 MATCH aws-waf-token:* COUNT 100` para listar tokens WAF cacheados.
+- `SCAN 0 MATCH tokencaptcha:* COUNT 100` para listar tokens captcha cacheados.
 - Bull Board (`/bull-board` em ambientes nao-production) para visao das filas.
+
+## Notas operacionais
+
+- O servico administrativo usa `SCAN` para limpeza e reprocessamento de jobs falhos, evitando comandos bloqueantes no Redis.
+- O `BrowserManager` centraliza o request interception padrao e a definicao de viewport para evitar drift entre pagina, browser e workers.

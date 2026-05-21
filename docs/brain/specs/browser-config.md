@@ -16,7 +16,7 @@ puppeteer.launch({
     '--disable-software-rasterizer',
     '--no-first-run',
     '--no-default-browser-check',
-    '--window-size=1280,720',
+    '--window-size=1366,768',
     '--disable-blink-features=AutomationControlled',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
@@ -24,16 +24,11 @@ puppeteer.launch({
   ],
   protocolTimeout: 120_000,   // 2 minutos
   timeout: 180_000,           // 3 minutos
-  defaultViewport: null,      // viewport configurado por pagina, nao globalmente
+  defaultViewport: { width: 1366, height: 768, ... }, // fonte unica de viewport
 })
 ```
 
 ### Configuracao por pagina (`createPage()`)
-
-**Viewport**:
-```typescript
-{ width: 1366, height: 768, deviceScaleFactor: 1, isMobile: false, hasTouch: false }
-```
 
 **Headers**:
 ```typescript
@@ -66,6 +61,7 @@ window.chrome = { runtime: {} }
 **Interceptacao de requests**:
 - Bloqueado: `['media']` (apenas tipo media)
 - Demais tipos: continue normalmente
+- Centralizada no `BrowserManager.ensureRequestInterception(page)` para evitar double interception em helpers/workers.
 
 **Timeouts por pagina**:
 ```typescript
@@ -75,11 +71,12 @@ page.setDefaultNavigationTimeout(120000)  // 2 minutos
 
 ### Padrao de uso
 
-- **Singleton**: uma instancia `Browser` para toda a aplicacao
+- **Pool**: `BROWSER_POOL_SIZE` instancias `Browser` em round-robin
 - **Isolamento**: cada operacao cria um `BrowserContext` proprio
 - `createPage()`: cria novo context + nova page
 - `closeContext()`: fecha o context (nao o browser)
-- `closeBrowser()`: fecha e anula o singleton
+- `closeAll()`: fecha todos os slots do pool
+- `closeBrowser()`: alias legado para `closeAll()`
 
 ---
 

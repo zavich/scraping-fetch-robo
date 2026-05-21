@@ -12,6 +12,13 @@ puppeteer.use(StealthPlugin());
 
 // Reinicia cada slot após N contextos para evitar acúmulo de Chrome zombies (EST-003)
 const MAX_CONTEXTS_PER_BROWSER = 200;
+const PAGE_VIEWPORT = {
+  width: 1366,
+  height: 768,
+  deviceScaleFactor: 1,
+  isMobile: false,
+  hasTouch: false,
+} as const;
 
 // Número de instâncias paralelas de browser (configurable via env var BROWSER_POOL_SIZE)
 const BROWSER_POOL_SIZE = Math.max(
@@ -46,6 +53,8 @@ export class BrowserManager {
   );
   private static roundRobinIndex = 0;
   private static readonly contextSlotIndex = new WeakMap<BrowserContext, number>();
+  private static readonly interceptedPages = new WeakSet<Page>();
+  private static readonly pagesWithDefaultRequestHandler = new WeakSet<Page>();
 
   private static readonly LAUNCH_ARGS = [
     '--no-sandbox',
@@ -69,7 +78,7 @@ export class BrowserManager {
       args: BrowserManager.LAUNCH_ARGS,
       protocolTimeout: 120_000,
       timeout: 180_000,
-      defaultViewport: null,
+      defaultViewport: PAGE_VIEWPORT,
     });
     BrowserManager.logger.log(`[slot-${slotIndex}] Browser inicializado`);
     return browser;
@@ -113,21 +122,23 @@ export class BrowserManager {
    */
   static async getBrowser(): Promise<Browser> {
     const slot = await BrowserManager.getOrCreateBrowserSlot(
-      BrowserManager.roundRobinIndex % BROWSER_POOL_SIZE,
+      BrowserManager.getNextSlotIndex(),
     );
+    return slot.browser!;
+  }
+
+  private static getNextSlotIndex(): number {
+    const slotIndex = BrowserManager.roundRobinIndex;
     BrowserManager.roundRobinIndex =
       (BrowserManager.roundRobinIndex + 1) % BROWSER_POOL_SIZE;
-    return slot.browser!;
+    return slotIndex;
   }
 
   /**
    * Contexto isolado — distribuído entre os N browsers do pool (PERF-001)
    */
   static async createContext(): Promise<BrowserContext> {
-    const slotIndex = BrowserManager.roundRobinIndex % BROWSER_POOL_SIZE;
-    BrowserManager.roundRobinIndex =
-      (BrowserManager.roundRobinIndex + 1) % BROWSER_POOL_SIZE;
-
+    const slotIndex = BrowserManager.getNextSlotIndex();
     const slot = await BrowserManager.getOrCreateBrowserSlot(slotIndex);
     slot.contextCount++;
     slot.activeContexts++;
@@ -145,15 +156,6 @@ export class BrowserManager {
   }> {
     const context = await BrowserManager.createContext();
     const page = await context.newPage();
-
-    // Viewport realista
-    await page.setViewport({
-      width: 1366,
-      height: 768,
-      deviceScaleFactor: 1,
-      isMobile: false,
-      hasTouch: false,
-    });
 
     // Headers reais
     await page.setExtraHTTPHeaders({
@@ -209,21 +211,38 @@ export class BrowserManager {
     // Timezone BR
     await page.emulateTimezone('America/Sao_Paulo');
 
-    // Bloqueio seletivo de assets
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-      if (['media'].includes(req.resourceType())) {
-        req.abort().catch(() => {});
-      } else {
-        req.continue().catch(() => {});
-      }
-    });
+    await BrowserManager.ensureRequestInterception(page);
 
     // Timeouts
     page.setDefaultTimeout(120000);
     page.setDefaultNavigationTimeout(120000);
 
     return { context, page };
+  }
+
+  static async ensureRequestInterception(page: Page): Promise<void> {
+    if (!BrowserManager.interceptedPages.has(page)) {
+      await page.setRequestInterception(true);
+      BrowserManager.interceptedPages.add(page);
+    }
+
+    if (BrowserManager.pagesWithDefaultRequestHandler.has(page)) {
+      return;
+    }
+
+    page.on('request', (req) => {
+      if (req.isInterceptResolutionHandled()) {
+        return;
+      }
+
+      if (req.resourceType() === 'media') {
+        req.abort().catch(() => {});
+        return;
+      }
+
+      req.continue().catch(() => {});
+    });
+    BrowserManager.pagesWithDefaultRequestHandler.add(page);
   }
 
   /**

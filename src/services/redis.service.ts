@@ -4,12 +4,13 @@ import { Redis } from 'ioredis';
 @Injectable()
 export class RedisService {
   private readonly logger = new Logger(RedisService.name);
+  private static readonly SCAN_COUNT = 100;
 
   constructor(@Inject('REDIS_CLIENT') private readonly redisClient: Redis) {}
 
   async deleteQueue(queueName: string): Promise<void> {
     try {
-      const keys = await this.redisClient.keys(`*${queueName}*`);
+      const keys = await this.scanKeys(`*${queueName}*`);
       if (keys.length > 0) {
         await this.redisClient.del(...keys);
         this.logger.log(`Fila ${queueName} deletada com sucesso.`);
@@ -31,7 +32,7 @@ export class RedisService {
     processJob: (jobData: Record<string, unknown>) => Promise<void>,
   ): Promise<void> {
     try {
-      const failedKeys = await this.redisClient.keys('failed:*');
+      const failedKeys = await this.scanKeys('failed:*');
 
       if (failedKeys.length === 0) {
         this.logger.log('Nenhum job com erro encontrado.');
@@ -68,5 +69,24 @@ export class RedisService {
       this.logger.error('Erro ao buscar jobs com erro:', error);
       throw error;
     }
+  }
+
+  private async scanKeys(pattern: string): Promise<string[]> {
+    const keys: string[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, batch] = await this.redisClient.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        RedisService.SCAN_COUNT,
+      );
+      cursor = nextCursor;
+      keys.push(...batch);
+    } while (cursor !== '0');
+
+    return keys;
   }
 }

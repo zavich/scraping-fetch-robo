@@ -24,12 +24,14 @@ export class GenericDocumentosWorker extends WorkerHost {
       numero: string;
       instances: ProcessosResponse[];
       pdfBase64: string | undefined;
+      correlationId?: string;
     }>,
   ) {
-    const { numero, instances, pdfBase64 } = job.data;
+    const { numero, instances, pdfBase64, correlationId: parentCorrelationId } =
+      job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
-    // ARQ-005: propagate job ID as correlation ID
-    const correlationId = String(job.id ?? `doc-${Date.now()}`);
+    const correlationId =
+      parentCorrelationId ?? String(job.id ?? `doc-${Date.now()}`);
     const webhookHeaders = {
       'x-correlation-id': correlationId,
       ...(process.env.WEBHOOK_SERVICE_KEY
@@ -58,7 +60,9 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-        return;
+        throw new Error(
+          `Número inválido para consulta de documentos: ${numero}`,
+        );
       }
 
       if (!pdfBase64) {
@@ -75,7 +79,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-        return;
+        throw new Error(`pdfBase64 ausente para ${numero}`);
       }
 
       // Executa consulta de documentos
@@ -96,7 +100,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-        return;
+        throw new Error(`Nenhum documento encontrado para ${numero}`);
       }
       const result = documentos.slice(0, 2);
       const response = normalizeResponse(numero, result, '', {
@@ -128,6 +132,8 @@ export class GenericDocumentosWorker extends WorkerHost {
         );
         throw webhookError; // deixa BullMQ marcar como falha para retry
       }
+
+      throw error instanceof Error ? error : new Error(String(error));
     } finally {
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
       const maxAttempts = job.opts.attempts ?? 1;

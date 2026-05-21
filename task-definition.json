@@ -1,9 +1,9 @@
 {
-  "taskDefinitionArn": "arn:aws:ecs:us-east-2:339340413604:task-definition/scraping-task:6",
+  "taskDefinitionArn": "arn:aws:ecs:<AWS_REGION>:<AWS_ACCOUNT_ID>:task-definition/<TASK_FAMILY>:<REVISION>",
   "containerDefinitions": [
     {
       "name": "scraping-container",
-      "image": "339340413604.dkr.ecr.us-east-2.amazonaws.com/scraping:latest",
+      "image": "<AWS_ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/<IMAGE_NAME>:<IMAGE_TAG>",
       "cpu": 0,
       "portMappings": [
         {
@@ -18,105 +18,105 @@
       "secrets": [
         {
           "name": "API_KEY",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:API_KEY::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:API_KEY::"
         },
         {
           "name": "API_KEY_2CAPTCHA",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:API_KEY_2CAPTCHA::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:API_KEY_2CAPTCHA::"
         },
         {
           "name": "SCRAPER_API_KEY",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:SCRAPER_API_KEY::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:SCRAPER_API_KEY::"
         },
         {
           "name": "PJE_USER_FIRST",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_FIRST::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_USER_FIRST::"
         },
         {
           "name": "PJE_PASS_FIRST",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_FIRST::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_PASS_FIRST::"
         },
         {
           "name": "PJE_USER_SECOND",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_SECOND::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_USER_SECOND::"
         },
         {
           "name": "PJE_PASS_SECOND",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_SECOND::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_PASS_SECOND::"
         },
         {
           "name": "PJE_USER_THIRD",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_THIRD::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_USER_THIRD::"
         },
         {
           "name": "PJE_PASS_THIRD",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_THIRD::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_PASS_THIRD::"
         },
         {
           "name": "PJE_USER_FOURTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_FOURTH::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_USER_FOURTH::"
         },
         {
           "name": "PJE_PASS_FOURTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_FOURTH::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_PASS_FOURTH::"
         },
         {
           "name": "PJE_USER_FIFTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_FIFTH::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_USER_FIFTH::"
         },
         {
           "name": "PJE_PASS_FIFTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_FIFTH::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_PASS_FIFTH::"
         },
         {
           "name": "PJE_USER_SIXTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_USER_SIXTH::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_USER_SIXTH::"
         },
         {
           "name": "PJE_PASS_SIXTH",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:PJE_PASS_SIXTH::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:PJE_PASS_SIXTH::"
         },
         {
           "name": "AWS_S3_REGION",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:AWS_S3_REGION::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:AWS_S3_REGION::"
         },
         {
           "name": "NODE_ENV",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:NODE_ENV::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:NODE_ENV::"
         },
         {
           "name": "AWS_S3_BUCKET_NAME",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:AWS_S3_BUCKET_NAME::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:AWS_S3_BUCKET_NAME::"
         },
         {
           "name": "WEBHOOK_URL",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:WEBHOOK_URL::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:WEBHOOK_URL::"
         },
         {
           "name": "WEBHOOK_SERVICE_KEY",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:WEBHOOK_SERVICE_KEY::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:WEBHOOK_SERVICE_KEY::"
         },
         {
           "name": "REDIS_URL",
-          "valueFrom": "arn:aws:secretsmanager:us-east-2:339340413604:secret:scraping/prod-WDs9sC:REDIS_URL::"
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<AWS_ACCOUNT_ID>:secret:<SECRET_NAME>:REDIS_URL::"
         }
       ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/scraping",
-          "awslogs-region": "us-east-2",
+          "awslogs-group": "/ecs/<SERVICE_NAME>",
+          "awslogs-region": "<AWS_REGION>",
           "awslogs-stream-prefix": "ecs"
         }
       },
       "systemControls": []
     }
   ],
-  "family": "scraping-task",
-  "executionRoleArn": "arn:aws:iam::339340413604:role/ecsTaskExecutionRole",
-  "taskRoleArn": "arn:aws:iam::339340413604:role/scraping-task-role",
+  "family": "<TASK_FAMILY>",
+  "executionRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<EXECUTION_ROLE>",
+  "taskRoleArn": "arn:aws:iam::<AWS_ACCOUNT_ID>:role/<TASK_ROLE>",
   "networkMode": "awsvpc",
-  "revision": 6,
+  "revision": 1,
   "volumes": [],
   "status": "ACTIVE",
   "requiresAttributes": [
@@ -160,7 +160,7 @@
     "cpuArchitecture": "X86_64",
     "operatingSystemFamily": "LINUX"
   },
-  "registeredAt": "2026-04-14T21:19:58.933Z",
-  "registeredBy": "arn:aws:iam::339340413604:user/rafael.nicacio",
+  "registeredAt": "<REGISTERED_AT>",
+  "registeredBy": "arn:aws:iam::<AWS_ACCOUNT_ID>:user/<REGISTERED_BY>",
   "tags": []
 }
