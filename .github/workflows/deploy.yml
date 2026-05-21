@@ -20,11 +20,15 @@ jobs:
       ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
       ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
       TASK_FAMILY: ${{ secrets.TASK_FAMILY }}
-      CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -38,19 +42,17 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          IMAGE_SHA=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
+          IMAGE_URI=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
           IMAGE_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
 
-          docker build -t $IMAGE_SHA -t $IMAGE_LATEST .
-          docker push $IMAGE_SHA
+          docker build -t $IMAGE_URI -t $IMAGE_LATEST .
+          docker push $IMAGE_URI
           docker push $IMAGE_LATEST
 
-          echo "IMAGE_SHA=$IMAGE_SHA" >> $GITHUB_ENV
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
       - name: Validate Redis URL (fail fast)
         run: |
-          echo "Checking REDIS_URL from Secrets Manager..."
-
           REDIS_URL=$(aws secretsmanager get-secret-value \
             --secret-id ${{ secrets.AWS_SECRET_ID }} \
             --query SecretString \
@@ -61,43 +63,21 @@ jobs:
             exit 1
           fi
 
-      - name: Download Current Task Definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition $TASK_FAMILY \
-            --query taskDefinition \
-            --output json > task-definition.json
-
-      - name: Update Task Definition (safe)
-        run: |
-          jq \
-            --arg IMAGE "$IMAGE_SHA" \
-            --arg TASK_ROLE "${{ secrets.TASK_ROLE_ARN }}" \
-            --arg EXEC_ROLE "${{ secrets.EXECUTION_ROLE_ARN }}" \
-            '
-            .taskRoleArn = $TASK_ROLE
-            | .executionRoleArn = $EXEC_ROLE
-            | .containerDefinitions |= map(
-              if .name == env.CONTAINER_NAME then
-                .image = $IMAGE
-              else .
-              end
-            )
-            | del(
-                .taskDefinitionArn,
-                .revision,
-                .status,
-                .requiresAttributes,
-                .compatibilities,
-                .registeredAt,
-                .registeredBy
-              )
-            ' task-definition.json > task-def-updated.json
+      - name: Render Task Definition
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          TASK_FAMILY: ${{ env.TASK_FAMILY }}
+          IMAGE_URI: ${{ env.IMAGE_URI }}
+          TASK_ROLE_ARN: ${{ secrets.TASK_ROLE_ARN }}
+          EXECUTION_ROLE_ARN: ${{ secrets.EXECUTION_ROLE_ARN }}
+          SECRET_ARN_PREFIX: ${{ secrets.SECRET_ARN_PREFIX }}
+          LOG_GROUP: ${{ secrets.LOG_GROUP }}
+        run: node ./scripts/render-task-definition.mjs task-def-rendered.json
 
       - name: Deploy ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
-          task-definition: task-def-updated.json
+          task-definition: task-def-rendered.json
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true

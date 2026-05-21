@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -18,5 +18,6 @@ const rendered = template.replace(/<([A-Z0-9_]+)>/g, (_, key) => {
   return value;
 });
 
+await mkdir(path.dirname(outputPath), { recursive: true });
 await writeFile(outputPath, rendered);
 console.log(`Task definition renderizada em ${outputPath}`);
