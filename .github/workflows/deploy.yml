@@ -46,17 +46,28 @@ jobs:
           IMAGE_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
 
           docker build -t $IMAGE_URI -t $IMAGE_LATEST .
-          docker push $IMAGE_URI
-          docker push $IMAGE_LATEST
+          docker push --all-tags ${ECR_REGISTRY}/${ECR_REPOSITORY}
 
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
       - name: Validate Redis URL (fail fast)
         run: |
+          set -euo pipefail
+
+          if [[ -z "${{ secrets.REDIS_URL_FINGERPRINT }}" ]]; then
+            echo "REDIS_URL_FINGERPRINT not configured"
+            exit 1
+          fi
+
           REDIS_URL=$(aws secretsmanager get-secret-value \
             --secret-id ${{ secrets.AWS_SECRET_ID }} \
             --query SecretString \
             --output text | jq -r .REDIS_URL)
+
+          if [[ -z "$REDIS_URL" || "$REDIS_URL" == "null" ]]; then
+            echo "Failed to fetch REDIS_URL from Secrets Manager"
+            exit 1
+          fi
 
           if [[ "$REDIS_URL" != *"${{ secrets.REDIS_URL_FINGERPRINT }}"* ]]; then
             echo "INVALID REDIS_URL detected!"
@@ -68,6 +79,7 @@ jobs:
           AWS_REGION: ${{ env.AWS_REGION }}
           TASK_FAMILY: ${{ env.TASK_FAMILY }}
           IMAGE_URI: ${{ env.IMAGE_URI }}
+          NODE_ENV: production
           TASK_ROLE_ARN: ${{ secrets.TASK_ROLE_ARN }}
           EXECUTION_ROLE_ARN: ${{ secrets.EXECUTION_ROLE_ARN }}
           SECRET_ARN_PREFIX: ${{ secrets.SECRET_ARN_PREFIX }}

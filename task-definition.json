@@ -31,7 +31,7 @@
       "environment": [
         {
           "name": "NODE_ENV",
-          "value": "production"
+          "value": "<NODE_ENV>"
         }
       ],
       "secrets": [

@@ -76,8 +76,9 @@ A auditoria revelou 58 achados no total. Do total, **22 sao responsabilidade do 
 ### Infra e deploy
 
 - `task-definition.json` sanitizado: todos os ARNs/account IDs/secret names substituidos por placeholders `<AWS_*>`
-- `scripts/render-task-definition.mjs` (NOVO) renderiza template usando `process.env`, com `fileURLToPath` (compativel com Node 18 do Dockerfile)
+- `scripts/render-task-definition.mjs` (NOVO) renderiza o template a partir de `process.env`, falha se faltar placeholder obrigatorio, usa `fileURLToPath` (compativel com Node 18 do Dockerfile) e exige `NODE_ENV` explicito no render
 - `.github/workflows/deploy.yml` agora le account ID, regiao, ECR repo, cluster, service, family, container, role ARNs, secret manager ID e Redis URL fingerprint todos de `secrets.*`
+- O workflow falha se `REDIS_URL_FINGERPRINT` estiver vazio, valida que `REDIS_URL` foi lido do Secrets Manager e publica `${GITHUB_SHA}` + `latest` com `docker push --all-tags`
 
 ### Brain docs (`docs/brain/`)
 
