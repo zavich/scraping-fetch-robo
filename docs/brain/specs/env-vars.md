@@ -25,7 +25,7 @@
 | `AWS_S3_REGION` | `aws-s3.service.ts:13,29` | string | Sim | - | Regiao AWS para S3 |
 | `ENVIRONMENT` | `main.ts:28` | string | Nao | undefined | Se NAO for `'production'`, Bull Board e montado em `/bull-board` |
 | `AUTHORIZATION_ESCAVADOR` | `cndt-scraper.service.ts:127` | string | Sim (para CNDT) | - | Token de auth enviado no webhook CNDT (sem prefixo "Bearer") |
-| `SCRAPER_API_KEY` | task-definition.json | string | Desconhecido | - | Presente no Secrets Manager mas sem uso no codigo fonte (possivelmente legado) |
+| `SCRAPER_API_KEY` | task-definition.json | string | Nao | - | Variavel legada ainda presente em alguns ambientes; sem uso no codigo fonte atual |
 
 ## Notas
 
@@ -33,3 +33,4 @@
 - `AUTHORIZATION_ESCAVADOR` e usado como `Authorization: {valor}` sem prefixo "Bearer".
 - `REDIS_URL` configura `maxRetriesPerRequest: null` (obrigatorio para BullMQ) via `redis.module.ts`.
 - Nao existe validacao Zod central de env vars neste servico (diferente do robo-api).
+- `task-definition.json` e template; a versao materializada de deploy deve ser gerada via `yarn render:task-definition`.

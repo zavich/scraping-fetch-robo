@@ -6,12 +6,15 @@
 
 - **URL**: `job.data.webhook ?? process.env.WEBHOOK_URL + '/process/webhook'`
 - **Metodo**: POST
-- **Auth**: nenhuma
+- **Auth**: header `x-service-key: ${process.env.WEBHOOK_SERVICE_KEY}`
 - **Trigger**: apos cada job de processo (sucesso ou falha)
+- **Headers adicionais**: `x-correlation-id` quando disponivel
+- **Idempotencia**: payload inclui `webhookId` unico por evento para deduplicacao no `robo-api`
 
 **Payload sucesso** (interface `Root`):
 ```typescript
 {
+  webhookId: string,            // ex: "{correlationId}:process-success"
   id: number,                    // aleatorio 11 digitos
   created_at: {
     date: "YYYY-MM-DD HH:MM:SS",
@@ -46,6 +49,7 @@
 **Payload erro/nao encontrado**:
 ```typescript
 {
+  webhookId: string,
   id: number,
   created_at: { date, timezone_type: 3, timezone: "UTC" },
   numero_processo: string,

@@ -46,3 +46,4 @@ yarn test:cov         # cobertura
 
 - `src/services/redis.service.spec.ts`: cobre `deleteQueue()`, `reprocessAllFailedJobs()` e `flushAll()`.
 - Validacao da rodada: `yarn test --runInBand` e `yarn build` passaram.
+- Antes do deploy, o template `task-definition.json` deve ser materializado com `yarn render:task-definition`.
