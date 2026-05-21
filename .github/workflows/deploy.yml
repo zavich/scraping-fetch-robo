@@ -14,13 +14,13 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: sa-east-1
-      ECR_REGISTRY: 339340413604.dkr.ecr.sa-east-1.amazonaws.com
-      ECR_REPOSITORY: scraping
-      ECS_CLUSTER: robo-cluster
-      ECS_SERVICE: scraping-task-service
-      TASK_FAMILY: scraping-task
-      CONTAINER_NAME: scraping-container
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+      TASK_FAMILY: ${{ secrets.TASK_FAMILY }}
+      CONTAINER_NAME: ${{ secrets.CONTAINER_NAME }}
 
     steps:
       - name: Checkout
@@ -52,14 +52,12 @@ jobs:
           echo "Checking REDIS_URL from Secrets Manager..."
 
           REDIS_URL=$(aws secretsmanager get-secret-value \
-            --secret-id scraping/prod \
+            --secret-id ${{ secrets.AWS_SECRET_ID }} \
             --query SecretString \
             --output text | jq -r .REDIS_URL)
 
-          echo "REDIS_URL=$REDIS_URL"
-
-          if [[ "$REDIS_URL" != *"robo-redis"* ]]; then
-            echo "❌ INVALID REDIS_URL detected!"
+          if [[ "$REDIS_URL" != *"${{ secrets.REDIS_URL_FINGERPRINT }}"* ]]; then
+            echo "INVALID REDIS_URL detected!"
             exit 1
           fi
 
@@ -74,8 +72,8 @@ jobs:
         run: |
           jq \
             --arg IMAGE "$IMAGE_SHA" \
-            --arg TASK_ROLE "arn:aws:iam::339340413604:role/scraping-task-role" \
-            --arg EXEC_ROLE "arn:aws:iam::339340413604:role/ecsTaskExecutionRole" \
+            --arg TASK_ROLE "${{ secrets.TASK_ROLE_ARN }}" \
+            --arg EXEC_ROLE "${{ secrets.EXECUTION_ROLE_ARN }}" \
             '
             .taskRoleArn = $TASK_ROLE
             | .executionRoleArn = $EXEC_ROLE
