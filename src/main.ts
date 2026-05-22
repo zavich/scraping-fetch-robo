@@ -10,7 +10,7 @@ import { BrowserManager } from './utils/browser.manager';
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
-  const port = 8081;
+  const port = Number(process.env.PORT) || 8081;
 
   app.enableCors({
     origin: ['https://robo-api.juri.capital'],
@@ -101,3 +101,4 @@ async function bootstrap() {
 }
 
 bootstrap();
+
