@@ -287,7 +287,7 @@ export class ScrapingProcessService {
           `aws-waf-token:${processNumber}`,
           originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
-          3600,
+          7200,
         );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({

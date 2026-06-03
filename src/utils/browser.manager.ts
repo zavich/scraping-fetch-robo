@@ -23,7 +23,7 @@ const PAGE_VIEWPORT = {
 // Número de instâncias paralelas de browser (configurable via env var BROWSER_POOL_SIZE)
 const BROWSER_POOL_SIZE = Math.max(
   1,
-  parseInt(process.env.BROWSER_POOL_SIZE ?? '3', 10),
+  parseInt(process.env.BROWSER_POOL_SIZE ?? '3', 10) || 3,
 );
 
 interface BrowserSlot {
@@ -339,6 +339,7 @@ export class BrowserManager {
 
   static getHealthSnapshot(): {
     connectedSlots: number;
+    initializedSlots: number;
     totalSlots: number;
     roundRobinIndex: number;
     activeContexts: number;
@@ -347,6 +348,10 @@ export class BrowserManager {
     return {
       connectedSlots: BrowserManager.slots.filter(
         (slot) => slot.browser?.isConnected(),
+      ).length,
+      // Slots que já foram inicializados ao menos uma vez (browser !== null)
+      initializedSlots: BrowserManager.slots.filter(
+        (slot) => slot.browser !== null || slot.contextCount > 0,
       ).length,
       totalSlots: BrowserManager.slots.length,
       roundRobinIndex: BrowserManager.roundRobinIndex,

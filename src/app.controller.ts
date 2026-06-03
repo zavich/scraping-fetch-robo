@@ -30,11 +30,12 @@ export class AppController {
     } catch {}
 
     // Verifica browser — BrowserManager é lazy: slots só são criados no primeiro job.
-    // Não marcar como unhealthy quando nenhum slot foi inicializado ainda.
+    // Se nenhum slot foi ainda inicializado (initializedSlots === 0), o pool está em
+    // warm-up; não marcar como unhealthy para não derrubarem o ECS task antes do
+    // primeiro job. Se já foram inicializados mas connectedSlots === 0, é crash real.
     const browserSnapshot = BrowserManager.getHealthSnapshot();
-    const browserInitialized = browserSnapshot.totalSlots > 0 &&
-      (browserSnapshot.connectedSlots > 0 || browserSnapshot.activeContexts === 0);
-    checks.browser = browserInitialized;
+    const neverInitialized = browserSnapshot.initializedSlots === 0;
+    checks.browser = neverInitialized || browserSnapshot.connectedSlots > 0;
 
     // Verifica memoria (alerta se heap > 85%) — apenas informativo, não bloqueia healthy
     const { heapUsed, heapTotal } = process.memoryUsage();
