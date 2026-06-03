@@ -47,7 +47,7 @@ describe('RedisService', () => {
   });
 
   it('flushes only the current redis database', async () => {
-    await service.flushAll();
+    await service.flushDb();
 
     expect(redisClient.flushdb).toHaveBeenCalled();
   });

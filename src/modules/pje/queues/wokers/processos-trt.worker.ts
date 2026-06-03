@@ -87,6 +87,7 @@ export class GenericProcessoWorker extends WorkerHost {
       origem?: string;
       documents?: boolean;
       webhook?: string;
+      correlationId?: string;
     }>,
   ) {
     const { numero, origem, documents = false, webhook } = job.data;
