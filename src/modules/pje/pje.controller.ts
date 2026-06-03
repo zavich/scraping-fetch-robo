@@ -5,6 +5,7 @@ import {
   Delete,
   Logger,
   Param,
+  ParseIntPipe,
   Post,
   Res,
   UploadedFile,
@@ -111,7 +112,7 @@ export class PjeController {
   @Post('/auth/login/:trt')
   @UseGuards(ApiKeyAuthGuard)
   async loginPje(
-    @Param('trt') trt: number,
+    @Param('trt', ParseIntPipe) trt: number,
     @Body('numero') numero: string,
   ) {
     if (!numero) {
