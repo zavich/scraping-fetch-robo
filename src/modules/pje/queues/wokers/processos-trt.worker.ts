@@ -258,6 +258,18 @@ export class GenericProcessoWorker extends WorkerHost {
 
         // Se não tiver cookies, significa que nenhuma conta está disponível
         if (!cookies || !account) {
+          const resp = normalizeResponse(
+            numero,
+            [],
+            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+            {
+              status: 'ERRO',
+              motivoErro: 'LOGIN_UNAVAILABLE',
+              webhookId: `${correlationId}:docs-login-unavailable`,
+              origem,
+            },
+          );
+          await axios.post(webhookUrl, resp, { headers: webhookHeaders });
           throw new Error(
             `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
           );
@@ -303,8 +315,7 @@ export class GenericProcessoWorker extends WorkerHost {
         await axios.post(webhookUrl, response, { headers: webhookHeaders });
       } catch (webhookError) {
         this.logger.error(
-          `Falha ao enviar webhook de erro para ${numero}:`,
-          webhookError,
+          `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,
         );
         throw webhookError;
       }
