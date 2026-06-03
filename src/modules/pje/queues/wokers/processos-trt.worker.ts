@@ -95,7 +95,7 @@ export class GenericProcessoWorker extends WorkerHost {
 
     const webhookUrl = webhook ?? `${process.env.WEBHOOK_URL}/process/webhook`;
     // ARQ-005: propagate correlation ID across services
-    const correlationId = String(job.id ?? `job-${Date.now()}`);
+    const correlationId = job.data.correlationId ?? String(job.id ?? `job-${Date.now()}`);
     const webhookHeaders = {
       'x-correlation-id': correlationId,
       ...(process.env.WEBHOOK_SERVICE_KEY
@@ -289,7 +289,7 @@ export class GenericProcessoWorker extends WorkerHost {
       }
 
       const mensagem = axios.isAxiosError(error)
-        ? `Erro PJE (HTTP ${error.status ?? 'sem status'}): ${error.message}`
+        ? `Erro PJE (HTTP ${error.response?.status ?? 'sem status'}): ${error.message}`
         : `Erro inesperado: ${error instanceof Error ? error.message : String(error)}`;
 
       const response: Root = normalizeResponse(numero, [], mensagem, {

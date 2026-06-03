@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { getTRTQueue } from 'src/helpers/getTRTQueue';
 
 @Injectable()
@@ -100,9 +101,10 @@ export class ConsultarProcessoQueue {
     }
 
     // ✅ Agora pode adicionar novamente
+    const correlationId = randomUUID();
     await queue.add(
       'consulta-processo',
-      { numero, origem, documents, webhook },
+      { numero, origem, documents, webhook, correlationId },
       {
         jobId: numero,
         attempts: 3,

@@ -554,6 +554,9 @@ export class ScrapingService implements OnModuleInit {
         //
         // 5. DEFINIR COOKIE DO TOKEN
         //
+        if (!newToken) {
+          this.logger.warn('⚠️ Voucher não retornou token WAF — pulando setCookie');
+        } else
         try {
           const originalCookies = await page.cookies();
           const wafOriginal = originalCookies.find((c) =>
@@ -563,7 +566,7 @@ export class ScrapingService implements OnModuleInit {
 
           await page.setCookie({
             name: 'aws-waf-token',
-            value: newToken ?? '',
+            value: newToken,
             domain: finalDomain,
             path: '/',
             httpOnly: false,
