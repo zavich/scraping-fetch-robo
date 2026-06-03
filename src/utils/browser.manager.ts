@@ -55,7 +55,10 @@ export class BrowserManager {
     }),
   );
   private static roundRobinIndex = 0;
-  private static readonly contextSlotIndex = new WeakMap<BrowserContext, number>();
+  private static readonly contextSlotIndex = new WeakMap<
+    BrowserContext,
+    number
+  >();
   private static readonly interceptedPages = new WeakSet<Page>();
   private static readonly pagesWithDefaultRequestHandler = new WeakSet<Page>();
 
@@ -87,7 +90,9 @@ export class BrowserManager {
     return browser;
   }
 
-  private static async getOrCreateBrowserSlot(slotIndex: number): Promise<BrowserSlot> {
+  private static async getOrCreateBrowserSlot(
+    slotIndex: number,
+  ): Promise<BrowserSlot> {
     const slot = BrowserManager.slots[slotIndex];
 
     // Aguarda inicialização em curso para evitar race TOCTOU: dois callers
@@ -125,7 +130,9 @@ export class BrowserManager {
         if (!slot.initializing) {
           slot.initializing = (async () => {
             try {
-              await slot.browser!.close();
+              if (slot.browser) {
+                await slot.browser.close();
+              }
             } catch {
               // ignore close errors
             }
@@ -151,10 +158,14 @@ export class BrowserManager {
    * Picks the next slot via round-robin, falls back to another if dead.
    */
   static async getBrowser(): Promise<Browser> {
-    const slot = await BrowserManager.getOrCreateBrowserSlot(
-      BrowserManager.getNextSlotIndex(),
-    );
-    return slot.browser!;
+    const slotIndex = BrowserManager.getNextSlotIndex();
+    const slot = await BrowserManager.getOrCreateBrowserSlot(slotIndex);
+    if (!slot.browser) {
+      throw new Error(
+        `[slot-${slotIndex}] Browser slot not initialized after getOrCreateBrowserSlot`,
+      );
+    }
+    return slot.browser;
   }
 
   private static getNextSlotIndex(): number {
@@ -172,7 +183,12 @@ export class BrowserManager {
     const slot = await BrowserManager.getOrCreateBrowserSlot(slotIndex);
     // Incrementar após createBrowserContext para evitar vazamento de contadores
     // caso a chamada falhe antes de retornar o contexto
-    const context = await slot.browser!.createBrowserContext();
+    if (!slot.browser) {
+      throw new Error(
+        `[slot-${slotIndex}] Browser slot not initialized after getOrCreateBrowserSlot`,
+      );
+    }
+    const context = await slot.browser.createBrowserContext();
     slot.contextCount++;
     slot.activeContexts++;
     BrowserManager.contextSlotIndex.set(context, slotIndex);
@@ -346,8 +362,8 @@ export class BrowserManager {
     recyclePendingSlots: number;
   } {
     return {
-      connectedSlots: BrowserManager.slots.filter(
-        (slot) => slot.browser?.isConnected(),
+      connectedSlots: BrowserManager.slots.filter((slot) =>
+        slot.browser?.isConnected(),
       ).length,
       // Slots que já foram inicializados ao menos uma vez (browser !== null)
       initializedSlots: BrowserManager.slots.filter(

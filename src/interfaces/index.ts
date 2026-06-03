@@ -64,7 +64,7 @@ export interface ProcessosResponse {
   poloAtivo: Polo[]; // pode substituir `any` pelo tipo correto
   poloPassivo: Polo[];
   assuntos: Assunto[];
-  expedientes: unknown[];
+  expedientes: Record<string, string | number | boolean | null>[];
   juizoDigital: boolean;
   documentos_restritos?: DocumentosRestritos[];
   documentos: Documento[];

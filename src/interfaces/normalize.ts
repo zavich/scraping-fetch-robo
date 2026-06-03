@@ -67,7 +67,7 @@ export interface Instancia {
   data_arquivamento: string;
   fisico: boolean | null;
   last_update_time: string;
-  situacoes: unknown[];
+  situacoes: Record<string, string | number | boolean | null>[];
   dados: Dado[];
   partes: Parte[];
   movimentacoes: Movimentacoes[];
@@ -114,7 +114,10 @@ export interface Audiencia {
   audiencia: string;
   situacao: string;
   numero_pessoas: number;
-  informacoes_adicionais: unknown;
+  informacoes_adicionais: Record<
+    string,
+    string | number | boolean | null
+  > | null;
 }
 
 export interface Tribunal {

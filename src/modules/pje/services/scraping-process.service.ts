@@ -64,7 +64,7 @@ export class ScrapingProcessService {
 
       // Detecta se é uma página de WAF
       const wafParams = await page.evaluate(() => {
-        const w = window as unknown as {
+        const w = window as Window & {
           gokuProps?: { key?: string; iv?: string; context?: string };
         };
 
@@ -98,7 +98,9 @@ export class ScrapingProcessService {
         };
       });
 
-      this.logger.debug(`wafFrame URL: ${wafFrame?.url() || '❌ não encontrado'}`);
+      this.logger.debug(
+        `wafFrame URL: ${wafFrame?.url() || '❌ não encontrado'}`,
+      );
       const urlObj = new URL(urlBase);
 
       const correctDomain = urlObj.hostname;
@@ -315,7 +317,9 @@ export class ScrapingProcessService {
         '🔁 Página recarregada — aguardando renderização real...',
       );
       await this.detectBlock(page);
-      this.logger.debug(`📄 HTML parcial: ${(await page.content()).slice(0, 1000)}`);
+      this.logger.debug(
+        `📄 HTML parcial: ${(await page.content()).slice(0, 1000)}`,
+      );
       this.logger.log('📍 URL atual:', page.url());
       on403 = (res: import('puppeteer').HTTPResponse) => {
         if (res.status() === 403) {
@@ -507,25 +511,29 @@ export class ScrapingProcessService {
       this.logger.log(`🔍 Resposta capturada: ${responseDadosBasicos.url()}`);
       this.logger.log(`🔍 Status: ${responseDadosBasicos.status()}`);
 
+      type ProcessoBasico = {
+        id: number;
+        segredoJustica?: boolean;
+        numero?: string;
+      };
+
+      const isProcessoDadosBasicos = (
+        obj: Record<string, string | number | boolean | null | object>,
+      ): obj is ProcessoBasico => {
+        return (
+          typeof obj === 'object' &&
+          obj !== null &&
+          'id' in obj &&
+          typeof (obj as Record<string, string | number | boolean | null>)
+            .id === 'number'
+        );
+      };
+
       try {
-        const data = (await responseDadosBasicos.json()) as unknown;
-
-        type ProcessoBasico = {
-          id: number;
-          segredoJustica?: boolean;
-          numero?: string;
-        };
-
-        const isProcessoDadosBasicos = (
-          obj: unknown,
-        ): obj is ProcessoBasico => {
-          return (
-            typeof obj === 'object' &&
-            obj !== null &&
-            'id' in obj &&
-            typeof (obj as Record<string, unknown>).id === 'number'
-          );
-        };
+        const data = (await responseDadosBasicos.json()) as
+          | ProcessoBasico[]
+          | ProcessoBasico
+          | Record<string, string | number | boolean | null>;
 
         if (
           Array.isArray(data) &&
