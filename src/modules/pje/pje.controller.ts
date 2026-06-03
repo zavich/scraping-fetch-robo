@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -114,7 +115,7 @@ export class PjeController {
     @Body('numero') numero: string,
   ) {
     if (!numero) {
-      return { success: false, error: 'Campo "numero" obrigatório no body' };
+      throw new BadRequestException('Campo "numero" obrigatório no body');
     }
     await this.loginPoolService.getCookies(trt, numero);
     return { success: true };

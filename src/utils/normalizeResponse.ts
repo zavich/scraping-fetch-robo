@@ -23,9 +23,9 @@ export function normalizeResponse(
   message = 'processo não encontrado',
   options: NormalizeResponseOptions = {},
 ): Root {
-  const opcoes: Record<string, unknown> = {
-    documento: options.documento ?? false,
-  };
+  const opcoes: Record<string, unknown> = options.autos
+    ? { autos: true }
+    : { documento: options.documento ?? false };
   function generateId(length = 11) {
     const chars = '0123456789';
     let resposta = '';
@@ -187,9 +187,6 @@ export function normalizeResponse(
   });
   if (options.origem) {
     opcoes['origem'] = options.origem;
-  }
-  if (options.autos) {
-    opcoes['autos'] = true;
   }
   const resposta =
     body.length > 0

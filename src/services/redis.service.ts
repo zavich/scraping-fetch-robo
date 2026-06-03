@@ -8,17 +8,22 @@ export class RedisService {
 
   constructor(@Inject('REDIS_CLIENT') private readonly redisClient: Redis) {}
 
+  private static readonly DELETE_BATCH_SIZE = 500;
+
   async deleteQueue(queueName: string): Promise<void> {
     try {
       const keys = await this.scanKeys(`*${queueName}*`);
       if (keys.length > 0) {
-        await this.redisClient.del(...keys);
-        this.logger.log(`Fila ${queueName} deletada com sucesso.`);
+        for (let i = 0; i < keys.length; i += RedisService.DELETE_BATCH_SIZE) {
+          const batch = keys.slice(i, i + RedisService.DELETE_BATCH_SIZE);
+          await this.redisClient.del(...batch);
+        }
+        this.logger.log(`Fila ${queueName} deletada com sucesso (${keys.length} chaves).`);
       } else {
         this.logger.log(`Nenhuma fila encontrada para ${queueName}.`);
       }
     } catch (error) {
-      this.logger.error(`Erro ao deletar a fila ${queueName}:`, error);
+      this.logger.error(`Erro ao deletar a fila ${queueName}: ${error instanceof Error ? error.stack : String(error)}`);
       throw error;
     }
   }
@@ -72,7 +77,7 @@ export class RedisService {
   }
 
   private async scanKeys(pattern: string): Promise<string[]> {
-    const keys: string[] = [];
+    const keySet = new Set<string>();
     let cursor = '0';
 
     do {
@@ -84,9 +89,9 @@ export class RedisService {
         RedisService.SCAN_COUNT,
       );
       cursor = nextCursor;
-      keys.push(...batch);
+      batch.forEach((k) => keySet.add(k));
     } while (cursor !== '0');
 
-    return keys;
+    return Array.from(keySet);
   }
 }
