@@ -16,7 +16,6 @@ export class AppController {
     const checks = {
       redis: false,
       browser: false,
-      memory: false,
     };
 
     // Verifica Redis
@@ -30,19 +29,23 @@ export class AppController {
       checks.redis = pong === 'PONG';
     } catch {}
 
-    // Verifica browser
+    // Verifica browser — BrowserManager é lazy: slots só são criados no primeiro job.
+    // Não marcar como unhealthy quando nenhum slot foi inicializado ainda.
     const browserSnapshot = BrowserManager.getHealthSnapshot();
-    checks.browser = browserSnapshot.connectedSlots > 0;
+    const browserInitialized = browserSnapshot.totalSlots > 0 &&
+      (browserSnapshot.connectedSlots > 0 || browserSnapshot.activeContexts === 0);
+    checks.browser = browserInitialized;
 
-    // Verifica memoria (alerta se heap > 85%)
+    // Verifica memoria (alerta se heap > 85%) — apenas informativo, não bloqueia healthy
     const { heapUsed, heapTotal } = process.memoryUsage();
-    checks.memory = heapUsed / heapTotal < 0.85;
+    const memoryWarning = heapUsed / heapTotal >= 0.85;
 
     const healthy = checks.redis && checks.browser;
     if (!healthy) {
       throw new ServiceUnavailableException({
         status: 'unhealthy',
         checks,
+        memoryWarning,
         browserSnapshot,
         heapUsedMB: Math.round(heapUsed / 1024 / 1024),
       });
@@ -51,6 +54,7 @@ export class AppController {
     return {
       status: 'ok',
       checks,
+      memoryWarning,
       browserSnapshot,
       heapUsedMB: Math.round(heapUsed / 1024 / 1024),
     };

@@ -170,9 +170,11 @@ export class BrowserManager {
   static async createContext(): Promise<BrowserContext> {
     const slotIndex = BrowserManager.getNextSlotIndex();
     const slot = await BrowserManager.getOrCreateBrowserSlot(slotIndex);
+    // Incrementar após createBrowserContext para evitar vazamento de contadores
+    // caso a chamada falhe antes de retornar o contexto
+    const context = await slot.browser!.createBrowserContext();
     slot.contextCount++;
     slot.activeContexts++;
-    const context = await slot.browser!.createBrowserContext();
     BrowserManager.contextSlotIndex.set(context, slotIndex);
     return context;
   }

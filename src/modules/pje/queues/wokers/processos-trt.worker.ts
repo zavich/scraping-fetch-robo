@@ -296,6 +296,7 @@ export class GenericProcessoWorker extends WorkerHost {
         status: 'ERRO',
         motivoErro: 'PJE_ERRO',
         webhookId: `${correlationId}:process-error`,
+        origem,
       });
 
       try {

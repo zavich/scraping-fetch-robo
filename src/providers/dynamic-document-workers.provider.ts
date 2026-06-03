@@ -8,7 +8,7 @@ export function createDynamicDocumentsWorkers(): Provider[] {
 
   return queues.map((queueName) => {
     // PERF-002: concurrency reduzida para não saturar o browser pool (capacity ~15)
-    const browserPoolSize = Number(process.env.BROWSER_POOL_SIZE ?? 3);
+    const browserPoolSize = Math.max(1, parseInt(process.env.BROWSER_POOL_SIZE ?? '3', 10) || 3);
     const processorOptions = {
       lockDuration: 10 * 60 * 1000, // 10 minutos
       concurrency: browserPoolSize * 5, // 5 páginas por browser instance
