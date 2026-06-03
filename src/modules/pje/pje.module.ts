@@ -13,7 +13,6 @@ import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
 import { PjeController } from './pje.controller';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
-import { ConsultarProcessoDocumentoQueue } from './queues/service/consultar-processo-documento';
 import { PdfExtractService } from './services/extract.service';
 import { FetchDocumentoService } from './services/fetch-documents-url.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
@@ -60,7 +59,6 @@ const defaultQueueOptions = {
     AwsS3Service,
     PdfExtractService,
     LoginPoolService,
-    ConsultarProcessoDocumentoQueue,
     ProcessDocumentsFindService,
     FetchDocumentoService,
     ScrapingService,

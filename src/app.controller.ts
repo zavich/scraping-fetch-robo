@@ -20,12 +20,16 @@ export class AppController {
 
     // Verifica Redis
     try {
+      let pingTimer: ReturnType<typeof setTimeout> | undefined;
       const pong = await Promise.race([
-        this.redis.ping(),
-        new Promise<string>((_, reject) =>
-          setTimeout(() => reject(new Error('Redis ping timeout')), 3000),
-        ),
-      ]);
+        this.redis.ping().catch(() => null),
+        new Promise<null>((_, reject) => {
+          pingTimer = setTimeout(
+            () => reject(new Error('Redis ping timeout')),
+            3000,
+          );
+        }),
+      ]).finally(() => clearTimeout(pingTimer));
       checks.redis = pong === 'PONG';
     } catch {}
 
@@ -37,9 +41,11 @@ export class AppController {
     const neverInitialized = browserSnapshot.initializedSlots === 0;
     checks.browser = neverInitialized || browserSnapshot.connectedSlots > 0;
 
-    // Verifica memoria (alerta se heap > 85%) — apenas informativo, não bloqueia healthy
-    const { heapUsed, heapTotal } = process.memoryUsage();
-    const memoryWarning = heapUsed / heapTotal >= 0.85;
+    // Verifica memoria — alerta se RSS >= 85% do threshold OOM (mesmo sinal do restart)
+    const { rss, heapUsed } = process.memoryUsage();
+    const rssMB = Math.round(rss / 1024 / 1024);
+    const OOM_THRESHOLD_MB = Number(process.env.OOM_THRESHOLD_MB ?? 1800);
+    const memoryWarning = rssMB >= Math.round(OOM_THRESHOLD_MB * 0.85);
 
     const healthy = checks.redis && checks.browser;
     if (!healthy) {

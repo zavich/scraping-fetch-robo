@@ -14,7 +14,7 @@
 **Payload sucesso** (interface `Root`):
 ```typescript
 {
-  webhookId: string,            // ex: "{correlationId}:process-success"
+  webhookId: string,            // ex: "{correlationId}:movements-success"
   id: number,                    // aleatorio 11 digitos
   created_at: {
     date: "YYYY-MM-DD HH:MM:SS",
