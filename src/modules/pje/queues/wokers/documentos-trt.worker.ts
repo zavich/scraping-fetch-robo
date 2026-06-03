@@ -102,6 +102,8 @@ export class GenericDocumentosWorker extends WorkerHost {
           {
             autos: true,
             webhookId: `${correlationId}:docs-empty`,
+            status: 'ERRO',
+            motivoErro: 'DOCUMENTOS_NAO_ENCONTRADOS',
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
