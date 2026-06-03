@@ -231,7 +231,15 @@ export class GenericProcessoWorker extends WorkerHost {
 
       this.logger.debug(`RESPONSE: ${JSON.stringify(response)}`);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
-      await axios.post(webhookUrl, response, { headers: webhookHeaders });
+
+      // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi
+      // enviado numa tentativa anterior (correlationId estável = job.id estável).
+      const movementsOkKey = `scraper:movements-ok:${correlationId}`;
+      const alreadySentMovements = await this.redis.get(movementsOkKey);
+      if (!alreadySentMovements) {
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await this.redis.set(movementsOkKey, '1', 'EX', 86400);
+      }
       successWebhookSent = true;
 
       if (documents) {

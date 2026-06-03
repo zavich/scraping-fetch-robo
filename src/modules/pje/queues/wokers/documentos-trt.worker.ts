@@ -39,6 +39,9 @@ export class GenericDocumentosWorker extends WorkerHost {
         : {}),
     };
     let completed = false;
+    // Impede que o catch externo envie um segundo webhook quando um path de erro
+    // específico já enviou o seu próprio (double-webhook bug).
+    let webhookAlreadySent = false;
 
     this.logger.log(`📄 [${job.queueName}] Documentos → ${numero}`);
 
@@ -60,6 +63,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        webhookAlreadySent = true;
         throw new Error(
           `Número inválido para consulta de documentos: ${numero}`,
         );
@@ -79,6 +83,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        webhookAlreadySent = true;
         throw new Error(`pdfBase64 ausente para ${numero}`);
       }
 
@@ -100,6 +105,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        webhookAlreadySent = true;
         throw new Error(`Nenhum documento encontrado para ${numero}`);
       }
       const result = documentos.slice(0, 2);
@@ -108,29 +114,32 @@ export class GenericDocumentosWorker extends WorkerHost {
         webhookId: `${correlationId}:autos-success`,
       });
       await axios.post(webhookUrl, response, { headers: webhookHeaders });
+      webhookAlreadySent = true;
       completed = true;
     } catch (error: unknown) {
       this.logger.error(error);
 
-      const resp = normalizeResponse(
-        numero,
-        [],
-        'Erro ao consultar documentos, tente novamente mais tarde.',
-        {
-          autos: true,
-          webhookId: `${correlationId}:autos-error`,
-          status: 'ERRO',
-          motivoErro: 'DOCUMENTOS_ERRO',
-        },
-      );
-      try {
-        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-      } catch (webhookError) {
-        this.logger.error(
-          `Falha crítica: erro no processamento E no envio do webhook para ${numero}:`,
-          webhookError,
+      if (!webhookAlreadySent) {
+        const resp = normalizeResponse(
+          numero,
+          [],
+          'Erro ao consultar documentos, tente novamente mais tarde.',
+          {
+            autos: true,
+            webhookId: `${correlationId}:autos-error`,
+            status: 'ERRO',
+            motivoErro: 'DOCUMENTOS_ERRO',
+          },
         );
-        throw webhookError; // deixa BullMQ marcar como falha para retry
+        try {
+          await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        } catch (webhookError) {
+          this.logger.error(
+            `Falha crítica: erro no processamento E no envio do webhook para ${numero}:`,
+            webhookError,
+          );
+          throw webhookError; // deixa BullMQ marcar como falha para retry
+        }
       }
 
       throw error instanceof Error ? error : new Error(String(error));

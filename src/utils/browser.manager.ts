@@ -32,6 +32,8 @@ interface BrowserSlot {
   activeContexts: number;
   index: number;
   recyclePending: boolean;
+  /** Promise em andamento para lançar/reciclar o browser — evita race condition TOCTOU */
+  initializing: Promise<Browser> | null;
 }
 
 /**
@@ -49,6 +51,7 @@ export class BrowserManager {
       activeContexts: 0,
       index: i,
       recyclePending: false,
+      initializing: null,
     }),
   );
   private static roundRobinIndex = 0;
@@ -87,10 +90,26 @@ export class BrowserManager {
   private static async getOrCreateBrowserSlot(slotIndex: number): Promise<BrowserSlot> {
     const slot = BrowserManager.slots[slotIndex];
 
+    // Aguarda inicialização em curso para evitar race TOCTOU: dois callers
+    // concorrentes passariam ambos no check `!slot.browser` antes de qualquer
+    // um atribuir o novo browser, causando dois launchBrowser simultâneos e
+    // descartando o primeiro.
     if (!slot.browser || !slot.browser.isConnected()) {
-      slot.browser = await BrowserManager.launchBrowser(slotIndex);
-      slot.contextCount = 0;
-      slot.recyclePending = false;
+      if (!slot.initializing) {
+        slot.initializing = BrowserManager.launchBrowser(slotIndex)
+          .then((browser) => {
+            slot.browser = browser;
+            slot.contextCount = 0;
+            slot.recyclePending = false;
+            slot.initializing = null;
+            return browser;
+          })
+          .catch((err: unknown) => {
+            slot.initializing = null;
+            throw err;
+          });
+      }
+      await slot.initializing;
     }
 
     if (slot.contextCount >= MAX_CONTEXTS_PER_BROWSER) {
@@ -103,14 +122,25 @@ export class BrowserManager {
         BrowserManager.logger.log(
           `[slot-${slotIndex}] ${slot.contextCount} contextos criados — reiniciando browser para evitar zombies`,
         );
-        try {
-          await slot.browser.close();
-        } catch {
-          // ignore close errors
+        if (!slot.initializing) {
+          slot.initializing = (async () => {
+            try {
+              await slot.browser!.close();
+            } catch {
+              // ignore close errors
+            }
+            const browser = await BrowserManager.launchBrowser(slotIndex);
+            slot.browser = browser;
+            slot.contextCount = 0;
+            slot.recyclePending = false;
+            slot.initializing = null;
+            return browser;
+          })().catch((err: unknown) => {
+            slot.initializing = null;
+            throw err;
+          });
         }
-        slot.browser = await BrowserManager.launchBrowser(slotIndex);
-        slot.contextCount = 0;
-        slot.recyclePending = false;
+        await slot.initializing;
       }
     }
 
