@@ -28,9 +28,9 @@ export class RedisService {
     }
   }
 
-  async flushAll(): Promise<void> {
+  async flushDb(): Promise<void> {
     await this.redisClient.flushdb();
-    this.logger.log('Redis do banco atual limpo completamente.');
+    this.logger.log('Redis do banco atual (DB 0) limpo.');
   }
 
   async reprocessAllFailedJobs(

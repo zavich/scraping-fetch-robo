@@ -125,10 +125,10 @@ export class PjeController {
   async clearRedis(@Param('queue') queue: string) {
     return await this.redisService.deleteQueue(queue);
   }
-  @Delete('redis/flush-all')
+  @Delete('redis/flush-db')
   @UseGuards(ApiKeyAuthGuard)
-  async flushAllRedis() {
-    return await this.redisService.flushAll();
+  async flushDbRedis() {
+    return await this.redisService.flushDb();
   }
   @Post('redis/reprocess-failed')
   @UseGuards(ApiKeyAuthGuard)

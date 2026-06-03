@@ -247,51 +247,73 @@ export class GenericProcessoWorker extends WorkerHost {
         this.logger.log(
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
-        const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
-          ? 2
-          : regionTRT;
+        let docsWebhookSent = false;
+        try {
+          const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
+            ? 2
+            : regionTRT;
 
-        const { cookies, account } = await this.loginPool.getCookies(
-          regionTRTValidate,
-          numero,
-        );
-
-        // Se não tiver cookies, significa que nenhuma conta está disponível
-        if (!cookies || !account) {
-          const resp = normalizeResponse(
+          const { cookies, account } = await this.loginPool.getCookies(
+            regionTRTValidate,
             numero,
-            [],
-            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+          );
+
+          // Se não tiver cookies, significa que nenhuma conta está disponível
+          if (!cookies || !account) {
+            const resp = normalizeResponse(
+              numero,
+              [],
+              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+              {
+                status: 'ERRO',
+                motivoErro: 'LOGIN_UNAVAILABLE',
+                webhookId: `${correlationId}:docs-login-unavailable`,
+                origem,
+              },
+            );
+            docsWebhookSent = true;
+            await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+            throw new Error(
+              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+            );
+          }
+          const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
+            numero,
+            instances as ProcessosResponse[],
+            regionTRT,
+          );
+          const queueName = `trt${regionTRT}`;
+          const documentosQueue = this.documentosQueues[queueName];
+          await documentosQueue.add(
+            'consulta-processo-documento',
+            { numero, instances, pdfBase64, correlationId },
             {
-              status: 'ERRO',
-              motivoErro: 'LOGIN_UNAVAILABLE',
-              webhookId: `${correlationId}:docs-login-unavailable`,
-              origem,
+              jobId: `${numero}:${correlationId}`,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 5000 },
+              removeOnFail: { count: 500, age: 7 * 24 * 3600 }, // retém últimos 500 por 7 dias (EST-006)
+              removeOnComplete: { count: 1000 },
             },
           );
-          await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-          throw new Error(
-            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
-          );
+        } catch (docError) {
+          if (!docsWebhookSent) {
+            const mensagem = axios.isAxiosError(docError)
+              ? `Erro ao buscar documentos (HTTP ${docError.response?.status ?? 'sem status'}): ${docError.message}`
+              : `Erro ao processar documentos: ${docError instanceof Error ? docError.message : String(docError)}`;
+            const resp: Root = normalizeResponse(numero, [], mensagem, {
+              status: 'ERRO',
+              motivoErro: 'PJE_ERRO',
+              webhookId: `${correlationId}:docs-error`,
+              origem,
+            });
+            await axios.post(webhookUrl, resp, { headers: webhookHeaders }).catch((webhookErr) => {
+              this.logger.error(
+                `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
+              );
+            });
+          }
+          throw docError instanceof Error ? docError : new Error(String(docError));
         }
-        const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
-          numero,
-          instances as ProcessosResponse[],
-          regionTRT,
-        );
-        const queueName = `trt${regionTRT}`;
-        const documentosQueue = this.documentosQueues[queueName];
-        await documentosQueue.add(
-          'consulta-processo-documento',
-          { numero, instances, pdfBase64, correlationId },
-          {
-            jobId: `${numero}:${correlationId}`,
-            attempts: 3,
-            backoff: { type: 'exponential', delay: 5000 },
-            removeOnFail: { count: 500, age: 7 * 24 * 3600 }, // retém últimos 500 por 7 dias (EST-006)
-            removeOnComplete: { count: 1000 },
-          },
-        );
       }
     } catch (error) {
       this.logger.error(error);

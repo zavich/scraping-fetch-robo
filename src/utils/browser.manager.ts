@@ -105,6 +105,7 @@ export class BrowserManager {
           .then((browser) => {
             slot.browser = browser;
             slot.contextCount = 0;
+            slot.activeContexts = 0;
             slot.recyclePending = false;
             slot.initializing = null;
             return browser;
