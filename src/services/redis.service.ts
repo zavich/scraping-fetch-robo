@@ -54,7 +54,7 @@ export class RedisService {
             try {
               parsedData = JSON.parse(jobData) as Record<string, unknown>;
             } catch (parseError) {
-              this.logger.error(`Erro ao parsear os dados do job ${key}:`, parseError);
+              this.logger.error(`Erro ao parsear os dados do job ${key}: ${parseError instanceof Error ? parseError.stack : String(parseError)}`);
               continue;
             }
 
@@ -67,11 +67,11 @@ export class RedisService {
             }
           }
         } catch (error) {
-          this.logger.error(`Erro ao reprocessar o job ${key}:`, error);
+          this.logger.error(`Erro ao reprocessar o job ${key}: ${error instanceof Error ? error.stack : String(error)}`);
         }
       }
     } catch (error) {
-      this.logger.error('Erro ao buscar jobs com erro:', error);
+      this.logger.error(`Erro ao buscar jobs com erro: ${error instanceof Error ? error.stack : String(error)}`);
       throw error;
     }
   }

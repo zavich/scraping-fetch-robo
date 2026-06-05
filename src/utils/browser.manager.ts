@@ -368,7 +368,7 @@ export class BrowserManager {
       ).length,
       // Slots que já foram inicializados ao menos uma vez (browser !== null)
       initializedSlots: BrowserManager.slots.filter(
-        (slot) => slot.browser !== null || slot.contextCount > 0,
+        (slot) => slot.browser !== null,
       ).length,
       totalSlots: BrowserManager.slots.length,
       roundRobinIndex: BrowserManager.roundRobinIndex,
