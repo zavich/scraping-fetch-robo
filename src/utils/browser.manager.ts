@@ -101,7 +101,14 @@ export class BrowserManager {
     // descartando o primeiro.
     if (!slot.browser || !slot.browser.isConnected()) {
       if (!slot.initializing) {
-        slot.initializing = BrowserManager.launchBrowser(slotIndex)
+        slot.initializing = (async () => {
+          // Fecha o browser desconectado antes de lançar novo para evitar zombies
+          if (slot.browser) {
+            await slot.browser.close().catch(() => {});
+            slot.browser = null;
+          }
+          return BrowserManager.launchBrowser(slotIndex);
+        })()
           .then((browser) => {
             slot.browser = browser;
             slot.contextCount = 0;

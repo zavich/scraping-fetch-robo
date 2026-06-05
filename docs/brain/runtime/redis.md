@@ -73,7 +73,7 @@ Total: 49 filas.
 |-------|-------------|-------------|-----------------|---------|
 | `pje-trt3`, `pje-trt9`, `pje-tst` | 1 | 120000ms (2 min) | 30000ms | 3 req/1000ms |
 | Demais TRTs | 3 | 120000ms (2 min) | 30000ms | 3 req/1000ms |
-| Documentos (todos) | `BROWSER_POOL_SIZE * 5` | **600000ms (10 min)** | Nao configurado | Nao configurado |
+| Documentos (todos) | `max(1, floor(BROWSER_POOL_SIZE*5 / 24))` — total efetivo: `min(BROWSER_POOL_SIZE*5, 24)` | **600000ms (10 min)** | Nao configurado | Nao configurado |
 
 ### Job options por tipo
 

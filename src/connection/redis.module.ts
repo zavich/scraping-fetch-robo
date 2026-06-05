@@ -35,7 +35,7 @@ const logger = new Logger('RedisModule');
         });
 
         client.on('error', (err) => {
-          logger.error('[Redis] Erro de conexao:', err.message);
+          logger.error(`[Redis] Erro de conexao: ${err instanceof Error ? err.stack : String(err)}`);
         });
 
         client.on('reconnecting', (ms: number) => {
