@@ -156,7 +156,8 @@ export class BrowserManager {
   }
 
   /**
-   * Picks the next slot via round-robin, falls back to another if dead.
+   * Returns a browser for the next slot via round-robin.
+   * Throws if the slot fails to initialize — no silent fallback to another slot.
    */
   static async getBrowser(): Promise<Browser> {
     const slotIndex = BrowserManager.getNextSlotIndex();
@@ -333,6 +334,10 @@ export class BrowserManager {
   static async closeAll(): Promise<void> {
     await Promise.allSettled(
       BrowserManager.slots.map(async (slot) => {
+        // Aguarda lançamento em curso antes de fechar para não deixar zombies
+        if (slot.initializing) {
+          await slot.initializing.catch(() => {});
+        }
         if (slot.browser) {
           try {
             await slot.browser.close();

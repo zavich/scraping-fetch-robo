@@ -340,7 +340,7 @@ export class GenericProcessoWorker extends WorkerHost {
         this.logger.error(
           `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,
         );
-        throw webhookError;
+        // Não relança webhookError — preserva o erro original de scraping
       }
 
       throw error instanceof Error ? error : new Error(String(error));

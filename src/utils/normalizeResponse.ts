@@ -185,9 +185,6 @@ export function normalizeResponse(
 
     return resposta;
   });
-  if (options.origem) {
-    opcoes['origem'] = options.origem;
-  }
   const resposta =
     body.length > 0
       ? {

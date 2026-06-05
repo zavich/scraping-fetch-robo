@@ -93,7 +93,7 @@ export class GenericDocumentosWorker extends WorkerHost {
         instances,
         pdfBase64,
       );
-      if (documentos[0].documentos.length === 0) {
+      if (documentos.length === 0 || documentos[0].documentos.length === 0) {
         this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
         const resp = normalizeResponse(
           numero,
