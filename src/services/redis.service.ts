@@ -19,7 +19,7 @@ export class RedisService {
         const [nextCursor, batch] = await this.redisClient.scan(
           cursor,
           'MATCH',
-          `*:${queueName}:*`,
+          `bull:${queueName}:*`,
           'COUNT',
           RedisService.SCAN_COUNT,
         );
@@ -27,8 +27,8 @@ export class RedisService {
         if (batch.length > 0) {
           for (let i = 0; i < batch.length; i += RedisService.DELETE_BATCH_SIZE) {
             const slice = batch.slice(i, i + RedisService.DELETE_BATCH_SIZE);
-            await this.redisClient.del(...slice);
-            totalDeleted += slice.length;
+            const deleted = await this.redisClient.del(...slice);
+            totalDeleted += deleted;
           }
         }
       } while (cursor !== '0');

@@ -212,69 +212,75 @@ export class BrowserManager {
     page: Page;
   }> {
     const context = await BrowserManager.createContext();
-    const page = await context.newPage();
+    try {
+      const page = await context.newPage();
 
-    // Headers reais
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-      Accept:
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    });
-
-    // User agent moderno
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-        '(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-    );
-
-    // Anti fingerprint
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-      Object.defineProperty(navigator, 'language', { get: () => 'pt-BR' });
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+      // Headers reais
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
       });
-      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
-      Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-      Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
 
-      // window.chrome fake
-      // @ts-ignore
-      window.chrome = { runtime: {} };
-
-      // Permissions patch
-      const originalQuery = window.navigator.permissions.query.bind(
-        window.navigator.permissions,
+      // User agent moderno
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+          '(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
       );
-      // @ts-ignore
-      window.navigator.permissions.query = (
-        parameters: PermissionDescriptor,
-      ): Promise<PermissionStatus> => {
-        if (parameters.name === 'notifications') {
-          return Promise.resolve({
-            state: Notification.permission,
-            name: 'notifications',
-            onchange: null,
-            addEventListener: () => {},
-            removeEventListener: () => {},
-            dispatchEvent: () => true,
-          } as PermissionStatus);
-        }
-        return originalQuery(parameters);
-      };
-    });
 
-    // Timezone BR
-    await page.emulateTimezone('America/Sao_Paulo');
+      // Anti fingerprint
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+        Object.defineProperty(navigator, 'language', { get: () => 'pt-BR' });
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+        });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
 
-    await BrowserManager.ensureRequestInterception(page);
+        // window.chrome fake
+        // @ts-ignore
+        window.chrome = { runtime: {} };
 
-    // Timeouts
-    page.setDefaultTimeout(120000);
-    page.setDefaultNavigationTimeout(120000);
+        // Permissions patch
+        const originalQuery = window.navigator.permissions.query.bind(
+          window.navigator.permissions,
+        );
+        // @ts-ignore
+        window.navigator.permissions.query = (
+          parameters: PermissionDescriptor,
+        ): Promise<PermissionStatus> => {
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({
+              state: Notification.permission,
+              name: 'notifications',
+              onchange: null,
+              addEventListener: () => {},
+              removeEventListener: () => {},
+              dispatchEvent: () => true,
+            } as PermissionStatus);
+          }
+          return originalQuery(parameters);
+        };
+      });
 
-    return { context, page };
+      // Timezone BR
+      await page.emulateTimezone('America/Sao_Paulo');
+
+      await BrowserManager.ensureRequestInterception(page);
+
+      // Timeouts
+      page.setDefaultTimeout(120000);
+      page.setDefaultNavigationTimeout(120000);
+
+      return { context, page };
+    } catch (err) {
+      // Garante que o contexto é fechado se qualquer etapa de setup falhar
+      await BrowserManager.closeContext(context).catch(() => {});
+      throw err;
+    }
   }
 
   static async ensureRequestInterception(page: Page): Promise<void> {
