@@ -152,13 +152,20 @@ export class GenericDocumentosWorker extends WorkerHost {
       const isLastAttempt = job.attemptsMade + 1 >= maxAttempts;
 
       if (completed || isLastAttempt) {
-        await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-          log: (msg) => this.logger.debug(msg),
-        });
-
-        await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-          log: (msg) => this.logger.debug(msg),
-        });
+        // Best-effort: falha na limpeza não deve marcar o job como falho
+        // nem gerar webhooks duplicados quando o processamento já concluiu
+        try {
+          await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+          await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+        } catch (cleanupError) {
+          this.logger.error(
+            `Falha na limpeza de tokens para ${numero}: ${cleanupError instanceof Error ? cleanupError.stack : String(cleanupError)}`,
+          );
+        }
       }
     }
   }
