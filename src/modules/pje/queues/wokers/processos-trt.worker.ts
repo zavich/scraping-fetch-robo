@@ -96,7 +96,8 @@ export class GenericProcessoWorker extends WorkerHost {
 
     const webhookUrl = webhook ?? `${process.env.WEBHOOK_URL}/process/webhook`;
     // ARQ-005: propagate correlation ID across services
-    const correlationId = job.data.correlationId ?? String(job.id ?? `job-${Date.now()}`);
+    // Usa numero como fallback determinístico para manter idempotência entre retries
+    const correlationId = job.data.correlationId ?? String(job.id ?? numero);
     const webhookHeaders = {
       'x-correlation-id': correlationId,
       ...(process.env.WEBHOOK_SERVICE_KEY

@@ -30,8 +30,9 @@ export class GenericDocumentosWorker extends WorkerHost {
     const { numero, instances, pdfBase64, correlationId: parentCorrelationId } =
       job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
+    // Usa numero como fallback determinístico para manter idempotência entre retries
     const correlationId =
-      parentCorrelationId ?? String(job.id ?? `doc-${Date.now()}`);
+      parentCorrelationId ?? String(job.id ?? `doc-${numero}`);
     const webhookHeaders = {
       'x-correlation-id': correlationId,
       ...(process.env.WEBHOOK_SERVICE_KEY

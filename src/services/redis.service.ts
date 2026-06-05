@@ -12,13 +12,29 @@ export class RedisService {
 
   async deleteQueue(queueName: string): Promise<void> {
     try {
-      const keys = await this.scanKeys(`*${queueName}*`);
-      if (keys.length > 0) {
-        for (let i = 0; i < keys.length; i += RedisService.DELETE_BATCH_SIZE) {
-          const batch = keys.slice(i, i + RedisService.DELETE_BATCH_SIZE);
-          await this.redisClient.del(...batch);
+      // Streaming scan-and-delete: evita materializar todas as chaves em memória
+      let cursor = '0';
+      let totalDeleted = 0;
+      do {
+        const [nextCursor, batch] = await this.redisClient.scan(
+          cursor,
+          'MATCH',
+          `*${queueName}*`,
+          'COUNT',
+          RedisService.SCAN_COUNT,
+        );
+        cursor = nextCursor;
+        if (batch.length > 0) {
+          for (let i = 0; i < batch.length; i += RedisService.DELETE_BATCH_SIZE) {
+            const slice = batch.slice(i, i + RedisService.DELETE_BATCH_SIZE);
+            await this.redisClient.del(...slice);
+            totalDeleted += slice.length;
+          }
         }
-        this.logger.log(`Fila ${queueName} deletada com sucesso (${keys.length} chaves).`);
+      } while (cursor !== '0');
+
+      if (totalDeleted > 0) {
+        this.logger.log(`Fila ${queueName} deletada com sucesso (${totalDeleted} chaves).`);
       } else {
         this.logger.log(`Nenhuma fila encontrada para ${queueName}.`);
       }

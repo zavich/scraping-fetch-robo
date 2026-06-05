@@ -8,8 +8,8 @@ export function createDynamicDocumentsWorkers(): Provider[] {
 
   return queues.map((queueName) => {
     const browserPoolSize = Math.max(1, parseInt(process.env.BROWSER_POOL_SIZE ?? '3', 10) || 3);
-    // Distribui a capacidade total do pool entre todas as filas de documentos.
-    // Sem isso: 24 filas × (browserPoolSize*5) esgotariam contextos e causariam OOM.
+    // Limita concorrência por fila distribuindo a capacidade total do pool.
+    // Nota: como é clamped a >= 1, o total efetivo é min(browserPoolSize*5, queues.length).
     const processorOptions = {
       lockDuration: 10 * 60 * 1000, // 10 minutos
       concurrency: Math.max(1, Math.floor((browserPoolSize * 5) / queues.length)),
