@@ -287,7 +287,8 @@ export class LoginPoolService {
   }
 
   private hasValidJwtCookie(cookieHeader: string, cookieName: string): boolean {
-    const match = cookieHeader.match(new RegExp(`${cookieName}=([^;]+)`));
+    // (?:^|;\s*) exige boundary: evita match parcial em nomes que CONTÊM cookieName
+    const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`));
 
     if (!match?.[1]) {
       return false;

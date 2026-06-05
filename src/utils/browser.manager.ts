@@ -371,7 +371,7 @@ export class BrowserManager {
       connectedSlots: BrowserManager.slots.filter((slot) =>
         slot.browser?.isConnected(),
       ).length,
-      // Slots que já foram inicializados ao menos uma vez (browser !== null)
+      // Slots com browser ativo no momento (browser !== null); zera após reciclagem/closeAll
       initializedSlots: BrowserManager.slots.filter(
         (slot) => slot.browser !== null,
       ).length,

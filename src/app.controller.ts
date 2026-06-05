@@ -33,13 +33,13 @@ export class AppController {
       checks.redis = pong === 'PONG';
     } catch {}
 
-    // Verifica browser — BrowserManager é lazy: slots só são criados no primeiro job.
-    // Se nenhum slot foi ainda inicializado (initializedSlots === 0), o pool está em
-    // warm-up; não marcar como unhealthy para não derrubarem o ECS task antes do
-    // primeiro job. Se já foram inicializados mas connectedSlots === 0, é crash real.
+    // BrowserManager é lazy: browsers só são criados no primeiro job.
+    // initializedSlots conta slots com browser !== null AGORA (zera após reciclagem).
+    // Se não há browsers ativos (warm-up ou reciclagem em curso), não penalizar.
+    // Só marca falha se há browsers inicializados mas nenhum conectado.
     const browserSnapshot = BrowserManager.getHealthSnapshot();
-    const neverInitialized = browserSnapshot.initializedSlots === 0;
-    checks.browser = neverInitialized || browserSnapshot.connectedSlots > 0;
+    const noActiveBrowsers = browserSnapshot.initializedSlots === 0;
+    checks.browser = noActiveBrowsers || browserSnapshot.connectedSlots > 0;
 
     // Verifica memoria — alerta se RSS >= 85% do threshold OOM (mesmo sinal do restart)
     const { rss, heapUsed } = process.memoryUsage();

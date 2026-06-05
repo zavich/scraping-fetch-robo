@@ -234,7 +234,7 @@ export class GenericProcessoWorker extends WorkerHost {
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
       // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi
-      // enviado numa tentativa anterior (correlationId estável = job.id estável).
+      // enviado numa tentativa anterior (correlationId é estável por estar no job data).
       const movementsOkKey = `scraper:movements-ok:${correlationId}`;
       const alreadySentMovements = await this.redis.get(movementsOkKey);
       if (!alreadySentMovements) {
