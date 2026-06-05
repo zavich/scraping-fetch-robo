@@ -231,7 +231,7 @@ export class GenericProcessoWorker extends WorkerHost {
         },
       );
 
-      this.logger.debug(`RESPONSE: ${JSON.stringify(response)}`);
+      this.logger.debug(`RESPONSE: numero=${numero} status=${response?.resposta?.status ?? 'n/a'}`);
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
       // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi

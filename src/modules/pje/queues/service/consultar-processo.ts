@@ -106,7 +106,6 @@ export class ConsultarProcessoQueue {
       'consulta-processo',
       { numero, origem, documents, webhook, correlationId },
       {
-        jobId: numero,
         attempts: 3,
         priority: priority ? 0 : 5,
         backoff: { type: 'fixed', delay: 5000 },

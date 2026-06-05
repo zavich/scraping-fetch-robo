@@ -556,7 +556,7 @@ export class ScrapingService implements OnModuleInit {
         //
         if (!newToken) {
           this.logger.warn('⚠️ Voucher não retornou token WAF — pulando setCookie');
-        } else
+        } else {
         try {
           const originalCookies = await page.cookies();
           const wafOriginal = originalCookies.find((c) =>
@@ -587,6 +587,7 @@ export class ScrapingService implements OnModuleInit {
           this.logger.log(
             '🍪 Cookie aws-waf-token setado via fallback document.cookie',
           );
+        }
         }
 
         //

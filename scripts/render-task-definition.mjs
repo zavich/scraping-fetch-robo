@@ -15,7 +15,8 @@ const rendered = template.replace(/<([A-Z0-9_]+)>/g, (_, key) => {
     throw new Error(`Variavel obrigatoria ausente para task definition: ${key}`);
   }
 
-  return value;
+  // Escape for JSON string context (handles quotes, backslashes, newlines)
+  return JSON.stringify(value).slice(1, -1);
 });
 
 await mkdir(path.dirname(outputPath), { recursive: true });
