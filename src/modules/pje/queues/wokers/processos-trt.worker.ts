@@ -240,8 +240,10 @@ export class GenericProcessoWorker extends WorkerHost {
       const alreadySentMovements = await this.redis.get(movementsOkKey);
       if (!alreadySentMovements) {
         await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        successWebhookSent = true; // setado antes do redis.set para evitar double-webhook se o set falhar
         await this.redis.set(movementsOkKey, '1', 'EX', 86400);
       }
+      // Se alreadySentMovements=true (retry anterior), o webhook já foi enviado
       successWebhookSent = true;
 
       if (documents) {

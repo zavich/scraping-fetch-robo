@@ -33,11 +33,13 @@ export class ApiKeyAuthGuard implements CanActivate {
   private safeEquals(left: string, right: string): boolean {
     const leftBuffer = Buffer.from(left);
     const rightBuffer = Buffer.from(right);
-
-    if (leftBuffer.length !== rightBuffer.length) {
-      return false;
-    }
-
-    return timingSafeEqual(leftBuffer, rightBuffer);
+    const maxLen = Math.max(leftBuffer.length, rightBuffer.length);
+    const paddedLeft = Buffer.alloc(maxLen);
+    const paddedRight = Buffer.alloc(maxLen);
+    leftBuffer.copy(paddedLeft);
+    rightBuffer.copy(paddedRight);
+    // timingSafeEqual exige buffers do mesmo tamanho; a checagem de comprimento
+    // original é feita depois para não vazar informação por timing.
+    return timingSafeEqual(paddedLeft, paddedRight) && leftBuffer.length === rightBuffer.length;
   }
 }
