@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
-import { Queue, Job } from 'bullmq';
+import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { getTRTQueue } from 'src/helpers/getTRTQueue';
 
@@ -93,14 +93,7 @@ export class ConsultarProcessoQueue {
       throw new BadRequestException('Fila não encontrada');
     }
 
-    // ✅ Se job existir, remove antes de reprocessar
-    const existing = (await queue.getJob(numero)) as Job | undefined;
-    if (existing) {
-      await existing.remove();
-      this.logger.warn(`♻️ Job removido para reprocessamento: ${numero}`);
-    }
-
-    // ✅ Agora pode adicionar novamente
+    // ✅ Adiciona o job (sem jobId fixo — BullMQ gera UUID único)
     const correlationId = randomUUID();
     await queue.add(
       'consulta-processo',
