@@ -19,7 +19,7 @@ export class RedisService {
         const [nextCursor, batch] = await this.redisClient.scan(
           cursor,
           'MATCH',
-          `*${queueName}*`,
+          `*:${queueName}:*`,
           'COUNT',
           RedisService.SCAN_COUNT,
         );

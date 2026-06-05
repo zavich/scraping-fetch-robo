@@ -312,6 +312,7 @@ export class GenericProcessoWorker extends WorkerHost {
               this.logger.error(
                 `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
               );
+              throw webhookErr;
             });
           }
           throw docError instanceof Error ? docError : new Error(String(docError));
