@@ -194,9 +194,7 @@ export class GenericProcessoWorker extends WorkerHost {
 
       const erroMensagem = result.find(
         (i) =>
-          i &&
-          typeof i.mensagemErro === 'string' &&
-          i.mensagemErro.length > 0,
+          i && typeof i.mensagemErro === 'string' && i.mensagemErro.length > 0,
       );
 
       if (erroMensagem) {
@@ -231,7 +229,9 @@ export class GenericProcessoWorker extends WorkerHost {
         },
       );
 
-      this.logger.debug(`RESPONSE: numero=${numero} status=${response?.resposta?.status ?? 'n/a'}`);
+      this.logger.debug(
+        `RESPONSE: numero=${numero} status=${response?.resposta ?? 'n/a'}`,
+      );
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
       // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi
@@ -322,14 +322,18 @@ export class GenericProcessoWorker extends WorkerHost {
               webhookId: `${correlationId}:docs-error`,
               origem,
             });
-            await axios.post(webhookUrl, resp, { headers: webhookHeaders }).catch((webhookErr) => {
-              this.logger.error(
-                `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
-              );
-              throw webhookErr;
-            });
+            await axios
+              .post(webhookUrl, resp, { headers: webhookHeaders })
+              .catch((webhookErr) => {
+                this.logger.error(
+                  `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
+                );
+                throw webhookErr;
+              });
           }
-          throw docError instanceof Error ? docError : new Error(String(docError));
+          throw docError instanceof Error
+            ? docError
+            : new Error(String(docError));
         }
       }
     } catch (error) {

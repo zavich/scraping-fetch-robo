@@ -22,12 +22,30 @@ export class LoginPoolService {
   // para que os valores residam apenas em process.env (não duplicados no heap)
   private get contas(): { username: string; password: string }[] {
     return [
-      { username: process.env.PJE_USER_FIRST as string, password: process.env.PJE_PASS_FIRST as string },
-      { username: process.env.PJE_USER_SECOND as string, password: process.env.PJE_PASS_SECOND as string },
-      { username: process.env.PJE_USER_THIRD as string, password: process.env.PJE_PASS_THIRD as string },
-      { username: process.env.PJE_USER_FOURTH as string, password: process.env.PJE_PASS_FOURTH as string },
-      { username: process.env.PJE_USER_FIFTH as string, password: process.env.PJE_PASS_FIFTH as string },
-      { username: process.env.PJE_USER_SIXTH as string, password: process.env.PJE_PASS_SIXTH as string },
+      {
+        username: process.env.PJE_USER_FIRST as string,
+        password: process.env.PJE_PASS_FIRST as string,
+      },
+      {
+        username: process.env.PJE_USER_SECOND as string,
+        password: process.env.PJE_PASS_SECOND as string,
+      },
+      {
+        username: process.env.PJE_USER_THIRD as string,
+        password: process.env.PJE_PASS_THIRD as string,
+      },
+      {
+        username: process.env.PJE_USER_FOURTH as string,
+        password: process.env.PJE_PASS_FOURTH as string,
+      },
+      {
+        username: process.env.PJE_USER_FIFTH as string,
+        password: process.env.PJE_PASS_FIFTH as string,
+      },
+      {
+        username: process.env.PJE_USER_SIXTH as string,
+        password: process.env.PJE_PASS_SIXTH as string,
+      },
     ];
   }
   private contaIndex = 0;
@@ -104,8 +122,14 @@ export class LoginPoolService {
       }
 
       // 2) Verifica se cookie tem tokens essenciais
-      const hasAccess = this.hasValidJwtCookie(cookies, 'access_token');
-      const hasRefresh = this.hasValidJwtCookie(cookies, 'refresh_token');
+      const hasAccess = this.hasAnyValidJwtCookie(cookies, [
+        'access_token',
+        'access_token_1g',
+      ]);
+      const hasRefresh = this.hasAnyValidJwtCookie(cookies, [
+        'refresh_token',
+        'refresh_token_1g',
+      ]);
 
       // Se cookie existe no Redis mas está quebrado → renovar
       if (!hasAccess || !hasRefresh) {
@@ -161,8 +185,14 @@ export class LoginPoolService {
             cookies = loginResult.cookies;
             usedAccount = account;
 
-            const hasAccess = this.hasValidJwtCookie(cookies, 'access_token');
-            const hasRefresh = this.hasValidJwtCookie(cookies, 'refresh_token');
+            const hasAccess = this.hasAnyValidJwtCookie(cookies, [
+              'access_token',
+              'access_token_1g',
+            ]);
+            const hasRefresh = this.hasAnyValidJwtCookie(cookies, [
+              'refresh_token',
+              'refresh_token_1g',
+            ]);
 
             if (!hasAccess || !hasRefresh) {
               throw new Error(`Login TRT ${trt} retornou cookies inválidos.`);
@@ -188,15 +218,19 @@ export class LoginPoolService {
           }
         }
 
-        if (!success)
-          throw new Error(
-            `Não foi possível logar no TRT ${trt} com nenhuma conta.`,
+        if (!success) {
+          this.logger.error(
+            `Todas as contas falharam ao logar no TRT-${trt}. Verificar credenciais e disponibilidade do site.`,
           );
+          return { cookies: '', account: this.getConta(true) }; // fallback para evitar bloqueio total
+        }
 
+        this.logger.debug(
+          `✅ Login TRT-${trt} concluído com sucesso. Retornando cookie da sessão.`,
+        );
+        return { cookies: cookies!, account: usedAccount! };
+      } finally {
         await this.redis.del(lockKey);
-      } catch (err) {
-        await this.redis.del(lockKey);
-        throw err;
       }
     }
 
@@ -288,7 +322,9 @@ export class LoginPoolService {
 
   private hasValidJwtCookie(cookieHeader: string, cookieName: string): boolean {
     // (?:^|;\s*) exige boundary: evita match parcial em nomes que CONTÊM cookieName
-    const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`));
+    const match = cookieHeader.match(
+      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
+    );
 
     if (!match?.[1]) {
       return false;
@@ -309,5 +345,14 @@ export class LoginPoolService {
     } catch {
       return false;
     }
+  }
+
+  private hasAnyValidJwtCookie(
+    cookieHeader: string,
+    cookieNames: string[],
+  ): boolean {
+    return cookieNames.some((cookieName) =>
+      this.hasValidJwtCookie(cookieHeader, cookieName),
+    );
   }
 }
