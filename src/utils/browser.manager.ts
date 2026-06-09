@@ -26,6 +26,19 @@ const BROWSER_POOL_SIZE = Math.max(
   parseInt(process.env.BROWSER_POOL_SIZE ?? '3', 10) || 3,
 );
 
+// Limite GLOBAL de contextos abertos simultaneamente em todos os browsers do
+// pool. Sem isso, com queues.length > pool*5 a concorrencia efetiva pode
+// estourar (ex.: 24 docs queues * concurrency=1 = 24 contextos ativos com pool=3).
+// Ajustavel via MAX_CONCURRENT_CONTEXTS; default = pool * 5.
+const MAX_CONCURRENT_CONTEXTS = Math.max(
+  BROWSER_POOL_SIZE,
+  parseInt(process.env.MAX_CONCURRENT_CONTEXTS ?? '0', 10) ||
+    BROWSER_POOL_SIZE * 5,
+);
+
+// Tempo entre tentativas de readquirir slot (semaphore polling).
+const SEMAPHORE_POLL_MS = 50;
+
 interface BrowserSlot {
   browser: Browser | null;
   contextCount: number;
@@ -184,10 +197,30 @@ export class BrowserManager {
     return slotIndex;
   }
 
+  private static totalActiveContexts(): number {
+    return BrowserManager.slots.reduce(
+      (total, s) => total + s.activeContexts,
+      0,
+    );
+  }
+
+  /**
+   * Semáforo global: bloqueia ate ter slot livre dentro de MAX_CONCURRENT_CONTEXTS.
+   * Evita explosão de contextos quando `queues.length > BROWSER_POOL_SIZE * 5`
+   * (a concorrencia por fila e clamped para >= 1, entao sem isso o total pode
+   * estourar o limite que o pool consegue sustentar).
+   */
+  private static async waitForContextSlot(): Promise<void> {
+    while (BrowserManager.totalActiveContexts() >= MAX_CONCURRENT_CONTEXTS) {
+      await new Promise((resolve) => setTimeout(resolve, SEMAPHORE_POLL_MS));
+    }
+  }
+
   /**
    * Contexto isolado — distribuído entre os N browsers do pool (PERF-001)
    */
   static async createContext(): Promise<BrowserContext> {
+    await BrowserManager.waitForContextSlot();
     const slotIndex = BrowserManager.getNextSlotIndex();
     const slot = await BrowserManager.getOrCreateBrowserSlot(slotIndex);
     // Incrementar após createBrowserContext para evitar vazamento de contadores
