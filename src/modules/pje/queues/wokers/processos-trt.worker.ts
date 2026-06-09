@@ -287,30 +287,31 @@ export class GenericProcessoWorker extends WorkerHost {
             regionTRT,
           );
           if (!pdfBase64) {
-            this.logger.warn(
-              `[${numero}] fetchDocuments retornou undefined — pulando enfileiramento de documentos`,
+            // Falha silenciosa = autos nunca produzidos e robo-api fica
+            // aguardando indefinidamente. Lanca para o catch de documentos
+            // enviar webhook de erro e marcar job para retry.
+            throw new Error(
+              `fetchDocuments retornou undefined para ${numero} (TRT-${regionTRT})`,
             );
-          } else {
-            const queueName = `trt${regionTRT}`;
-            const documentosQueue = this.documentosQueues[queueName];
-            if (!documentosQueue) {
-              this.logger.warn(
-                `[${numero}] Fila de documentos não encontrada para trt${regionTRT} — pulando`,
-              );
-            } else {
-              await documentosQueue.add(
-                'consulta-processo-documento',
-                { numero, instances, pdfBase64, correlationId },
-                {
-                  jobId: `${numero}:${correlationId}`,
-                  attempts: 3,
-                  backoff: { type: 'exponential', delay: 5000 },
-                  removeOnFail: { count: 500, age: 7 * 24 * 3600 },
-                  removeOnComplete: { count: 1000 },
-                },
-              );
-            }
           }
+          const queueName = `trt${regionTRT}`;
+          const documentosQueue = this.documentosQueues[queueName];
+          if (!documentosQueue) {
+            throw new Error(
+              `Fila de documentos nao encontrada para trt${regionTRT} (${numero})`,
+            );
+          }
+          await documentosQueue.add(
+            'consulta-processo-documento',
+            { numero, instances, pdfBase64, correlationId },
+            {
+              jobId: `${numero}:${correlationId}`,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 5000 },
+              removeOnFail: { count: 500, age: 7 * 24 * 3600 },
+              removeOnComplete: { count: 1000 },
+            },
+          );
         } catch (docError) {
           if (!docsWebhookSent) {
             const mensagem = axios.isAxiosError(docError)

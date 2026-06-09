@@ -34,8 +34,13 @@ export class ApiKeyAuthGuard implements CanActivate {
   }
 
   private safeEquals(left: string, right: string): boolean {
-    // Rejeita headers excessivamente grandes antes de qualquer alocação.
-    if (left.length > MAX_API_KEY_BYTES || right.length > MAX_API_KEY_BYTES) {
+    // Rejeita headers excessivamente grandes antes de qualquer alocacao.
+    // Usa byteLength (UTF-8) para nao ser burlado por chars multi-byte que
+    // ocupam mais bytes do que .length (UTF-16 code units) sugere.
+    if (
+      Buffer.byteLength(left, 'utf8') > MAX_API_KEY_BYTES ||
+      Buffer.byteLength(right, 'utf8') > MAX_API_KEY_BYTES
+    ) {
       return false;
     }
 
