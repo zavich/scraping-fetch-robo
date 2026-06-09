@@ -93,7 +93,9 @@ export class ConsultarProcessoQueue {
       throw new BadRequestException('Fila não encontrada');
     }
 
-    // ✅ Adiciona o job (sem jobId fixo — BullMQ gera UUID único)
+    // Adiciona o job sem jobId fixo — BullMQ gera um id sequencial unico
+    // (NAO e UUID). O correlationId UUID abaixo e nosso, usado para idempotencia
+    // de webhooks e cache Redis (scraper:movements-ok:${correlationId}).
     const correlationId = randomUUID();
     await queue.add(
       'consulta-processo',

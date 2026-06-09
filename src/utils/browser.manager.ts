@@ -317,28 +317,29 @@ export class BrowserManager {
   }
 
   static async ensureRequestInterception(page: Page): Promise<void> {
+    // Ordem importa: registra o handler ANTES de habilitar interception. Se a
+    // ordem fosse invertida, requests da pagina (especialmente em navegacao em
+    // curso) poderiam ser interceptados sem handler e travar ate timeout.
+    if (!BrowserManager.pagesWithDefaultRequestHandler.has(page)) {
+      page.on('request', (req) => {
+        if (req.isInterceptResolutionHandled()) {
+          return;
+        }
+
+        if (req.resourceType() === 'media') {
+          req.abort().catch(() => {});
+          return;
+        }
+
+        req.continue().catch(() => {});
+      });
+      BrowserManager.pagesWithDefaultRequestHandler.add(page);
+    }
+
     if (!BrowserManager.interceptedPages.has(page)) {
       await page.setRequestInterception(true);
       BrowserManager.interceptedPages.add(page);
     }
-
-    if (BrowserManager.pagesWithDefaultRequestHandler.has(page)) {
-      return;
-    }
-
-    page.on('request', (req) => {
-      if (req.isInterceptResolutionHandled()) {
-        return;
-      }
-
-      if (req.resourceType() === 'media') {
-        req.abort().catch(() => {});
-        return;
-      }
-
-      req.continue().catch(() => {});
-    });
-    BrowserManager.pagesWithDefaultRequestHandler.add(page);
   }
 
   /**

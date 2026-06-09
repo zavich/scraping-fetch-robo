@@ -62,39 +62,43 @@ export function normalizeResponse(
 
   const isTrabalhista = Number(numero.split('.')[2]);
 
-  function getBestNameByDocument(baseName: string, login?: string): string {
-    const documentNumber = String(login ?? '').replace(/\D/g, '');
-    let bestName = String(baseName ?? '').trim();
-
-    if (!documentNumber) return bestName;
-
-    for (const instance of body) {
-      for (const poloKey of ['poloAtivo', 'poloPassivo'] as const) {
-        const polos = instance[poloKey] ?? [];
-
-        for (const polo of polos) {
-          const poloDoc = String(polo?.login ?? '').replace(/\D/g, '');
-          if (poloDoc === documentNumber) {
-            const candidateName = String(polo?.nome ?? '').trim();
-            if (isBetterNameCandidate(bestName, candidateName)) {
-              bestName = candidateName;
-            }
+  // Pre-computa Map<documento, bestName> em um unico O(body) pass.
+  // Antes era O(partes x body) — quadratico em processos com muitas partes/movs.
+  const bestNameByDocument = new Map<string, string>();
+  for (const instance of body) {
+    for (const poloKey of ['poloAtivo', 'poloPassivo'] as const) {
+      const polos = instance[poloKey] ?? [];
+      for (const polo of polos) {
+        const poloDoc = String(polo?.login ?? '').replace(/\D/g, '');
+        if (poloDoc) {
+          const candidate = String(polo?.nome ?? '').trim();
+          const current = bestNameByDocument.get(poloDoc) ?? '';
+          if (!current || isBetterNameCandidate(current, candidate)) {
+            bestNameByDocument.set(poloDoc, candidate);
           }
+        }
 
-          for (const rep of polo.representantes || []) {
-            const repDoc = String(rep?.login ?? '').replace(/\D/g, '');
-            if (repDoc === documentNumber) {
-              const candidateName = String(rep?.nome ?? '').trim();
-              if (isBetterNameCandidate(bestName, candidateName)) {
-                bestName = candidateName;
-              }
-            }
+        for (const rep of polo.representantes || []) {
+          const repDoc = String(rep?.login ?? '').replace(/\D/g, '');
+          if (!repDoc) continue;
+          const candidate = String(rep?.nome ?? '').trim();
+          const current = bestNameByDocument.get(repDoc) ?? '';
+          if (!current || isBetterNameCandidate(current, candidate)) {
+            bestNameByDocument.set(repDoc, candidate);
           }
         }
       }
     }
+  }
 
-    return bestName;
+  function getBestNameByDocument(baseName: string, login?: string): string {
+    const baseTrim = String(baseName ?? '').trim();
+    const documentNumber = String(login ?? '').replace(/\D/g, '');
+    if (!documentNumber) return baseTrim;
+
+    const fromMap = bestNameByDocument.get(documentNumber);
+    if (!fromMap) return baseTrim;
+    return isBetterNameCandidate(baseTrim, fromMap) ? fromMap : baseTrim;
   }
 
   const instancias = body.map((instance, index) => {

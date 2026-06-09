@@ -20,6 +20,9 @@ describe('RedisService', () => {
     redisClient.scan
       .mockResolvedValueOnce(['5', ['bull:queue:1', 'bull:queue:2']])
       .mockResolvedValueOnce(['0', ['bull:queue:3']]);
+    // Real Redis DEL retorna o numero de chaves removidas; mockar para nao
+    // virar NaN quando o servico fizer totalDeleted += deleted.
+    redisClient.del.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
 
     await service.deleteQueue('queue');
 
