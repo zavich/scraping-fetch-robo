@@ -7,6 +7,9 @@ import {
 } from '@nestjs/common';
 import { timingSafeEqual } from 'crypto';
 import { Request } from 'express';
+// Limite defensivo para evitar alocações grandes em headers maliciosos (DoS).
+const MAX_API_KEY_BYTES = 1024;
+
 @Injectable()
 export class ApiKeyAuthGuard implements CanActivate {
   private readonly apiKey = process.env.API_KEY;
@@ -31,6 +34,11 @@ export class ApiKeyAuthGuard implements CanActivate {
   }
 
   private safeEquals(left: string, right: string): boolean {
+    // Rejeita headers excessivamente grandes antes de qualquer alocação.
+    if (left.length > MAX_API_KEY_BYTES || right.length > MAX_API_KEY_BYTES) {
+      return false;
+    }
+
     const leftBuffer = Buffer.from(left);
     const rightBuffer = Buffer.from(right);
     const maxLen = Math.max(leftBuffer.length, rightBuffer.length);
@@ -40,6 +48,9 @@ export class ApiKeyAuthGuard implements CanActivate {
     rightBuffer.copy(paddedRight);
     // timingSafeEqual exige buffers do mesmo tamanho; a checagem de comprimento
     // original é feita depois para não vazar informação por timing.
-    return timingSafeEqual(paddedLeft, paddedRight) && leftBuffer.length === rightBuffer.length;
+    return (
+      timingSafeEqual(paddedLeft, paddedRight) &&
+      leftBuffer.length === rightBuffer.length
+    );
   }
 }

@@ -222,7 +222,10 @@ export class LoginPoolService {
           this.logger.error(
             `Todas as contas falharam ao logar no TRT-${trt}. Verificar credenciais e disponibilidade do site.`,
           );
-          return { cookies: '', account: this.getConta(true) }; // fallback para evitar bloqueio total
+          // Falha explicita: callers nao devem tratar isso como sucesso silencioso.
+          throw new Error(
+            `Login pool exausto para TRT-${trt}: todas as contas falharam`,
+          );
         }
 
         this.logger.debug(

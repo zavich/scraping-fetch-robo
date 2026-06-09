@@ -214,9 +214,18 @@ export class ScrapingProcessService {
           voucherResponse &&
           typeof voucherResponse === 'object' &&
           'token' in voucherResponse &&
-          typeof (voucherResponse as { token?: unknown }).token === 'string'
+          typeof (voucherResponse as { token?: unknown }).token === 'string' &&
+          (voucherResponse as { token: string }).token.length > 0
         ) {
           newToken = (voucherResponse as { token: string }).token;
+        }
+
+        if (!newToken) {
+          // Falha explícita: setar cookie vazio mascara o problema do WAF e
+          // pode persistir um token inválido no Redis (`aws-waf-token:...`).
+          throw new Error(
+            `AWS WAF /voucher não retornou token válido para processo ${processNumber}`,
+          );
         }
 
         //
