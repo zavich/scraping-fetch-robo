@@ -2,10 +2,7 @@ import { ItensProcesso, Partes, Polo, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
 import { randomUUID } from 'crypto';
 
-type Assunto = {
-  principal: boolean;
-  descricao: string;
-};
+const DEBUG_PARTES_NAME_MATCH = process.env.DEBUG_PARTES_NAME_MATCH === 'true';
 
 type NormalizeResponseOptions = {
   documento?: boolean;
@@ -23,6 +20,20 @@ export function normalizeResponse(
   message = 'processo não encontrado',
   options: NormalizeResponseOptions = {},
 ): Root {
+  const debugLog = (event: string, payload: Record<string, unknown>) => {
+    if (!DEBUG_PARTES_NAME_MATCH) {
+      return;
+    }
+
+    console.log(
+      JSON.stringify({
+        scope: 'normalizeResponse.partes',
+        event,
+        ...payload,
+      }),
+    );
+  };
+
   const opcoes: Record<string, unknown> = options.autos
     ? { autos: true }
     : { documento: options.documento ?? false };
@@ -67,6 +78,63 @@ export function normalizeResponse(
 
   const isTrabalhista = Number(numero.split('.')[2]);
 
+  function getBestNameByDocument(baseName: string, login?: string): string {
+    const documentNumber = String(login ?? '').replace(/\D/g, '');
+    let bestName = String(baseName ?? '').trim();
+    const candidates: string[] = [];
+
+    if (!documentNumber) {
+      debugLog('document-scan-skip', {
+        numero,
+        reason: 'missing-document-number',
+        baseName: bestName,
+      });
+      return bestName;
+    }
+
+    for (const instance of body) {
+      for (const poloKey of ['poloAtivo', 'poloPassivo'] as const) {
+        const polos = instance[poloKey] ?? [];
+
+        for (const polo of polos) {
+          const poloDoc = String(polo?.login ?? '').replace(/\D/g, '');
+          if (poloDoc === documentNumber) {
+            const candidateName = String(polo?.nome ?? '').trim();
+            if (candidateName) {
+              candidates.push(candidateName);
+            }
+            if (isBetterNameCandidate(bestName, candidateName)) {
+              bestName = candidateName;
+            }
+          }
+
+          for (const rep of polo.representantes || []) {
+            const repDoc = String(rep?.login ?? '').replace(/\D/g, '');
+            if (repDoc === documentNumber) {
+              const candidateName = String(rep?.nome ?? '').trim();
+              if (candidateName) {
+                candidates.push(candidateName);
+              }
+              if (isBetterNameCandidate(bestName, candidateName)) {
+                bestName = candidateName;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    debugLog('document-scan-result', {
+      numero,
+      documentNumber,
+      baseName,
+      candidates,
+      selectedName: bestName,
+    });
+
+    return bestName;
+  }
+
   const instancias = body.map((instance, index) => {
     const grauInstanciaMap = ['PRIMEIRO_GRAU', 'SEGUNDO_GRAU'];
     const arquivado = instance?.itensProcesso?.some((item) =>
@@ -89,7 +157,7 @@ export function normalizeResponse(
           partes.push({
             id: parte.id,
             tipo: parte.tipo,
-            nome: parte.nome.trim(),
+            nome: getBestNameByDocument(parte.nome, parte.login),
             principal: true,
             polo: parte.polo,
             documento: {
@@ -104,7 +172,7 @@ export function normalizeResponse(
             partes.push({
               id: rep.id,
               tipo: rep.tipo,
-              nome: rep.nome.trim(),
+              nome: getBestNameByDocument(rep.nome, rep.login),
               principal: false,
               polo: rep.polo,
               documento: {
@@ -125,6 +193,18 @@ export function normalizeResponse(
       });
 
       partes = atualizarNomesPartes(instance.itensProcesso, partes);
+
+      if (DEBUG_PARTES_NAME_MATCH) {
+        partes.forEach((parte) => {
+          debugLog('final-part-name', {
+            numero,
+            parteId: parte.id,
+            tipo: parte.tipo,
+            documento: parte.documento?.numero ?? null,
+            nomeFinal: parte.nome,
+          });
+        });
+      }
     }
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
@@ -274,8 +354,7 @@ export function atualizarNomesPartes(
   partes: Partes[],
 ): Partes[] {
   // aceita agora / e - dentro das palavras (mas vamos normalizar antes)
-  const regexNomeCompleto =
-    /([A-Z][A-Z0-9&\.\(\)\/-]*(?:\s+[A-Z0-9&\.\(\)\/-]+)+)/g;
+  const regexNomeCompleto = /([A-Z][A-Z0-9&.()/-]*(?:\s+[A-Z0-9&.()/-]+)+)/g;
 
   // 🔹 Função que normaliza o título para facilitar a extração
   function normalizeTitleForRegex(t: string): string {
@@ -292,9 +371,33 @@ export function atualizarNomesPartes(
 
   const nomesExtraidos: { nome: string; siglas: string }[] = [];
 
+  function extractNameHintsFromTitle(normalizedTitle: string): string[] {
+    const hints: string[] = [];
+
+    // Ex.: "Decorrido o prazo de SINDICATO ... - SINTERGIA/RJ em 17/03/2025"
+    const deNomeEmDataRegex =
+      /\bde\s+([A-ZÀ-Ý0-9&.()/-]+(?:\s+[A-ZÀ-Ý0-9&.()/-]+)+?)\s+em\s+\d{2}\/\d{2}\/\d{4}\b/gi;
+
+    let match: RegExpExecArray | null;
+    while ((match = deNomeEmDataRegex.exec(normalizedTitle)) !== null) {
+      const hint = String(match[1]).trim();
+      if (hint.split(/\s+/).length >= 2) {
+        hints.push(hint);
+      }
+    }
+
+    return hints;
+  }
+
   titulos.forEach(({ titulo }) => {
     // normaliza o título antes de aplicar o regex
     const normalized = normalizeTitleForRegex(titulo);
+
+    // Primeiro tenta extrair nomes em padrões textuais comuns de movimentação.
+    extractNameHintsFromTitle(normalized).forEach((hint) => {
+      nomesExtraidos.push({ nome: hint, siglas: gerarSiglas(hint) });
+    });
+
     let match: RegExpExecArray | null;
     // executa o regex na versão normalizada
     while ((match = regexNomeCompleto.exec(normalized)) !== null) {
@@ -312,7 +415,7 @@ export function atualizarNomesPartes(
       nomesExtraidos.map((n) => {
         // chave: nome sem pontuação extra e com espaços normalizados
         const key = n.nome
-          .replace(/[.,()\/-]/g, '')
+          .replace(/[.,()/-]/g, '')
           .replace(/\s+/g, ' ')
           .trim();
         return [key, n];
@@ -323,8 +426,13 @@ export function atualizarNomesPartes(
   return partes.map((parte) => {
     if (parte.tipo === 'ADVOGADO') return parte;
 
-    const sigParte = gerarSiglas(parte.nome);
+    const sigParte = isInitialsLikeName(parte.nome)
+      ? initialsFingerprint(parte.nome)
+      : gerarSiglas(parte.nome);
     let melhorNome = parte.nome;
+    const matchedBySigla: string[] = [];
+    let matchedByDocument: string | null = null;
+
     for (const { nome: nomeTitulo, siglas: sigTituloRaw } of nomesUnicos) {
       const sigTitulo = sigTituloRaw.replace(/[^A-Z0-9]/g, '')?.trim();
       const sigParteClean = sigParte.replace(/[^A-Z0-9]/g, '')?.trim();
@@ -335,18 +443,97 @@ export function atualizarNomesPartes(
         nomeTitulo.includes(parte.documento.numero)
       ) {
         melhorNome = nomeTitulo;
+        matchedByDocument = nomeTitulo;
         break;
       }
 
       // Comparador simples e robusto
       if (matchSiglas(sigParteClean, sigTitulo)) {
-        melhorNome = nomeTitulo;
-        break;
+        matchedBySigla.push(nomeTitulo);
+        if (isBetterNameCandidate(melhorNome, nomeTitulo)) {
+          melhorNome = nomeTitulo;
+        }
+        // Continua procurando para privilegiar nome por extenso quando existir.
+        continue;
       }
+    }
+
+    if (DEBUG_PARTES_NAME_MATCH) {
+      console.log(
+        JSON.stringify({
+          scope: 'normalizeResponse.partes',
+          event: 'title-match-result',
+          parteId: parte.id,
+          tipo: parte.tipo,
+          documento: parte.documento?.numero ?? null,
+          nomeOriginal: parte.nome,
+          matchedByDocument,
+          matchedBySigla,
+          nomeSelecionado: melhorNome,
+        }),
+      );
     }
 
     return { ...parte, nome: melhorNome };
   });
+}
+
+function initialsFingerprint(name: string): string {
+  return String(name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[(),.]/g, ' ')
+    .replace(/[/-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token[0].toUpperCase())
+    .join('');
+}
+
+function isBetterNameCandidate(
+  currentName: string,
+  candidateName: string,
+): boolean {
+  const current = String(currentName || '').trim();
+  const candidate = String(candidateName || '').trim();
+
+  if (!candidate) return false;
+  if (!current) return true;
+  if (candidate === current) return false;
+
+  const currentInitials = isInitialsLikeName(current);
+  const candidateInitials = isInitialsLikeName(candidate);
+
+  // Nunca troca nome por extenso por nome em sigla.
+  if (!currentInitials && candidateInitials) return false;
+
+  const currentInfo = countInformativeWords(current);
+  const candidateInfo = countInformativeWords(candidate);
+
+  if (candidateInfo > currentInfo) return true;
+  if (candidateInfo < currentInfo) return false;
+
+  // Empate: favorece o nome mais longo quando ambos têm mesmo nível de informação.
+  return candidate.length > current.length;
+}
+
+function isInitialsLikeName(name: string): boolean {
+  const tokens = String(name)
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-zÀ-ÿ0-9]/g, ''))
+    .filter(Boolean);
+
+  if (tokens.length === 0) return false;
+
+  const shortTokens = tokens.filter((token) => token.length <= 2).length;
+  return shortTokens / tokens.length >= 0.6;
+}
+
+function countInformativeWords(name: string): number {
+  return String(name)
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-zÀ-ÿ0-9]/g, ''))
+    .filter((token) => token.length >= 3).length;
 }
 
 function matchSiglas(sigParte: string, sigTitulo: string): boolean {
@@ -359,11 +546,20 @@ function matchSiglas(sigParte: string, sigTitulo: string): boolean {
   // Prefixo igual → ex: PBTVS começa com PBTV
   if (b.startsWith(a) || a.startsWith(b)) return true;
 
-  // Tolerância mínima: todas as letras de a aparecem em ordem em b
-  let i = 0;
-  for (const c of b) {
-    if (c === a[i]) i++;
-    if (i === a.length) return true;
+  // Tolerância: subsequência nos dois sentidos.
+  // Isso cobre casos como iniciais extras de stopwords (ex.: "NAS") no nome truncado.
+  if (isSubsequence(a, b) || isSubsequence(b, a)) return true;
+
+  return false;
+}
+
+function isSubsequence(target: string, source: string): boolean {
+  if (!target) return false;
+
+  let index = 0;
+  for (const char of source) {
+    if (char === target[index]) index++;
+    if (index === target.length) return true;
   }
 
   return false;
