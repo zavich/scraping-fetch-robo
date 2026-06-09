@@ -2,8 +2,6 @@ import { ItensProcesso, Partes, Polo, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
 import { randomUUID } from 'crypto';
 
-const DEBUG_PARTES_NAME_MATCH = process.env.DEBUG_PARTES_NAME_MATCH === 'true';
-
 type NormalizeResponseOptions = {
   documento?: boolean;
   autos?: boolean;
@@ -20,20 +18,6 @@ export function normalizeResponse(
   message = 'processo não encontrado',
   options: NormalizeResponseOptions = {},
 ): Root {
-  const debugLog = (event: string, payload: Record<string, unknown>) => {
-    if (!DEBUG_PARTES_NAME_MATCH) {
-      return;
-    }
-
-    console.log(
-      JSON.stringify({
-        scope: 'normalizeResponse.partes',
-        event,
-        ...payload,
-      }),
-    );
-  };
-
   const opcoes: Record<string, unknown> = options.autos
     ? { autos: true }
     : { documento: options.documento ?? false };
@@ -81,16 +65,8 @@ export function normalizeResponse(
   function getBestNameByDocument(baseName: string, login?: string): string {
     const documentNumber = String(login ?? '').replace(/\D/g, '');
     let bestName = String(baseName ?? '').trim();
-    const candidates: string[] = [];
 
-    if (!documentNumber) {
-      debugLog('document-scan-skip', {
-        numero,
-        reason: 'missing-document-number',
-        baseName: bestName,
-      });
-      return bestName;
-    }
+    if (!documentNumber) return bestName;
 
     for (const instance of body) {
       for (const poloKey of ['poloAtivo', 'poloPassivo'] as const) {
@@ -100,9 +76,6 @@ export function normalizeResponse(
           const poloDoc = String(polo?.login ?? '').replace(/\D/g, '');
           if (poloDoc === documentNumber) {
             const candidateName = String(polo?.nome ?? '').trim();
-            if (candidateName) {
-              candidates.push(candidateName);
-            }
             if (isBetterNameCandidate(bestName, candidateName)) {
               bestName = candidateName;
             }
@@ -112,9 +85,6 @@ export function normalizeResponse(
             const repDoc = String(rep?.login ?? '').replace(/\D/g, '');
             if (repDoc === documentNumber) {
               const candidateName = String(rep?.nome ?? '').trim();
-              if (candidateName) {
-                candidates.push(candidateName);
-              }
               if (isBetterNameCandidate(bestName, candidateName)) {
                 bestName = candidateName;
               }
@@ -123,14 +93,6 @@ export function normalizeResponse(
         }
       }
     }
-
-    debugLog('document-scan-result', {
-      numero,
-      documentNumber,
-      baseName,
-      candidates,
-      selectedName: bestName,
-    });
 
     return bestName;
   }
@@ -193,18 +155,6 @@ export function normalizeResponse(
       });
 
       partes = atualizarNomesPartes(instance.itensProcesso, partes);
-
-      if (DEBUG_PARTES_NAME_MATCH) {
-        partes.forEach((parte) => {
-          debugLog('final-part-name', {
-            numero,
-            parteId: parte.id,
-            tipo: parte.tipo,
-            documento: parte.documento?.numero ?? null,
-            nomeFinal: parte.nome,
-          });
-        });
-      }
     }
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
@@ -430,8 +380,6 @@ export function atualizarNomesPartes(
       ? initialsFingerprint(parte.nome)
       : gerarSiglas(parte.nome);
     let melhorNome = parte.nome;
-    const matchedBySigla: string[] = [];
-    let matchedByDocument: string | null = null;
 
     for (const { nome: nomeTitulo, siglas: sigTituloRaw } of nomesUnicos) {
       const sigTitulo = sigTituloRaw.replace(/[^A-Z0-9]/g, '')?.trim();
@@ -443,35 +391,17 @@ export function atualizarNomesPartes(
         nomeTitulo.includes(parte.documento.numero)
       ) {
         melhorNome = nomeTitulo;
-        matchedByDocument = nomeTitulo;
         break;
       }
 
       // Comparador simples e robusto
       if (matchSiglas(sigParteClean, sigTitulo)) {
-        matchedBySigla.push(nomeTitulo);
         if (isBetterNameCandidate(melhorNome, nomeTitulo)) {
           melhorNome = nomeTitulo;
         }
         // Continua procurando para privilegiar nome por extenso quando existir.
         continue;
       }
-    }
-
-    if (DEBUG_PARTES_NAME_MATCH) {
-      console.log(
-        JSON.stringify({
-          scope: 'normalizeResponse.partes',
-          event: 'title-match-result',
-          parteId: parte.id,
-          tipo: parte.tipo,
-          documento: parte.documento?.numero ?? null,
-          nomeOriginal: parte.nome,
-          matchedByDocument,
-          matchedBySigla,
-          nomeSelecionado: melhorNome,
-        }),
-      );
     }
 
     return { ...parte, nome: melhorNome };
