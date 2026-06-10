@@ -5,7 +5,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
-import { Queue, Job } from 'bullmq';
+import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { getTRTQueue } from 'src/helpers/getTRTQueue';
 
 @Injectable()
@@ -92,24 +93,19 @@ export class ConsultarProcessoQueue {
       throw new BadRequestException('Fila não encontrada');
     }
 
-    // ✅ Se job existir, remove antes de reprocessar
-    const existing = (await queue.getJob(numero)) as Job | undefined;
-    if (existing) {
-      await existing.remove();
-      this.logger.warn(`♻️ Job removido para reprocessamento: ${numero}`);
-    }
-
-    // ✅ Agora pode adicionar novamente
+    // Adiciona o job sem jobId fixo — BullMQ gera um id sequencial unico
+    // (NAO e UUID). O correlationId UUID abaixo e nosso, usado para idempotencia
+    // de webhooks e cache Redis (scraper:movements-ok:${correlationId}).
+    const correlationId = randomUUID();
     await queue.add(
       'consulta-processo',
-      { numero, origem, documents, webhook },
+      { numero, origem, documents, webhook, correlationId },
       {
-        jobId: numero,
         attempts: 3,
         priority: priority ? 0 : 5,
         backoff: { type: 'fixed', delay: 5000 },
-        removeOnFail: false,
-        removeOnComplete: true,
+        removeOnFail: { count: 500, age: 7 * 24 * 3600 },
+        removeOnComplete: { count: 1000 },
       },
     );
 

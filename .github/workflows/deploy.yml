@@ -14,17 +14,21 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      AWS_REGION: sa-east-1
-      ECR_REGISTRY: 339340413604.dkr.ecr.sa-east-1.amazonaws.com
-      ECR_REPOSITORY: scraping
-      ECS_CLUSTER: robo-cluster
-      ECS_SERVICE: scraping-task-service
-      TASK_FAMILY: scraping-task
-      CONTAINER_NAME: scraping-container
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+      ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+      TASK_FAMILY: ${{ secrets.TASK_FAMILY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -38,68 +42,54 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          IMAGE_SHA=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
+          IMAGE_URI=${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}
           IMAGE_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
 
-          docker build -t $IMAGE_SHA -t $IMAGE_LATEST .
-          docker push $IMAGE_SHA
-          docker push $IMAGE_LATEST
+          docker build -t $IMAGE_URI -t $IMAGE_LATEST .
+          docker push --all-tags ${ECR_REGISTRY}/${ECR_REPOSITORY}
 
-          echo "IMAGE_SHA=$IMAGE_SHA" >> $GITHUB_ENV
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
       - name: Validate Redis URL (fail fast)
         run: |
-          echo "Checking REDIS_URL from Secrets Manager..."
+          set -euo pipefail
 
-          REDIS_URL=$(aws secretsmanager get-secret-value \
-            --secret-id scraping/prod \
-            --query SecretString \
-            --output text | jq -r .REDIS_URL)
-
-          echo "REDIS_URL=$REDIS_URL"
-
-          if [[ "$REDIS_URL" != *"robo-redis"* ]]; then
-            echo "❌ INVALID REDIS_URL detected!"
+          if [[ -z "${{ secrets.REDIS_URL_FINGERPRINT }}" ]]; then
+            echo "REDIS_URL_FINGERPRINT not configured"
             exit 1
           fi
 
-      - name: Download Current Task Definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition $TASK_FAMILY \
-            --query taskDefinition \
-            --output json > task-definition.json
+          REDIS_URL=$(aws secretsmanager get-secret-value \
+            --secret-id ${{ secrets.AWS_SECRET_ID }} \
+            --query SecretString \
+            --output text | jq -r .REDIS_URL)
 
-      - name: Update Task Definition (safe)
-        run: |
-          jq \
-            --arg IMAGE "$IMAGE_SHA" \
-            --arg TASK_ROLE "arn:aws:iam::339340413604:role/scraping-task-role" \
-            --arg EXEC_ROLE "arn:aws:iam::339340413604:role/ecsTaskExecutionRole" \
-            '
-            .taskRoleArn = $TASK_ROLE
-            | .executionRoleArn = $EXEC_ROLE
-            | .containerDefinitions |= map(
-              if .name == env.CONTAINER_NAME then
-                .image = $IMAGE
-              else .
-              end
-            )
-            | del(
-                .taskDefinitionArn,
-                .revision,
-                .status,
-                .requiresAttributes,
-                .compatibilities,
-                .registeredAt,
-                .registeredBy
-              )
-            ' task-definition.json > task-def-updated.json
+          if [[ -z "$REDIS_URL" || "$REDIS_URL" == "null" ]]; then
+            echo "Failed to fetch REDIS_URL from Secrets Manager"
+            exit 1
+          fi
+
+          if [[ "$REDIS_URL" != *"${{ secrets.REDIS_URL_FINGERPRINT }}"* ]]; then
+            echo "INVALID REDIS_URL detected!"
+            exit 1
+          fi
+
+      - name: Render Task Definition
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          TASK_FAMILY: ${{ env.TASK_FAMILY }}
+          IMAGE_URI: ${{ env.IMAGE_URI }}
+          NODE_ENV: production
+          TASK_ROLE_ARN: ${{ secrets.TASK_ROLE_ARN }}
+          EXECUTION_ROLE_ARN: ${{ secrets.EXECUTION_ROLE_ARN }}
+          SECRET_ARN_PREFIX: ${{ secrets.SECRET_ARN_PREFIX }}
+          LOG_GROUP: ${{ secrets.LOG_GROUP }}
+        run: node ./scripts/render-task-definition.mjs task-def-rendered.json
 
       - name: Deploy ECS
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
-          task-definition: task-def-updated.json
+          task-definition: task-def-rendered.json
           service: ${{ env.ECS_SERVICE }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true

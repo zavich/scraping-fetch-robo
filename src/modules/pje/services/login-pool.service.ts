@@ -18,44 +18,48 @@ export class LoginPoolService {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  private contas = [
-    {
-      username: process.env.PJE_USER_FIRST as string,
-      password: process.env.PJE_PASS_FIRST as string,
-    },
-    {
-      username: process.env.PJE_USER_SECOND as string,
-      password: process.env.PJE_PASS_SECOND as string,
-    },
-    {
-      username: process.env.PJE_USER_THIRD as string,
-      password: process.env.PJE_PASS_THIRD as string,
-    },
-    {
-      username: process.env.PJE_USER_FOURTH as string,
-      password: process.env.PJE_PASS_FOURTH as string,
-    },
-    {
-      username: process.env.PJE_USER_FIFTH as string,
-      password: process.env.PJE_PASS_FIFTH as string,
-    },
-    {
-      username: process.env.PJE_USER_SIXTH as string,
-      password: process.env.PJE_PASS_SIXTH as string,
-    },
-  ];
+  // SEG-007: não armazenar credenciais como propriedade persistente — usar getter
+  // para que os valores residam apenas em process.env (não duplicados no heap)
+  private get contas(): { username: string; password: string }[] {
+    return [
+      {
+        username: process.env.PJE_USER_FIRST as string,
+        password: process.env.PJE_PASS_FIRST as string,
+      },
+      {
+        username: process.env.PJE_USER_SECOND as string,
+        password: process.env.PJE_PASS_SECOND as string,
+      },
+      {
+        username: process.env.PJE_USER_THIRD as string,
+        password: process.env.PJE_PASS_THIRD as string,
+      },
+      {
+        username: process.env.PJE_USER_FOURTH as string,
+        password: process.env.PJE_PASS_FOURTH as string,
+      },
+      {
+        username: process.env.PJE_USER_FIFTH as string,
+        password: process.env.PJE_PASS_FIFTH as string,
+      },
+      {
+        username: process.env.PJE_USER_SIXTH as string,
+        password: process.env.PJE_PASS_SIXTH as string,
+      },
+    ];
+  }
   private contaIndex = 0;
   private contadorProcessos = 0;
   getConta(force = false): { username: string; password: string } {
+    const contas = this.contas;
     if (force || this.contadorProcessos >= 5) {
-      this.contaIndex = (this.contaIndex + 1) % this.contas.length;
+      this.contaIndex = (this.contaIndex + 1) % contas.length;
       this.contadorProcessos = 0;
-      this.logger.debug(
-        `🔄 Alternando para a conta: ${this.contas[this.contaIndex].username}`,
-      );
+      // SEG-007: não logar credenciais — apenas o índice
+      this.logger.debug(`🔄 Alternando para conta #${this.contaIndex + 1}`);
     }
     this.contadorProcessos++;
-    return this.contas[this.contaIndex];
+    return contas[this.contaIndex];
   }
 
   // Adicione um parâmetro opcional "simulateDown" para testes
@@ -95,7 +99,7 @@ export class LoginPoolService {
     const redisKey = `pje:session:${trt}`;
     const readyKey = `${redisKey}:ready`;
     const lockKey = `pje:lock:${trt}`;
-    const lockTTL = 15000;
+    const lockTTL = 60000;
     const waitInterval = 500;
     const maxWait = 60000;
 
@@ -118,8 +122,14 @@ export class LoginPoolService {
       }
 
       // 2) Verifica se cookie tem tokens essenciais
-      const hasAccess = /access_token/.test(cookies);
-      const hasRefresh = /refresh_token/.test(cookies);
+      const hasAccess = this.hasAnyValidJwtCookie(cookies, [
+        'access_token',
+        'access_token_1g',
+      ]);
+      const hasRefresh = this.hasAnyValidJwtCookie(cookies, [
+        'refresh_token',
+        'refresh_token_1g',
+      ]);
 
       // Se cookie existe no Redis mas está quebrado → renovar
       if (!hasAccess || !hasRefresh) {
@@ -140,12 +150,12 @@ export class LoginPoolService {
     await this.checkSiteAvailability(trt);
 
     // ✅ 3) LOCK para garantir somente 1 login simultâneo
-    const lockAcquired = await (this.redis as any).set(
+    const lockAcquired = await this.redis.set(
       lockKey,
       '1',
-      'NX',
       'PX',
       lockTTL,
+      'NX',
     );
 
     if (lockAcquired) {
@@ -175,8 +185,14 @@ export class LoginPoolService {
             cookies = loginResult.cookies;
             usedAccount = account;
 
-            const hasAccess = /access_token/.test(cookies);
-            const hasRefresh = /refresh_token/.test(cookies);
+            const hasAccess = this.hasAnyValidJwtCookie(cookies, [
+              'access_token',
+              'access_token_1g',
+            ]);
+            const hasRefresh = this.hasAnyValidJwtCookie(cookies, [
+              'refresh_token',
+              'refresh_token_1g',
+            ]);
 
             if (!hasAccess || !hasRefresh) {
               throw new Error(`Login TRT ${trt} retornou cookies inválidos.`);
@@ -185,7 +201,7 @@ export class LoginPoolService {
             await this.redis.set(readyKey, '1', 'EX', 30);
 
             success = true;
-          } catch (err: any) {
+          } catch (err: unknown) {
             if (
               err instanceof ServiceUnavailableException &&
               /fora do ar/.test(err.message)
@@ -202,15 +218,22 @@ export class LoginPoolService {
           }
         }
 
-        if (!success)
-          throw new Error(
-            `Não foi possível logar no TRT ${trt} com nenhuma conta.`,
+        if (!success) {
+          this.logger.error(
+            `Todas as contas falharam ao logar no TRT-${trt}. Verificar credenciais e disponibilidade do site.`,
           );
+          // Falha explicita: callers nao devem tratar isso como sucesso silencioso.
+          throw new Error(
+            `Login pool exausto para TRT-${trt}: todas as contas falharam`,
+          );
+        }
 
+        this.logger.debug(
+          `✅ Login TRT-${trt} concluído com sucesso. Retornando cookie da sessão.`,
+        );
+        return { cookies: cookies!, account: usedAccount! };
+      } finally {
         await this.redis.del(lockKey);
-      } catch (err) {
-        await this.redis.del(lockKey);
-        throw err;
       }
     }
 
@@ -224,6 +247,14 @@ export class LoginPoolService {
           usedAccount = this.getConta(true); // fallback
           break;
         }
+      }
+      // Se o lock sumiu mas readyKey não foi setado, o holder falhou
+      const lockStillExists = await this.redis.exists(lockKey);
+      if (!lockStillExists) {
+        this.logger.warn(
+          `⚠️ Lock TRT ${trt} expirou sem readyKey — holder falhou. Tentando login próprio.`,
+        );
+        break;
       }
       await new Promise((r) => setTimeout(r, waitInterval));
     }
@@ -290,5 +321,41 @@ export class LoginPoolService {
     await this.redis.set(readyKey, '1', 'EX', 30);
 
     return { cookies: newCookies, account };
+  }
+
+  private hasValidJwtCookie(cookieHeader: string, cookieName: string): boolean {
+    // (?:^|;\s*) exige boundary: evita match parcial em nomes que CONTÊM cookieName
+    const match = cookieHeader.match(
+      new RegExp(`(?:^|;\\s*)${cookieName}=([^;]+)`),
+    );
+
+    if (!match?.[1]) {
+      return false;
+    }
+
+    const token = match[1];
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      return false;
+    }
+
+    try {
+      const payload = JSON.parse(
+        Buffer.from(parts[1], 'base64url').toString('utf8'),
+      ) as { exp?: number };
+
+      return typeof payload.exp === 'number' && payload.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
+  }
+
+  private hasAnyValidJwtCookie(
+    cookieHeader: string,
+    cookieNames: string[],
+  ): boolean {
+    return cookieNames.some((cookieName) =>
+      this.hasValidJwtCookie(cookieHeader, cookieName),
+    );
   }
 }

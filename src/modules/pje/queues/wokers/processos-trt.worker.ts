@@ -9,6 +9,7 @@ import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
 import { ProcessosResponse } from 'src/interfaces';
 import { ScrapingService } from 'src/helpers/scraping.service';
+import { Root } from 'src/interfaces/normalize';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -86,6 +87,7 @@ export class GenericProcessoWorker extends WorkerHost {
       origem?: string;
       documents?: boolean;
       webhook?: string;
+      correlationId?: string;
     }>,
   ) {
     const { numero, origem, documents = false, webhook } = job.data;
@@ -93,6 +95,16 @@ export class GenericProcessoWorker extends WorkerHost {
     this.logger.log(`📄 [${job.queueName}] Consultando processo ${numero}`);
 
     const webhookUrl = webhook ?? `${process.env.WEBHOOK_URL}/process/webhook`;
+    // ARQ-005: propagate correlation ID across services
+    // Usa numero como fallback determinístico para manter idempotência entre retries
+    const correlationId = job.data.correlationId ?? String(job.id ?? numero);
+    const webhookHeaders = {
+      'x-correlation-id': correlationId,
+      ...(process.env.WEBHOOK_SERVICE_KEY
+        ? { 'x-service-key': process.env.WEBHOOK_SERVICE_KEY }
+        : {}),
+    };
+    let successWebhookSent = false;
 
     // Extrai TRT do CNJ
     const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
@@ -109,10 +121,14 @@ export class GenericProcessoWorker extends WorkerHost {
           numero,
           [],
           'Número do processo inválido',
-          true,
+          {
+            status: 'ERRO',
+            motivoErro: 'NUMERO_INVALIDO',
+            webhookId: `${correlationId}:invalid-number`,
+          },
         );
 
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
       if (regionTRT === 3 || regionTRT === 9) {
@@ -133,11 +149,13 @@ export class GenericProcessoWorker extends WorkerHost {
           numero,
           [],
           'Nenhum resultado encontrado',
-          true,
-          origem,
+          {
+            origem,
+            webhookId: `${correlationId}:not-found`,
+          },
         );
 
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -146,7 +164,7 @@ export class GenericProcessoWorker extends WorkerHost {
       // --------------------------
       const segredo = result.some((i) => {
         if (!i) return false; // protege contra null/undefined
-        const maybeMsg = (i as any).mensagemErro as unknown;
+        const maybeMsg: unknown = i.mensagemErro;
         if (typeof maybeMsg !== 'string') return false;
         const msg = maybeMsg;
         if (!msg) return false;
@@ -163,18 +181,20 @@ export class GenericProcessoWorker extends WorkerHost {
           numero,
           [],
           `O processo ${numero} está em segredo de justiça`,
-          true,
-          origem,
+          {
+            origem,
+            webhookId: `${correlationId}:secrecy`,
+            status: 'ERRO',
+            motivoErro: 'SEGREDO_JUSTICA',
+          },
         );
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
       const erroMensagem = result.find(
         (i) =>
-          i &&
-          typeof (i as any).mensagemErro === 'string' &&
-          (i as any).mensagemErro.length > 0,
+          i && typeof i.mensagemErro === 'string' && i.mensagemErro.length > 0,
       );
 
       if (erroMensagem) {
@@ -185,10 +205,14 @@ export class GenericProcessoWorker extends WorkerHost {
           numero,
           [],
           erroMensagem.mensagemErro,
-          true,
-          origem,
+          {
+            origem,
+            webhookId: `${correlationId}:message-error`,
+            status: 'ERRO',
+            motivoErro: 'PJE_ERRO',
+          },
         );
-        await axios.post(webhookUrl, response);
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -199,70 +223,148 @@ export class GenericProcessoWorker extends WorkerHost {
         numero,
         result as ProcessosResponse[],
         '',
-        false,
-        origem,
+        {
+          origem,
+          webhookId: `${correlationId}:movements-success`,
+        },
       );
 
-      console.log('RESPONSE:', response);
+      this.logger.debug(
+        `RESPONSE: numero=${numero} status=${response?.resposta ?? 'n/a'}`,
+      );
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
-      await axios.post(webhookUrl, response);
+      // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi
+      // enviado numa tentativa anterior (correlationId é estável por estar no job data).
+      const movementsOkKey = `scraper:movements-ok:${correlationId}`;
+      const alreadySentMovements = await this.redis.get(movementsOkKey);
+      if (!alreadySentMovements) {
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        successWebhookSent = true; // setado antes do redis.set para evitar double-webhook se o set falhar
+        await this.redis.set(movementsOkKey, '1', 'EX', 86400);
+      }
+      // Se alreadySentMovements=true (retry anterior), o webhook já foi enviado
+      successWebhookSent = true;
+
       if (documents) {
-        await new Promise((resolve) => setTimeout(resolve, 2000)); // pequena pausa para garantir que o webhook seja processado antes de iniciar a consulta de documentos
-        console.log(
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        this.logger.log(
           `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
         );
-        const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
-          ? 2
-          : regionTRT;
+        let docsWebhookSent = false;
+        try {
+          const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
+            ? 2
+            : regionTRT;
 
-        const { cookies, account } = await this.loginPool.getCookies(
-          regionTRTValidate,
-          numero,
-        );
-
-        // Se não tiver cookies, significa que nenhuma conta está disponível
-        if (!cookies || !account) {
-          const resp = normalizeResponse(
+          const { cookies, account } = await this.loginPool.getCookies(
+            regionTRTValidate,
             numero,
-            [],
-            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
-            true,
           );
-          await axios.post(webhookUrl, resp);
-          return;
+
+          // Se não tiver cookies, significa que nenhuma conta está disponível
+          if (!cookies || !account) {
+            const resp = normalizeResponse(
+              numero,
+              [],
+              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+              {
+                status: 'ERRO',
+                motivoErro: 'LOGIN_UNAVAILABLE',
+                webhookId: `${correlationId}:docs-login-unavailable`,
+                origem,
+              },
+            );
+            docsWebhookSent = true;
+            await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+            throw new Error(
+              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+            );
+          }
+          const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
+            numero,
+            instances as ProcessosResponse[],
+            regionTRT,
+          );
+          if (!pdfBase64) {
+            // Falha silenciosa = autos nunca produzidos e robo-api fica
+            // aguardando indefinidamente. Lanca para o catch de documentos
+            // enviar webhook de erro e marcar job para retry.
+            throw new Error(
+              `fetchDocuments retornou undefined para ${numero} (TRT-${regionTRT})`,
+            );
+          }
+          const queueName = `trt${regionTRT}`;
+          const documentosQueue = this.documentosQueues[queueName];
+          if (!documentosQueue) {
+            throw new Error(
+              `Fila de documentos nao encontrada para trt${regionTRT} (${numero})`,
+            );
+          }
+          await documentosQueue.add(
+            'consulta-processo-documento',
+            { numero, instances, pdfBase64, correlationId },
+            {
+              jobId: `${numero}:${correlationId}`,
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 5000 },
+              removeOnFail: { count: 500, age: 7 * 24 * 3600 },
+              removeOnComplete: { count: 1000 },
+            },
+          );
+        } catch (docError) {
+          if (!docsWebhookSent) {
+            const mensagem = axios.isAxiosError(docError)
+              ? `Erro ao buscar documentos (HTTP ${docError.response?.status ?? 'sem status'}): ${docError.message}`
+              : `Erro ao processar documentos: ${docError instanceof Error ? docError.message : String(docError)}`;
+            const resp: Root = normalizeResponse(numero, [], mensagem, {
+              status: 'ERRO',
+              motivoErro: 'PJE_ERRO',
+              webhookId: `${correlationId}:docs-error`,
+              origem,
+            });
+            await axios
+              .post(webhookUrl, resp, { headers: webhookHeaders })
+              .catch((webhookErr) => {
+                this.logger.error(
+                  `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
+                );
+                throw webhookErr;
+              });
+          }
+          throw docError instanceof Error
+            ? docError
+            : new Error(String(docError));
         }
-        const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
-          numero,
-          instances as ProcessosResponse[],
-          regionTRT,
-        );
-        const queueName = `trt${regionTRT}`;
-        const documentosQueue = this.documentosQueues[queueName];
-        await documentosQueue.add(
-          'consulta-processo-documento',
-          { numero, instances, pdfBase64 },
-          {
-            jobId: numero,
-            attempts: 2,
-            backoff: { type: 'fixed', delay: 5000 },
-            removeOnFail: false,
-            removeOnComplete: true,
-          },
-        );
       }
     } catch (error) {
       this.logger.error(error);
 
-      if (axios.isAxiosError(error) && error.status === 503) {
-        const response = normalizeResponse(
-          numero,
-          [],
-          'Erro temporário, tente novamente mais tarde',
-          true,
-        );
-        await axios.post(webhookUrl, response);
+      if (successWebhookSent) {
+        throw error instanceof Error ? error : new Error(String(error));
       }
+
+      const mensagem = axios.isAxiosError(error)
+        ? `Erro PJE (HTTP ${error.response?.status ?? 'sem status'}): ${error.message}`
+        : `Erro inesperado: ${error instanceof Error ? error.message : String(error)}`;
+
+      const response: Root = normalizeResponse(numero, [], mensagem, {
+        status: 'ERRO',
+        motivoErro: 'PJE_ERRO',
+        webhookId: `${correlationId}:process-error`,
+        origem,
+      });
+
+      try {
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+      } catch (webhookError) {
+        this.logger.error(
+          `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,
+        );
+        // Não relança webhookError — preserva o erro original de scraping
+      }
+
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 }

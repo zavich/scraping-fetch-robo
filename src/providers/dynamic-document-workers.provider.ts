@@ -7,10 +7,13 @@ export function createDynamicDocumentsWorkers(): Provider[] {
   const queues = [...ALL_TRT_DOCUMENT_QUEUES];
 
   return queues.map((queueName) => {
-    // Configura concurrency e rate limiter para TRT15
+    const browserPoolSize = Math.max(1, parseInt(process.env.BROWSER_POOL_SIZE ?? '3', 10) || 3);
+    // Limita concorrência por fila distribuindo a capacidade total do pool.
+    // Nota: como é clamped a >= 1, o total efetivo pode chegar a queues.length
+    // quando queues.length > browserPoolSize*5 (ex.: pool=3 → 1 por fila × 24 = 24).
     const processorOptions = {
       lockDuration: 10 * 60 * 1000, // 10 minutos
-      concurrency: 100,
+      concurrency: Math.max(1, Math.floor((browserPoolSize * 5) / queues.length)),
     };
 
     @Processor(queueName, processorOptions)

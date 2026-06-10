@@ -7,6 +7,7 @@ import { ReceitaFederalModule } from './modules/receita-federal/receita-federal.
 import { RedisModule } from './connection/redis.module';
 import { BullModule } from '@nestjs/bullmq';
 import { AppController } from './app.controller';
+import type { Redis } from 'ioredis';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { AppController } from './app.controller';
     BullModule.forRootAsync({
       imports: [RedisModule],
       inject: ['REDIS_CLIENT'],
-      useFactory: (redisClient: any) => ({
+      useFactory: (redisClient: Redis) => ({
         connection: redisClient,
       }),
     }),

@@ -131,7 +131,7 @@ export class PjeLoginService {
     //   // Detecta se é uma página de WAF
     //   const wafParams = await page.evaluate(() => {
     //     // @ts-ignore
-    //     const w = window as any;
+    //     const w = window as Window & typeof globalThis & { gokuProps?: { key?: string; iv?: string; context?: string } };
     //     // Tenta pegar diretamente do objeto gokuProps, se existir
     //     const key = w.gokuProps?.key || null;
     //     const iv = w.gokuProps?.iv || null;
@@ -176,7 +176,7 @@ export class PjeLoginService {
     //       await client.send('Page.stopLoading');
 
     //       const wafParamsExtracted = await page.evaluate(() => {
-    //         const goku = (window as any).gokuProps;
+    //         const goku = (window as Window & typeof globalThis & { gokuProps: unknown }).gokuProps;
     //         if (!goku) return null;
     //         const challengeScript = (
     //           document.querySelector(

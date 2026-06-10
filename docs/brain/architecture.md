@@ -16,7 +16,7 @@
 
 ## Bootstrap
 
-- `src/main.ts`: cria app NestJS na porta 8081, configura CORS (apenas robo-api.juri.capital), registra Bull Board (non-prod), graceful shutdown para browser.
+- `src/main.ts`: cria app NestJS na porta 8081, configura CORS (apenas robo-api.juri.capital), registra Bull Board (non-prod), graceful shutdown com `app.close()` + `BrowserManager.closeAll()`.
 - `src/app.module.ts`: importa PjeModule, ReceitaFederalModule, RedisModule, ScheduleModule.
 
 ## Modulos
@@ -50,17 +50,17 @@ Concorrencia: TRT3, TRT9, TST = 1; demais = 3. Rate limit: 3 req/s por fila.
 
 - Singleton Puppeteer em `src/utils/browser.manager.ts`.
 - Stealth plugin habilitado.
-- User-agent rotativo (100+ agentes).
+- User-agent fixo e viewport coerente com launch args.
 - Context isolation por operacao.
 - Headless: true, viewport: 1366x768.
-- Graceful shutdown: SIGINT handler.
+- Graceful shutdown: SIGINT/SIGTERM/uncaughtException com fechamento do pool completo.
 
 ## Login Pool
 
 - 6 contas PJE (FIRST a SIXTH).
 - Rotacao a cada 5 processos.
 - Sessao cacheada no Redis com TTL.
-- Lock por TRT (15s) para evitar login concorrente.
+- Lock por TRT (60s) para evitar login concorrente.
 - AWS WAF token cacheado por processo.
 
 ## Auth

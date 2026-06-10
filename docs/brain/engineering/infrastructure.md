@@ -5,6 +5,7 @@
 - AWS ECS Fargate na regiao `sa-east-1`.
 - CI/CD via GitHub Actions.
 - Docker image com Chromium embutido para Puppeteer.
+- `task-definition.json` e template anonimo versionado. A versao de deploy deve ser gerada via `yarn render:task-definition [arquivo-destino]`.
 
 ## Servicos AWS
 
@@ -34,7 +35,7 @@
 
 - CloudWatch Logs para todos os containers.
 - Metricas de CPU/memoria do ECS.
-- Bull Board (`/admin/queues`) para monitorar filas.
+- Bull Board (`/bull-board`) para monitorar filas (apenas fora de producao).
 
 ## Variaveis de ambiente
 
@@ -42,7 +43,12 @@
 - `AWS_S3_BUCKET`: bucket para documentos.
 - `TWO_CAPTCHA_API_KEY`: chave da API 2Captcha.
 - `PJE_*`: credenciais carregadas do Secrets Manager.
-- Validadas com Zod no bootstrap.
+- Nao ha validacao Zod no bootstrap; variaveis criticas (ex: API_KEY, REDIS_URL) vem do Secrets Manager via ECS task definition.
+
+## ECS task definition
+
+- Placeholders obrigatorios no template atual: `TASK_FAMILY`, `EXECUTION_ROLE_ARN`, `TASK_ROLE_ARN`, `IMAGE_URI`, `NODE_ENV`, `SECRET_ARN_PREFIX`, `LOG_GROUP`, `AWS_REGION`.
+- O pipeline nao deve registrar o `task-definition.json` cru no ECS. Primeiro renderiza os placeholders, depois chama `aws ecs register-task-definition`.
 
 ## Seguranca
 

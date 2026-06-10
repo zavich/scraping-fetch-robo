@@ -1,21 +1,26 @@
 import { ItensProcesso, Partes, Polo, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
+import { randomUUID } from 'crypto';
 
-type Assunto = {
-  principal: boolean;
-  descricao: string;
+type NormalizeResponseOptions = {
+  documento?: boolean;
+  autos?: boolean;
+  origem?: string;
+  webhookId?: string;
+  status?: 'SUCESSO' | 'NAO_ENCONTRADO' | 'ERRO';
+  motivoErro?: string | null;
+  tribunalSigla?: string;
 };
 
 export function normalizeResponse(
   numero: string,
   body: ProcessosResponse[],
   message = 'processo não encontrado',
-  isDocument = false,
-  origem?: string,
+  options: NormalizeResponseOptions = {},
 ): Root {
-  const opcoes: { [key: string]: any } = {
-    documento: false,
-  };
+  const opcoes: Record<string, unknown> = options.autos
+    ? { autos: true }
+    : { documento: options.documento ?? false };
   function generateId(length = 11) {
     const chars = '0123456789';
     let resposta = '';
@@ -24,16 +29,14 @@ export function normalizeResponse(
     }
     return Number(resposta);
   }
-  if (origem) {
-    opcoes['origem'] = origem;
-  }
-  if (isDocument) {
-    opcoes['documento'] = true;
+  if (options.origem) {
+    opcoes['origem'] = options.origem;
   }
   const now = new Date();
   if (!body || body.length === 0) {
     return {
       id: generateId(),
+      webhookId: options.webhookId ?? randomUUID(),
       created_at: {
         date: now.toISOString()?.replace('T', ' ').substring(0, 19),
         timezone_type: 3,
@@ -41,13 +44,13 @@ export function normalizeResponse(
       },
       numero_processo: numero,
       resposta: { message },
-      status: 'NAO_ENCONTRADO',
-      motivo_erro: 'SEM_DADOS',
+      status: options.status ?? 'NAO_ENCONTRADO',
+      motivo_erro: options.motivoErro ?? 'SEM_DADOS',
       status_callback: null,
       tipo: 'BUSCA_PROCESSO',
       opcoes,
       tribunal: {
-        sigla: origem ? 'TST' : 'TRT',
+        sigla: options.tribunalSigla ?? (options.origem ? 'TST' : 'TRT'),
         nome: 'Tribunal Regional do Trabalho',
         busca_processo: 1,
       },
@@ -58,6 +61,45 @@ export function normalizeResponse(
   const regionTRT = match ? Number(match[1]) : null;
 
   const isTrabalhista = Number(numero.split('.')[2]);
+
+  // Pre-computa Map<documento, bestName> em um unico O(body) pass.
+  // Antes era O(partes x body) — quadratico em processos com muitas partes/movs.
+  const bestNameByDocument = new Map<string, string>();
+  for (const instance of body) {
+    for (const poloKey of ['poloAtivo', 'poloPassivo'] as const) {
+      const polos = instance[poloKey] ?? [];
+      for (const polo of polos) {
+        const poloDoc = String(polo?.login ?? '').replace(/\D/g, '');
+        if (poloDoc) {
+          const candidate = String(polo?.nome ?? '').trim();
+          const current = bestNameByDocument.get(poloDoc) ?? '';
+          if (!current || isBetterNameCandidate(current, candidate)) {
+            bestNameByDocument.set(poloDoc, candidate);
+          }
+        }
+
+        for (const rep of polo.representantes || []) {
+          const repDoc = String(rep?.login ?? '').replace(/\D/g, '');
+          if (!repDoc) continue;
+          const candidate = String(rep?.nome ?? '').trim();
+          const current = bestNameByDocument.get(repDoc) ?? '';
+          if (!current || isBetterNameCandidate(current, candidate)) {
+            bestNameByDocument.set(repDoc, candidate);
+          }
+        }
+      }
+    }
+  }
+
+  function getBestNameByDocument(baseName: string, login?: string): string {
+    const baseTrim = String(baseName ?? '').trim();
+    const documentNumber = String(login ?? '').replace(/\D/g, '');
+    if (!documentNumber) return baseTrim;
+
+    const fromMap = bestNameByDocument.get(documentNumber);
+    if (!fromMap) return baseTrim;
+    return isBetterNameCandidate(baseTrim, fromMap) ? fromMap : baseTrim;
+  }
 
   const instancias = body.map((instance, index) => {
     const grauInstanciaMap = ['PRIMEIRO_GRAU', 'SEGUNDO_GRAU'];
@@ -81,7 +123,7 @@ export function normalizeResponse(
           partes.push({
             id: parte.id,
             tipo: parte.tipo,
-            nome: parte.nome.trim(),
+            nome: getBestNameByDocument(parte.nome, parte.login),
             principal: true,
             polo: parte.polo,
             documento: {
@@ -96,7 +138,7 @@ export function normalizeResponse(
             partes.push({
               id: rep.id,
               tipo: rep.tipo,
-              nome: rep.nome.trim(),
+              nome: getBestNameByDocument(rep.nome, rep.login),
               principal: false,
               polo: rep.polo,
               documento: {
@@ -107,7 +149,7 @@ export function normalizeResponse(
               advogado_de: parte.id,
               // oabs: (rep.papeis || [])
               //   .filter((p: Papeis) => p.identificador === 'advogado')
-              //   .map((_: any) => ({
+              //   .map((_: unknown) => ({
               //     numero: '', // substituir pelo número real da OAB
               //     uf: rep.endereco?.estado ?? '', // garantir que seja sempre string
               //   })),
@@ -170,24 +212,18 @@ export function normalizeResponse(
       movimentacoes,
     };
 
-    if (isDocument) {
+    if (options.autos) {
       resposta['documentos_restritos'] = instance.documentos_restritos;
       resposta['documentos'] = instance.documentos;
     }
 
     return resposta;
   });
-  if (origem) {
-    opcoes['origem'] = origem;
-  }
-  if (isDocument) {
-    opcoes['autos'] = true;
-  }
   const resposta =
     body.length > 0
       ? {
           numero_unico: body[0]?.numero,
-          origem: origem ? 'TST' : `TRT-${regionTRT}`,
+          origem: options.origem ? 'TST' : `TRT-${regionTRT}`,
           instancias,
           id: generateId(),
         }
@@ -197,6 +233,7 @@ export function normalizeResponse(
         };
   return {
     id: generateId(),
+    webhookId: options.webhookId ?? randomUUID(),
     created_at: {
       date: now.toISOString()?.replace('T', ' ').substring(0, 19),
       timezone_type: 3,
@@ -204,13 +241,13 @@ export function normalizeResponse(
     },
     numero_processo: body[0]?.numero,
     resposta,
-    status: body.length > 0 ? 'SUCESSO' : 'NAO_ENCONTRADO',
-    motivo_erro: null,
+    status: options.status ?? (body.length > 0 ? 'SUCESSO' : 'NAO_ENCONTRADO'),
+    motivo_erro: options.motivoErro ?? null,
     status_callback: null,
     tipo: 'BUSCA_PROCESSO',
     opcoes,
     tribunal: {
-      sigla: origem ? 'TST' : `TRT`,
+      sigla: options.tribunalSigla ?? (options.origem ? 'TST' : `TRT`),
       nome: 'Tribunal Regional do Trabalho',
       busca_processo: 1,
     },
@@ -271,8 +308,7 @@ export function atualizarNomesPartes(
   partes: Partes[],
 ): Partes[] {
   // aceita agora / e - dentro das palavras (mas vamos normalizar antes)
-  const regexNomeCompleto =
-    /([A-Z][A-Z0-9&\.\(\)\/-]*(?:\s+[A-Z0-9&\.\(\)\/-]+)+)/g;
+  const regexNomeCompleto = /([A-Z][A-Z0-9&.()/-]*(?:\s+[A-Z0-9&.()/-]+)+)/g;
 
   // 🔹 Função que normaliza o título para facilitar a extração
   function normalizeTitleForRegex(t: string): string {
@@ -289,9 +325,33 @@ export function atualizarNomesPartes(
 
   const nomesExtraidos: { nome: string; siglas: string }[] = [];
 
+  function extractNameHintsFromTitle(normalizedTitle: string): string[] {
+    const hints: string[] = [];
+
+    // Ex.: "Decorrido o prazo de SINDICATO ... - SINTERGIA/RJ em 17/03/2025"
+    const deNomeEmDataRegex =
+      /\bde\s+([A-ZÀ-Ý0-9&.()/-]+(?:\s+[A-ZÀ-Ý0-9&.()/-]+)+?)\s+em\s+\d{2}\/\d{2}\/\d{4}\b/gi;
+
+    let match: RegExpExecArray | null;
+    while ((match = deNomeEmDataRegex.exec(normalizedTitle)) !== null) {
+      const hint = String(match[1]).trim();
+      if (hint.split(/\s+/).length >= 2) {
+        hints.push(hint);
+      }
+    }
+
+    return hints;
+  }
+
   titulos.forEach(({ titulo }) => {
     // normaliza o título antes de aplicar o regex
     const normalized = normalizeTitleForRegex(titulo);
+
+    // Primeiro tenta extrair nomes em padrões textuais comuns de movimentação.
+    extractNameHintsFromTitle(normalized).forEach((hint) => {
+      nomesExtraidos.push({ nome: hint, siglas: gerarSiglas(hint) });
+    });
+
     let match: RegExpExecArray | null;
     // executa o regex na versão normalizada
     while ((match = regexNomeCompleto.exec(normalized)) !== null) {
@@ -309,7 +369,7 @@ export function atualizarNomesPartes(
       nomesExtraidos.map((n) => {
         // chave: nome sem pontuação extra e com espaços normalizados
         const key = n.nome
-          .replace(/[.,()\/-]/g, '')
+          .replace(/[.,()/-]/g, '')
           .replace(/\s+/g, ' ')
           .trim();
         return [key, n];
@@ -320,8 +380,11 @@ export function atualizarNomesPartes(
   return partes.map((parte) => {
     if (parte.tipo === 'ADVOGADO') return parte;
 
-    const sigParte = gerarSiglas(parte.nome);
+    const sigParte = isInitialsLikeName(parte.nome)
+      ? initialsFingerprint(parte.nome)
+      : gerarSiglas(parte.nome);
     let melhorNome = parte.nome;
+
     for (const { nome: nomeTitulo, siglas: sigTituloRaw } of nomesUnicos) {
       const sigTitulo = sigTituloRaw.replace(/[^A-Z0-9]/g, '')?.trim();
       const sigParteClean = sigParte.replace(/[^A-Z0-9]/g, '')?.trim();
@@ -337,13 +400,74 @@ export function atualizarNomesPartes(
 
       // Comparador simples e robusto
       if (matchSiglas(sigParteClean, sigTitulo)) {
-        melhorNome = nomeTitulo;
-        break;
+        if (isBetterNameCandidate(melhorNome, nomeTitulo)) {
+          melhorNome = nomeTitulo;
+        }
+        // Continua procurando para privilegiar nome por extenso quando existir.
+        continue;
       }
     }
 
     return { ...parte, nome: melhorNome };
   });
+}
+
+function initialsFingerprint(name: string): string {
+  return String(name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[(),.]/g, ' ')
+    .replace(/[/-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => token[0].toUpperCase())
+    .join('');
+}
+
+function isBetterNameCandidate(
+  currentName: string,
+  candidateName: string,
+): boolean {
+  const current = String(currentName || '').trim();
+  const candidate = String(candidateName || '').trim();
+
+  if (!candidate) return false;
+  if (!current) return true;
+  if (candidate === current) return false;
+
+  const currentInitials = isInitialsLikeName(current);
+  const candidateInitials = isInitialsLikeName(candidate);
+
+  // Nunca troca nome por extenso por nome em sigla.
+  if (!currentInitials && candidateInitials) return false;
+
+  const currentInfo = countInformativeWords(current);
+  const candidateInfo = countInformativeWords(candidate);
+
+  if (candidateInfo > currentInfo) return true;
+  if (candidateInfo < currentInfo) return false;
+
+  // Empate: favorece o nome mais longo quando ambos têm mesmo nível de informação.
+  return candidate.length > current.length;
+}
+
+function isInitialsLikeName(name: string): boolean {
+  const tokens = String(name)
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-zÀ-ÿ0-9]/g, ''))
+    .filter(Boolean);
+
+  if (tokens.length === 0) return false;
+
+  const shortTokens = tokens.filter((token) => token.length <= 2).length;
+  return shortTokens / tokens.length >= 0.6;
+}
+
+function countInformativeWords(name: string): number {
+  return String(name)
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Za-zÀ-ÿ0-9]/g, ''))
+    .filter((token) => token.length >= 3).length;
 }
 
 function matchSiglas(sigParte: string, sigTitulo: string): boolean {
@@ -356,11 +480,20 @@ function matchSiglas(sigParte: string, sigTitulo: string): boolean {
   // Prefixo igual → ex: PBTVS começa com PBTV
   if (b.startsWith(a) || a.startsWith(b)) return true;
 
-  // Tolerância mínima: todas as letras de a aparecem em ordem em b
-  let i = 0;
-  for (const c of b) {
-    if (c === a[i]) i++;
-    if (i === a.length) return true;
+  // Tolerância: subsequência nos dois sentidos.
+  // Isso cobre casos como iniciais extras de stopwords (ex.: "NAS") no nome truncado.
+  if (isSubsequence(a, b) || isSubsequence(b, a)) return true;
+
+  return false;
+}
+
+function isSubsequence(target: string, source: string): boolean {
+  if (!target) return false;
+
+  let index = 0;
+  for (const char of source) {
+    if (char === target[index]) index++;
+    if (index === target.length) return true;
   }
 
   return false;

@@ -27,7 +27,7 @@ Scraping de processo PJE falhou, timeout, retorno vazio ou erro inesperado.
 
 3. **Sessao invalida**:
    - Verifique `pje:session:{trt}` no Redis (TTL, conteudo).
-   - Verifique se ha lock ativo `pje:lock:{trt}` (TTL 15s).
+   - Verifique se ha lock ativo `pje:lock:{trt}` (TTL 60s).
    - Verifique credenciais no Secrets Manager (`PJE_USER_*`, `PJE_PASS_*`).
    - Force novo login removendo a sessao do Redis.
 

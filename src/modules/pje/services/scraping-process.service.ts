@@ -1,32 +1,23 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
-import { Page } from 'puppeteer';
+import { Page, ElementHandle } from 'puppeteer';
 import { ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
-import { BrowserPool } from 'src/utils/browser-pool';
 import { BrowserManager } from 'src/utils/browser.manager';
 
 @Injectable()
 export class ScrapingProcessService {
   private readonly logger = new Logger(ScrapingProcessService.name);
-
-  private readonly pool = new BrowserPool(5); // Reduzir o limite
-  private isInitialized = false;
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly awsS3Service: AwsS3Service,
-  ) {
-    this.pool.init();
-  }
+  ) {}
 
   async execute(processNumber: string, regionTRT: number, instance: number) {
-    if (!this.isInitialized) {
-      await this.pool.init();
-      this.isInitialized = true;
-    }
     const { page, context } = await BrowserManager.createPage();
+    let on403: ((res: import('puppeteer').HTTPResponse) => void) | null = null;
 
     try {
       if (!page || !context) {
@@ -66,14 +57,14 @@ export class ScrapingProcessService {
         );
 
       if (!wafFrame) {
-        console.log('❌ Nenhum frame AWS WAF encontrado');
+        this.logger.warn('❌ Nenhum frame AWS WAF encontrado');
       } else {
-        console.log('✅ Frame AWS WAF detectado:', wafFrame.url());
+        this.logger.debug(`✅ Frame AWS WAF detectado: ${wafFrame.url()}`);
       }
 
       // Detecta se é uma página de WAF
       const wafParams = await page.evaluate(() => {
-        const w = window as unknown as {
+        const w = window as Window & {
           gokuProps?: { key?: string; iv?: string; context?: string };
         };
 
@@ -107,7 +98,9 @@ export class ScrapingProcessService {
         };
       });
 
-      console.log('wafFrame URL:', wafFrame?.url() || '❌ não encontrado');
+      this.logger.debug(
+        `wafFrame URL: ${wafFrame?.url() || '❌ não encontrado'}`,
+      );
       const urlObj = new URL(urlBase);
 
       const correctDomain = urlObj.hostname;
@@ -115,8 +108,8 @@ export class ScrapingProcessService {
       if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
         this.logger.warn('⚠️ AWS WAF detectado — iniciando resolução...');
 
-        const client = await page.target().createCDPSession();
-        await client.send('Page.stopLoading');
+        const wafCdpClient = await page.target().createCDPSession();
+        await wafCdpClient.send('Page.stopLoading');
 
         //
         // 1. EXTRAIR PARÂMETROS DO WAF
@@ -221,9 +214,18 @@ export class ScrapingProcessService {
           voucherResponse &&
           typeof voucherResponse === 'object' &&
           'token' in voucherResponse &&
-          typeof (voucherResponse as { token?: unknown }).token === 'string'
+          typeof (voucherResponse as { token?: unknown }).token === 'string' &&
+          (voucherResponse as { token: string }).token.length > 0
         ) {
           newToken = (voucherResponse as { token: string }).token;
+        }
+
+        if (!newToken) {
+          // Falha explícita: setar cookie vazio mascara o problema do WAF e
+          // pode persistir um token inválido no Redis (`aws-waf-token:...`).
+          throw new Error(
+            `AWS WAF /voucher não retornou token válido para processo ${processNumber}`,
+          );
         }
 
         //
@@ -291,18 +293,23 @@ export class ScrapingProcessService {
         //
         // 6. RECARREGAR PARA VALIDAR O TOKEN
         //
-        // const originalCookies = await page.cookies();
-        // await this.redis.set(
-        //   `aws-waf-token:${regionTRT}`,
-        //   originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
-        //   'EX',
-        //   3600,
-        // );
+        const originalCookies = await page.cookies();
+        await this.redis.set(
+          `aws-waf-token:${processNumber}`,
+          originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
+          'EX',
+          7200,
+        );
         await new Promise((r) => setTimeout(r, 1500));
         await page.reload({
           waitUntil: 'networkidle2',
         });
         await this.delay(4000);
+        try {
+          await wafCdpClient.detach();
+        } catch {
+          /* ignore */
+        }
       }
       // 🔥 ESPERA REAL DO FRONT
       await page.waitForFunction(
@@ -319,14 +326,16 @@ export class ScrapingProcessService {
         '🔁 Página recarregada — aguardando renderização real...',
       );
       await this.detectBlock(page);
-      this.logger.log('📄 HTML parcial:');
-      console.log((await page.content()).slice(0, 1000));
+      this.logger.debug(
+        `📄 HTML parcial: ${(await page.content()).slice(0, 1000)}`,
+      );
       this.logger.log('📍 URL atual:', page.url());
-      page.on('response', (res) => {
+      on403 = (res: import('puppeteer').HTTPResponse) => {
         if (res.status() === 403) {
-          console.log('🚫 403 detectado:', res.url());
+          this.logger.debug(`🚫 403 detectado: ${res.url()}`);
         }
-      });
+      };
+      page.on('response', on403);
 
       // Substitui a espera direta pelo retry para o inputSelector
       this.logger.log(
@@ -387,10 +396,9 @@ export class ScrapingProcessService {
           });
 
         const buttons = await page.$$(instanceButtonSelector);
-        this.logger.log(`🔍 Botões encontrados: ${buttons.length}`);
+        this.logger.debug(`🔍 Botões encontrados: ${buttons.length}`);
 
-        let instanceButton: any = null;
-        console.log(`🔍 Botões encontrados: ${buttons.length}`);
+        let instanceButton: ElementHandle<Element> | null = null;
         multipleInstances = buttons.length > 1;
         for (const button of buttons) {
           const buttonText = await page.evaluate(
@@ -413,9 +421,6 @@ export class ScrapingProcessService {
             page.evaluate((button) => {
               if (button instanceof HTMLElement) {
                 button.click();
-                console.log('✅ Clique executado no botão.');
-              } else {
-                console.log('⚠️ O elemento não é um HTMLElement.');
               }
             }, instanceButton),
           ]);
@@ -515,25 +520,29 @@ export class ScrapingProcessService {
       this.logger.log(`🔍 Resposta capturada: ${responseDadosBasicos.url()}`);
       this.logger.log(`🔍 Status: ${responseDadosBasicos.status()}`);
 
+      type ProcessoBasico = {
+        id: number;
+        segredoJustica?: boolean;
+        numero?: string;
+      };
+
+      const isProcessoDadosBasicos = (
+        obj: Record<string, string | number | boolean | null | object>,
+      ): obj is ProcessoBasico => {
+        return (
+          typeof obj === 'object' &&
+          obj !== null &&
+          'id' in obj &&
+          typeof (obj as Record<string, string | number | boolean | null>)
+            .id === 'number'
+        );
+      };
+
       try {
-        const data = (await responseDadosBasicos.json()) as unknown;
-
-        type ProcessoBasico = {
-          id: number;
-          segredoJustica?: boolean;
-          numero?: string;
-        };
-
-        const isProcessoDadosBasicos = (
-          obj: unknown,
-        ): obj is ProcessoBasico => {
-          return (
-            typeof obj === 'object' &&
-            obj !== null &&
-            'id' in obj &&
-            typeof (obj as Record<string, unknown>).id === 'number'
-          );
-        };
+        const data = (await responseDadosBasicos.json()) as
+          | ProcessoBasico[]
+          | ProcessoBasico
+          | Record<string, string | number | boolean | null>;
 
         if (
           Array.isArray(data) &&
@@ -609,7 +618,7 @@ export class ScrapingProcessService {
                   if (tokenCaptcha) {
                     const redisKey = `tokencaptcha:${processNumber}:${instance}`;
 
-                    await this.redis.set(redisKey, tokenCaptcha, 'EX', 3600);
+                    await this.redis.set(redisKey, tokenCaptcha, 'EX', 600); // 10 minutos (captcha válido por ~5 min)
 
                     this.logger.log(`✅ TokenCaptcha salvo: ${redisKey}`);
                   }
@@ -668,11 +677,17 @@ export class ScrapingProcessService {
         segredoJusticaDetected,
       };
     } finally {
+      // Remove 403 listener before closing page
+      try {
+        if (page && on403) page.off('response', on403);
+      } catch {
+        /* ignore */
+      }
       // 3. O PULO DO GATO: Fechar a página antes de liberar o contexto
       if (page) await page.close().catch(() => {});
 
-      // 4. Libera o contexto para o próximo job da fila
-      this.pool.release(context);
+      // 4. Fecha o contexto real criado pelo BrowserManager
+      await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado e aba fechada');
     }
   }

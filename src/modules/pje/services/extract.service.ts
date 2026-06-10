@@ -95,7 +95,7 @@ export class PdfExtractService {
     }[] = [];
 
     for (const item of outline) {
-      let dest: any;
+      let dest: unknown;
 
       if (typeof item.dest === 'string') {
         dest = await pdf.getDestination(item.dest);

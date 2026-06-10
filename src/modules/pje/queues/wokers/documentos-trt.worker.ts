@@ -24,10 +24,29 @@ export class GenericDocumentosWorker extends WorkerHost {
       numero: string;
       instances: ProcessosResponse[];
       pdfBase64: string | undefined;
+      correlationId?: string;
     }>,
   ) {
-    const { numero, instances, pdfBase64 } = job.data;
+    const {
+      numero,
+      instances,
+      pdfBase64,
+      correlationId: parentCorrelationId,
+    } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
+    // Usa numero como fallback determinístico para manter idempotência entre retries
+    const correlationId =
+      parentCorrelationId ?? String(job.id ?? `doc-${numero}`);
+    const webhookHeaders = {
+      'x-correlation-id': correlationId,
+      ...(process.env.WEBHOOK_SERVICE_KEY
+        ? { 'x-service-key': process.env.WEBHOOK_SERVICE_KEY }
+        : {}),
+    };
+    let completed = false;
+    // Impede que o catch externo envie um segundo webhook quando um path de erro
+    // específico já enviou o seu próprio (double-webhook bug).
+    let webhookAlreadySent = false;
 
     this.logger.log(`📄 [${job.queueName}] Documentos → ${numero}`);
 
@@ -41,10 +60,18 @@ export class GenericDocumentosWorker extends WorkerHost {
           numero,
           [],
           `Número inválido para consulta de documentos`,
-          true,
+          {
+            autos: true,
+            webhookId: `${correlationId}:invalid-number`,
+            status: 'ERRO',
+            motivoErro: 'NUMERO_INVALIDO',
+          },
         );
-        await axios.post(webhookUrl, resp);
-        return;
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        webhookAlreadySent = true;
+        throw new Error(
+          `Número inválido para consulta de documentos: ${numero}`,
+        );
       }
 
       if (!pdfBase64) {
@@ -53,10 +80,16 @@ export class GenericDocumentosWorker extends WorkerHost {
           numero,
           [],
           `Erro ao gerar arquivo para consulta de documentos, tente novamente mais tarde.`,
-          true,
+          {
+            autos: true,
+            webhookId: `${correlationId}:pdf-missing`,
+            status: 'ERRO',
+            motivoErro: 'PDF_NAO_GERADO',
+          },
         );
-        await axios.post(webhookUrl, resp);
-        return;
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        webhookAlreadySent = true;
+        throw new Error(`pdfBase64 ausente para ${numero}`);
       }
 
       // Executa consulta de documentos
@@ -65,39 +98,79 @@ export class GenericDocumentosWorker extends WorkerHost {
         instances,
         pdfBase64,
       );
-      if (documentos[0].documentos.length === 0) {
+      if (documentos.length === 0 || documentos[0].documentos.length === 0) {
         this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
         const resp = normalizeResponse(
           numero,
           [],
           `Nenhum documento encontrado, tente novamente mais tarde.`,
-          true,
+          {
+            autos: true,
+            webhookId: `${correlationId}:docs-empty`,
+            status: 'ERRO',
+            motivoErro: 'DOCUMENTOS_NAO_ENCONTRADOS',
+          },
         );
-        await axios.post(webhookUrl, resp);
-        return;
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        webhookAlreadySent = true;
+        throw new Error(`Nenhum documento encontrado para ${numero}`);
       }
       const result = documentos.slice(0, 2);
-      const response = normalizeResponse(numero, result, '', true);
-      await axios.post(webhookUrl, response);
-    } catch (error: any) {
+      const response = normalizeResponse(numero, result, '', {
+        autos: true,
+        webhookId: `${correlationId}:autos-success`,
+      });
+      await axios.post(webhookUrl, response, { headers: webhookHeaders });
+      webhookAlreadySent = true;
+      completed = true;
+    } catch (error: unknown) {
       this.logger.error(error);
 
-      const resp = normalizeResponse(
-        numero,
-        [],
-        'Erro ao consultar documentos, tente novamente mais tarde.',
-        true,
-      );
-      await axios.post(webhookUrl, resp);
+      if (!webhookAlreadySent) {
+        const resp = normalizeResponse(
+          numero,
+          [],
+          'Erro ao consultar documentos, tente novamente mais tarde.',
+          {
+            autos: true,
+            webhookId: `${correlationId}:autos-error`,
+            status: 'ERRO',
+            motivoErro: 'DOCUMENTOS_ERRO',
+          },
+        );
+        try {
+          await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        } catch (webhookError) {
+          this.logger.error(
+            `Falha crítica: erro no processamento E no envio do webhook para ${numero}:`,
+            webhookError,
+          );
+          throw webhookError; // deixa BullMQ marcar como falha para retry
+        }
+      }
+
+      throw error instanceof Error ? error : new Error(String(error));
     } finally {
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
-      await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
+      const maxAttempts = job.opts.attempts ?? 1;
+      const isLastAttempt = job.attemptsMade + 1 >= maxAttempts;
 
-      await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-        log: (msg) => this.logger.debug(msg),
-      });
+      if (completed || isLastAttempt) {
+        // Best-effort: falha na limpeza não deve marcar o job como falho
+        // nem gerar webhooks duplicados quando o processamento já concluiu
+        try {
+          await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+          await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+        } catch (cleanupError) {
+          this.logger.error(
+            `Falha na limpeza de tokens para ${numero}: ${cleanupError instanceof Error ? cleanupError.stack : String(cleanupError)}`,
+          );
+        }
+      }
     }
   }
 }
