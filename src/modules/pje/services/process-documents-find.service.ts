@@ -7,6 +7,10 @@ import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
 import { PdfExtractService } from './extract.service';
 
+type ExtractedBookmark = Awaited<
+  ReturnType<PdfExtractService['extractBookmarks']>
+>[number];
+
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
@@ -14,6 +18,10 @@ export class ProcessDocumentsFindService {
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
   ) {}
+
+  private getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'Erro desconhecido';
+  }
 
   async execute(
     numeroDoProcesso: string,
@@ -40,12 +48,13 @@ export class ProcessDocumentsFindService {
         documentos: documentosRestritos,
       }));
       return newInstances;
-    } catch (error) {
+    } catch (error: unknown) {
+      const errorMessage = this.getErrorMessage(error);
       this.logger.error(
-        `Error uploading restricted documents: ${error.message}`,
+        `Error uploading restricted documents: ${errorMessage}`,
       );
       throw new BadGatewayException(
-        `Error uploading restricted documents: ${error.message}`,
+        `Error uploading restricted documents: ${errorMessage}`,
       );
     }
   }
@@ -62,14 +71,7 @@ export class ProcessDocumentsFindService {
 
       // tenta extrair bookmarks e processar
       try {
-        interface Bookmark {
-          id: string;
-          index: number;
-          title: string;
-          data?: string;
-        }
-
-        const bookmarks: Bookmark[] =
+        const bookmarks: ExtractedBookmark[] =
           await this.pdfExtractService.extractBookmarks(fileBuffer);
 
         if (!bookmarks || bookmarks.length === 0) {
@@ -79,7 +81,7 @@ export class ProcessDocumentsFindService {
           return uploadedDocuments;
         }
 
-        const bookmarksFiltrados = bookmarks.filter((b: Bookmark) =>
+        const bookmarksFiltrados = bookmarks.filter((b) =>
           regexDocumentos.some((r) => r.test(normalizeString(b.title))),
         );
 
@@ -90,11 +92,12 @@ export class ProcessDocumentsFindService {
           return uploadedDocuments;
         }
 
-        const processarBookmark = async (bookmark: Bookmark) => {
+        const processarBookmark = async (bookmark: ExtractedBookmark) => {
           const extractedPdfBuffer =
             await this.pdfExtractService.extractPagesByIndex(
               fileBuffer,
               bookmark.id,
+              bookmarks,
             );
 
           if (!extractedPdfBuffer) {
@@ -149,16 +152,16 @@ export class ProcessDocumentsFindService {
 
         await this.runInBatches(tasks, 4);
       } catch (pdfError: unknown) {
+        const errorMessage = this.getErrorMessage(pdfError);
         this.logger.error(
-          `❌ Erro ao processar PDF da instância: ${(pdfError as Error).message}`,
+          `❌ Erro ao processar PDF da instância: ${errorMessage}`,
         );
         throw new BadGatewayException(
-          `Erro ao processar PDF da instância: ${(pdfError as Error).message}`,
+          `Erro ao processar PDF da instância: ${errorMessage}`,
         );
       }
     } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Erro desconhecido';
+      const errorMessage = this.getErrorMessage(error);
       this.logger.error(
         `❌ Erro ao baixar PDF do processo ${processNumber}: ${errorMessage}`,
       );

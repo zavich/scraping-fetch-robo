@@ -17,11 +17,15 @@ const logger = new Logger('RedisModule');
           maxRetriesPerRequest: null, // obrigatorio para BullMQ
           retryStrategy: (times: number) => {
             if (times > 20) {
-              logger.error('[Redis] Maximo de tentativas atingido. Desistindo.');
+              logger.error(
+                '[Redis] Maximo de tentativas atingido. Desistindo.',
+              );
               return null; // para de tentar
             }
             const delay = Math.min(times * 200, 5000);
-            logger.warn(`[Redis] Tentativa ${times} de reconexao em ${delay}ms`);
+            logger.warn(
+              `[Redis] Tentativa ${times} de reconexao em ${delay}ms`,
+            );
             return delay;
           },
           reconnectOnError: (err: Error) => {
@@ -33,9 +37,12 @@ const logger = new Logger('RedisModule');
               : false;
           },
         });
+        let maxmemoryPolicyConfigured = false;
 
         client.on('error', (err) => {
-          logger.error(`[Redis] Erro de conexao: ${err instanceof Error ? err.stack : String(err)}`);
+          logger.error(
+            `[Redis] Erro de conexao: ${err instanceof Error ? err.stack : String(err)}`,
+          );
         });
 
         client.on('reconnecting', (ms: number) => {
@@ -44,6 +51,24 @@ const logger = new Logger('RedisModule');
 
         client.on('ready', () => {
           logger.log('[Redis] Conexao estabelecida com sucesso');
+          if (maxmemoryPolicyConfigured) {
+            return;
+          }
+
+          // Evita que o Redis rejeite escritas ao atingir maxmemory — remove chaves
+          // menos usadas ao invés de retornar OOM (causa do "Missing lock" no BullMQ).
+          void client
+            .config('SET', 'maxmemory-policy', 'allkeys-lru')
+            .then(() => {
+              maxmemoryPolicyConfigured = true;
+            })
+            .catch((err: unknown) => {
+              const errorMessage =
+                err instanceof Error ? err.message : String(err);
+              logger.warn(
+                `[Redis] Nao foi possivel definir maxmemory-policy: ${errorMessage}`,
+              );
+            });
         });
 
         return client;
