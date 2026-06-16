@@ -6,9 +6,12 @@ import { normalizeString } from 'src/utils/normalize-string';
 export class PdfExtractService {
   logger = new Logger(PdfExtractService.name);
 
-  async extractPagesByIndex(fileBuffer: Buffer, documentId: string) {
-    // Carrega bookmarks
-    const bookmarks = await this.extractBookmarks(fileBuffer);
+  async extractPagesByIndex(
+    fileBuffer: Buffer,
+    documentId: string,
+    cachedBookmarks?: Awaited<ReturnType<PdfExtractService['extractBookmarks']>>,
+  ) {
+    const bookmarks = cachedBookmarks ?? await this.extractBookmarks(fileBuffer);
 
     // Encontra o bookmark pelo id
     const bookmark = bookmarks.find(
@@ -31,6 +34,7 @@ export class PdfExtractService {
       data: new Uint8Array(fileBuffer),
     }).promise;
     const pdfjsTotalPages = pdfjsDoc.numPages;
+    await pdfjsDoc.destroy();
 
     // Ajuste de offset entre pdfjs e pdf-lib
     const pageOffset = pdfjsTotalPages - pdfLibTotalPages;
@@ -158,6 +162,7 @@ export class PdfExtractService {
       }
     }
 
+    await pdf.destroy();
     return bookmarks;
   }
 }

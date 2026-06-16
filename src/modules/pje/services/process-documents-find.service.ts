@@ -66,7 +66,9 @@ export class ProcessDocumentsFindService {
           id: string;
           index: number;
           title: string;
-          data?: string;
+          data: string;
+          startPage: number;
+          endPage: number;
         }
 
         const bookmarks: Bookmark[] =
@@ -95,6 +97,7 @@ export class ProcessDocumentsFindService {
             await this.pdfExtractService.extractPagesByIndex(
               fileBuffer,
               bookmark.id,
+              bookmarks,
             );
 
           if (!extractedPdfBuffer) {

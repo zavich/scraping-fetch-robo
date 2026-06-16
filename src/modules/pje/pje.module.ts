@@ -24,8 +24,8 @@ import { RedisService } from 'src/services/redis.service';
 const defaultQueueOptions = {
   attempts: 3,
   backoff: { type: 'fixed' as const, delay: 5000 },
-  removeOnComplete: { count: 1000 },
-  removeOnFail: { count: 500, age: 7 * 24 * 3600 },
+  removeOnComplete: { count: 100 },
+  removeOnFail: { count: 100, age: 3 * 24 * 3600 },
 };
 
 @Module({
