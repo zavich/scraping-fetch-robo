@@ -308,8 +308,6 @@ export class GenericProcessoWorker extends WorkerHost {
               jobId: `${numero}:${correlationId}`,
               attempts: 3,
               backoff: { type: 'exponential', delay: 5000 },
-              removeOnFail: { count: 500, age: 7 * 24 * 3600 },
-              removeOnComplete: { count: 1000 },
             },
           );
         } catch (docError) {
