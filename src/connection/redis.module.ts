@@ -54,11 +54,14 @@ const logger = new Logger('RedisModule');
           if (maxmemoryPolicyConfigured) {
             return;
           }
-          maxmemoryPolicyConfigured = true;
+
           // Evita que o Redis rejeite escritas ao atingir maxmemory — remove chaves
           // menos usadas ao invés de retornar OOM (causa do "Missing lock" no BullMQ).
-          client
+          void client
             .config('SET', 'maxmemory-policy', 'allkeys-lru')
+            .then(() => {
+              maxmemoryPolicyConfigured = true;
+            })
             .catch((err: unknown) => {
               const errorMessage =
                 err instanceof Error ? err.message : String(err);
