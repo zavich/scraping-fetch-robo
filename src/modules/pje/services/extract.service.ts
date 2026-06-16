@@ -84,85 +84,88 @@ export class PdfExtractService {
     const loadingTask = pdfjsLib.getDocument({ data: uint8Array });
     const pdf = await loadingTask.promise;
 
-    const outline = await pdf.getOutline();
-    if (!outline) {
-      return [];
-    }
-
-    const bookmarks: {
-      title: string;
-      startPage: number;
-      endPage: number;
-      index: number;
-      data: string;
-      id: string;
-    }[] = [];
-
-    for (const item of outline) {
-      let dest: unknown;
-
-      if (typeof item.dest === 'string') {
-        dest = await pdf.getDestination(item.dest);
-      } else if (Array.isArray(item.dest)) {
-        dest = item.dest; // já vem resolvido
+    try {
+      const outline = await pdf.getOutline();
+      if (!outline) {
+        return [];
       }
 
-      const parts = item.title.split(' - ');
+      const bookmarks: {
+        title: string;
+        startPage: number;
+        endPage: number;
+        index: number;
+        data: string;
+        id: string;
+      }[] = [];
 
-      let id: string = '';
-      let index = 0;
-      let date: string = '';
-      let description = '';
+      for (const item of outline) {
+        let dest: unknown;
 
-      if (parts.length >= 3) {
-        // Assume que o último pedaço é o ID
-        id = parts[parts.length - 1].trim();
-        description = parts.slice(1, -1).join(' - ').trim();
-      } else if (parts.length === 2) {
-        description = parts[1].trim();
-      } else {
-        description = parts[0].trim();
-      }
+        if (typeof item.dest === 'string') {
+          dest = await pdf.getDestination(item.dest);
+        } else if (Array.isArray(item.dest)) {
+          dest = item.dest; // já vem resolvido
+        }
 
-      // Extrair índice e data do primeiro pedaço
-      const firstPart = parts[0].trim();
-      const matchWithIndex = firstPart.match(
-        /^(\d+)\.\s*(\d{2}\/\d{2}\/\d{4})$/,
-      );
-      const matchWithoutIndex = firstPart.match(/^(\d{2}\/\d{2}\/\d{4})$/);
+        const parts = item.title.split(' - ');
 
-      if (matchWithIndex) {
-        index = parseInt(matchWithIndex[1], 10);
-        date = matchWithIndex[2];
-      } else if (matchWithoutIndex) {
-        date = matchWithoutIndex[1];
-      }
-      if (dest && Array.isArray(dest) && dest.length > 0) {
-        const ref = await pdf.getPageIndex(dest[0]);
-        if (typeof ref === 'number') {
-          bookmarks.push({
-            index,
-            id,
-            title: String(description).trim(),
-            data: date,
-            startPage: ref + 1, // 1-based
-            endPage: 0, // placeholder, será calculado depois
-          });
+        let id: string = '';
+        let index = 0;
+        let date: string = '';
+        let description = '';
+
+        if (parts.length >= 3) {
+          // Assume que o último pedaço é o ID
+          id = parts[parts.length - 1].trim();
+          description = parts.slice(1, -1).join(' - ').trim();
+        } else if (parts.length === 2) {
+          description = parts[1].trim();
+        } else {
+          description = parts[0].trim();
+        }
+
+        // Extrair índice e data do primeiro pedaço
+        const firstPart = parts[0].trim();
+        const matchWithIndex = firstPart.match(
+          /^(\d+)\.\s*(\d{2}\/\d{2}\/\d{4})$/,
+        );
+        const matchWithoutIndex = firstPart.match(/^(\d{2}\/\d{2}\/\d{4})$/);
+
+        if (matchWithIndex) {
+          index = parseInt(matchWithIndex[1], 10);
+          date = matchWithIndex[2];
+        } else if (matchWithoutIndex) {
+          date = matchWithoutIndex[1];
+        }
+        if (dest && Array.isArray(dest) && dest.length > 0) {
+          const ref = await pdf.getPageIndex(dest[0]);
+          if (typeof ref === 'number') {
+            bookmarks.push({
+              index,
+              id,
+              title: String(description).trim(),
+              data: date,
+              startPage: ref + 1, // 1-based
+              endPage: 0, // placeholder, será calculado depois
+            });
+          }
         }
       }
-    }
 
-    // calcular endPage
-    const totalPages = pdf.numPages;
-    for (let i = 0; i < bookmarks.length; i++) {
-      if (i < bookmarks.length - 1) {
-        bookmarks[i].endPage = bookmarks[i + 1].startPage - 1;
-      } else {
-        bookmarks[i].endPage = totalPages;
+      // calcular endPage
+      const totalPages = pdf.numPages;
+      for (let i = 0; i < bookmarks.length; i++) {
+        if (i < bookmarks.length - 1) {
+          bookmarks[i].endPage = bookmarks[i + 1].startPage - 1;
+        } else {
+          bookmarks[i].endPage = totalPages;
+        }
       }
-    }
 
-    await pdf.destroy();
-    return bookmarks;
+      return bookmarks;
+    } finally {
+      await pdf.destroy();
+    }
   }
 }
