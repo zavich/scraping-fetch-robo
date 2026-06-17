@@ -102,6 +102,12 @@ export class ConsultarProcessoQueue {
       { numero, origem, documents, webhook, correlationId },
       {
         priority: priority ? 0 : 5,
+<<<<<<< Updated upstream
+=======
+        backoff: { type: 'fixed', delay: 5000 },
+        removeOnFail: { count: 100, age: 3 * 24 * 3600 },
+        removeOnComplete: { count: 100 },
+>>>>>>> Stashed changes
       },
     );
 
