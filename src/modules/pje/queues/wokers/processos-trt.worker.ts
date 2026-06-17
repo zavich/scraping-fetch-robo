@@ -10,20 +10,21 @@ import { LoginPoolService } from '../../services/login-pool.service';
 import { ProcessosResponse } from 'src/interfaces';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { Root } from 'src/interfaces/normalize';
+import { AwsS3Service } from 'src/services/aws-s3.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
   private readonly documentosQueues: Record<string, Queue> = {};
   constructor(
-    @Inject(LoginPoolService) // 👈 AQUI
+    @Inject(LoginPoolService)
     private readonly loginPool: LoginPoolService,
-    // @Inject(ScrapingService)
-    // private readonly scrapingService: ScrapingService,
     @Inject(FetchUrlMovimentService)
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
     @Inject(ScrapingService)
     private readonly scrapingService: ScrapingService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    @Inject(AwsS3Service)
+    private readonly awsS3Service: AwsS3Service,
 
     // ✅ injeta todas as filas TRT
     @Inject(getQueueToken('pje-documentos-trt1')) trt1: Queue,
@@ -287,13 +288,13 @@ export class GenericProcessoWorker extends WorkerHost {
             regionTRT,
           );
           if (!pdfBase64) {
-            // Falha silenciosa = autos nunca produzidos e robo-api fica
-            // aguardando indefinidamente. Lanca para o catch de documentos
-            // enviar webhook de erro e marcar job para retry.
             throw new Error(
               `fetchDocuments retornou undefined para ${numero} (TRT-${regionTRT})`,
             );
           }
+
+          // Valida que a fila existe antes de fazer o upload para evitar
+          // objetos órfãos no S3 caso a fila não seja encontrada.
           const queueName = `trt${regionTRT}`;
           const documentosQueue = this.documentosQueues[queueName];
           if (!documentosQueue) {
@@ -301,15 +302,42 @@ export class GenericProcessoWorker extends WorkerHost {
               `Fila de documentos nao encontrada para trt${regionTRT} (${numero})`,
             );
           }
-          await documentosQueue.add(
-            'consulta-processo-documento',
-            { numero, instances, pdfBase64, correlationId },
-            {
-              jobId: `${numero}:${correlationId}`,
-              attempts: 3,
-              backoff: { type: 'exponential', delay: 5000 },
-            },
+
+          // Salva o PDF no S3 como arquivo temporário para não trafegar o
+          // base64 pelo Redis (cada PDF pode ter dezenas de MB no payload do job).
+          const pdfS3Key = `temp-pdf/${numero}/${correlationId}.pdf`;
+          await this.awsS3Service.uploadS3Object(
+            process.env.AWS_S3_BUCKET_NAME as string,
+            pdfS3Key,
+            Buffer.from(pdfBase64, 'base64'),
+            'application/pdf',
           );
+
+          try {
+            await documentosQueue.add(
+              'consulta-processo-documento',
+              { numero, instances, pdfS3Key, correlationId },
+              {
+                jobId: `${numero}:${correlationId}`,
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 5000 },
+              },
+            );
+          } catch (enqueueError) {
+            // Remove o arquivo temporário do S3 para evitar objetos órfãos
+            // quando o enqueue falha após o upload já ter sido feito.
+            try {
+              await this.awsS3Service.deleteS3Object(
+                process.env.AWS_S3_BUCKET_NAME as string,
+                pdfS3Key,
+              );
+            } catch (deleteErr) {
+              this.logger.error(
+                `Falha ao limpar PDF temporário ${pdfS3Key} após erro de enqueue: ${deleteErr instanceof Error ? deleteErr.message : String(deleteErr)}`,
+              );
+            }
+            throw enqueueError;
+          }
         } catch (docError) {
           if (!docsWebhookSent) {
             const mensagem = axios.isAxiosError(docError)
