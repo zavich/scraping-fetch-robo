@@ -293,6 +293,16 @@ export class GenericProcessoWorker extends WorkerHost {
             );
           }
 
+          // Valida que a fila existe antes de fazer o upload para evitar
+          // objetos órfãos no S3 caso a fila não seja encontrada.
+          const queueName = `trt${regionTRT}`;
+          const documentosQueue = this.documentosQueues[queueName];
+          if (!documentosQueue) {
+            throw new Error(
+              `Fila de documentos nao encontrada para trt${regionTRT} (${numero})`,
+            );
+          }
+
           // Salva o PDF no S3 como arquivo temporário para não trafegar o
           // base64 pelo Redis (cada PDF pode ter dezenas de MB no payload do job).
           const pdfS3Key = `temp-pdf/${numero}/${correlationId}.pdf`;
@@ -303,22 +313,31 @@ export class GenericProcessoWorker extends WorkerHost {
             'application/pdf',
           );
 
-          const queueName = `trt${regionTRT}`;
-          const documentosQueue = this.documentosQueues[queueName];
-          if (!documentosQueue) {
-            throw new Error(
-              `Fila de documentos nao encontrada para trt${regionTRT} (${numero})`,
+          try {
+            await documentosQueue.add(
+              'consulta-processo-documento',
+              { numero, instances, pdfS3Key, correlationId },
+              {
+                jobId: `${numero}:${correlationId}`,
+                attempts: 3,
+                backoff: { type: 'exponential', delay: 5000 },
+              },
             );
+          } catch (enqueueError) {
+            // Remove o arquivo temporário do S3 para evitar objetos órfãos
+            // quando o enqueue falha após o upload já ter sido feito.
+            this.awsS3Service
+              .deleteS3Object(
+                process.env.AWS_S3_BUCKET_NAME as string,
+                pdfS3Key,
+              )
+              .catch((deleteErr) =>
+                this.logger.error(
+                  `Falha ao limpar PDF temporário ${pdfS3Key} após erro de enqueue: ${deleteErr instanceof Error ? deleteErr.message : String(deleteErr)}`,
+                ),
+              );
+            throw enqueueError;
           }
-          await documentosQueue.add(
-            'consulta-processo-documento',
-            { numero, instances, pdfS3Key, correlationId },
-            {
-              jobId: `${numero}:${correlationId}`,
-              attempts: 3,
-              backoff: { type: 'exponential', delay: 5000 },
-            },
-          );
         } catch (docError) {
           if (!docsWebhookSent) {
             const mensagem = axios.isAxiosError(docError)

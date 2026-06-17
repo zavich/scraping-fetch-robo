@@ -55,6 +55,11 @@ export class AwsS3Service {
     const response = await this.s3.send(
       new GetObjectCommand({ Bucket: bucket, Key: key }),
     );
+    if (!response.Body) {
+      throw new Error(
+        `S3 object body is empty or missing for key: ${key} in bucket: ${bucket}`,
+      );
+    }
     const chunks: Uint8Array[] = [];
     for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
       chunks.push(chunk);

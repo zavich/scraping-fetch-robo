@@ -26,7 +26,8 @@ export class GenericDocumentosWorker extends WorkerHost {
     job: Job<{
       numero: string;
       instances: ProcessosResponse[];
-      pdfS3Key: string;
+      pdfS3Key?: string;
+      pdfBase64?: string;
       correlationId?: string;
     }>,
   ) {
@@ -34,6 +35,7 @@ export class GenericDocumentosWorker extends WorkerHost {
       numero,
       instances,
       pdfS3Key,
+      pdfBase64,
       correlationId: parentCorrelationId,
     } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
@@ -77,7 +79,7 @@ export class GenericDocumentosWorker extends WorkerHost {
         );
       }
 
-      if (!pdfS3Key) {
+      if (!pdfS3Key && !pdfBase64) {
         this.logger.error(`❌ pdfS3Key ausente para ${numero}`);
         const resp = normalizeResponse(
           numero,
@@ -97,10 +99,19 @@ export class GenericDocumentosWorker extends WorkerHost {
 
       // Baixa o PDF do S3 — o payload do job contém apenas a chave, não o binário,
       // para não estourar a memória do Redis com PDFs de dezenas de MB.
-      const pdfBuffer = await this.awsS3Service.getS3Object(
-        process.env.AWS_S3_BUCKET_NAME as string,
-        pdfS3Key,
-      );
+      // Aceita pdfBase64 como fallback para jobs enfileirados antes do deploy.
+      let pdfBuffer: Buffer;
+      if (pdfS3Key) {
+        pdfBuffer = await this.awsS3Service.getS3Object(
+          process.env.AWS_S3_BUCKET_NAME as string,
+          pdfS3Key,
+        );
+      } else {
+        this.logger.warn(
+          `⚠️ Usando fallback pdfBase64 para ${numero} (job legado)`,
+        );
+        pdfBuffer = Buffer.from(pdfBase64 as string, 'base64');
+      }
 
       // Executa consulta de documentos
       const documentos = await this.processDocsService.execute(
