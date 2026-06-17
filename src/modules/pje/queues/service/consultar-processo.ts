@@ -107,6 +107,9 @@ export class ConsultarProcessoQueue {
         backoff: { type: 'fixed', delay: 5000 },
         removeOnFail: { count: 100, age: 3 * 24 * 3600 },
         removeOnComplete: { count: 100 },
+<<<<<<< Updated upstream
+>>>>>>> Stashed changes
+=======
 >>>>>>> Stashed changes
       },
     );
