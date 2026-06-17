@@ -167,7 +167,5 @@ export class PdfExtractService {
     } finally {
       await pdf.destroy();
     }
-    await pdf.destroy();
-    return bookmarks;
   }
 }
