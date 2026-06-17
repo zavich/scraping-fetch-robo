@@ -26,7 +26,7 @@ export class ProcessDocumentsFindService {
   async execute(
     numeroDoProcesso: string,
     instances: ProcessosResponse[],
-    pdfBase64: string,
+    pdfBase64: string | Buffer,
   ): Promise<ProcessosResponse[]> {
     try {
       const instancesWithGrau = instances.map((instance, i) => {
@@ -61,13 +61,15 @@ export class ProcessDocumentsFindService {
 
   async uploadDocumentosRestritos(
     processNumber: string,
-    pdfBase64: string,
+    pdfBase64: string | Buffer,
   ): Promise<Documento[]> {
     this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
     const uploadedDocuments: Documento[] = [];
     const processedDocumentIds = new Set<string>();
     try {
-      const fileBuffer = Buffer.from(pdfBase64, 'base64');
+      const fileBuffer = Buffer.isBuffer(pdfBase64)
+        ? pdfBase64
+        : Buffer.from(pdfBase64, 'base64');
 
       // tenta extrair bookmarks e processar
       try {

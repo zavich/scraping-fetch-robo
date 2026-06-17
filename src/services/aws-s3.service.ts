@@ -1,6 +1,11 @@
 // src/aws/aws-s3.service.ts
 import { Injectable } from '@nestjs/common';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -35,9 +40,7 @@ export class AwsS3Service {
     body: Buffer | Uint8Array | string,
     contentType?: string,
   ): Promise<void> {
-    const s3Client = this.s3;
-
-    await s3Client.send(
+    await this.s3.send(
       new PutObjectCommand({
         Bucket: bucket,
         Key: key,
@@ -45,6 +48,23 @@ export class AwsS3Service {
         ContentType: contentType || 'application/octet-stream',
         ServerSideEncryption: 'AES256',
       }),
+    );
+  }
+
+  async getS3Object(bucket: string, key: string): Promise<Buffer> {
+    const response = await this.s3.send(
+      new GetObjectCommand({ Bucket: bucket, Key: key }),
+    );
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of response.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  async deleteS3Object(bucket: string, key: string): Promise<void> {
+    await this.s3.send(
+      new DeleteObjectCommand({ Bucket: bucket, Key: key }),
     );
   }
 }

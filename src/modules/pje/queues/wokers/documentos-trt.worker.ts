@@ -9,6 +9,7 @@ import { LoginPoolService } from '../../services/login-pool.service';
 import { ProcessDocumentsFindService } from '../../services/process-documents-find.service';
 import { deleteByPattern } from 'src/utils/redis-delete-keys';
 import Redis from 'ioredis';
+import { AwsS3Service } from 'src/services/aws-s3.service';
 
 export class GenericDocumentosWorker extends WorkerHost {
   protected readonly logger = new Logger(GenericDocumentosWorker.name);
@@ -18,19 +19,21 @@ export class GenericDocumentosWorker extends WorkerHost {
   @Inject(LoginPoolService)
   protected readonly loginPoolService!: LoginPoolService;
   @Inject('REDIS_CLIENT') private readonly redis: Redis;
+  @Inject(AwsS3Service)
+  protected readonly awsS3Service!: AwsS3Service;
 
   async process(
     job: Job<{
       numero: string;
       instances: ProcessosResponse[];
-      pdfBase64: string | undefined;
+      pdfS3Key: string;
       correlationId?: string;
     }>,
   ) {
     const {
       numero,
       instances,
-      pdfBase64,
+      pdfS3Key,
       correlationId: parentCorrelationId,
     } = job.data;
     const webhookUrl = `${process.env.WEBHOOK_URL}/process/webhook`;
@@ -74,8 +77,8 @@ export class GenericDocumentosWorker extends WorkerHost {
         );
       }
 
-      if (!pdfBase64) {
-        this.logger.error(`❌ pdfBase64 undefined para ${numero}`);
+      if (!pdfS3Key) {
+        this.logger.error(`❌ pdfS3Key ausente para ${numero}`);
         const resp = normalizeResponse(
           numero,
           [],
@@ -89,14 +92,21 @@ export class GenericDocumentosWorker extends WorkerHost {
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         webhookAlreadySent = true;
-        throw new Error(`pdfBase64 ausente para ${numero}`);
+        throw new Error(`pdfS3Key ausente para ${numero}`);
       }
+
+      // Baixa o PDF do S3 — o payload do job contém apenas a chave, não o binário,
+      // para não estourar a memória do Redis com PDFs de dezenas de MB.
+      const pdfBuffer = await this.awsS3Service.getS3Object(
+        process.env.AWS_S3_BUCKET_NAME as string,
+        pdfS3Key,
+      );
 
       // Executa consulta de documentos
       const documentos = await this.processDocsService.execute(
         numero,
         instances,
-        pdfBase64,
+        pdfBuffer,
       );
       if (documentos.length === 0 || documentos[0].documentos.length === 0) {
         this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
@@ -156,8 +166,18 @@ export class GenericDocumentosWorker extends WorkerHost {
       const isLastAttempt = job.attemptsMade + 1 >= maxAttempts;
 
       if (completed || isLastAttempt) {
-        // Best-effort: falha na limpeza não deve marcar o job como falho
-        // nem gerar webhooks duplicados quando o processamento já concluiu
+        // Remove o arquivo temporário do S3 ao finalizar (sucesso ou última tentativa).
+        // O arquivo só é deletado na última tentativa para permitir retries.
+        if (pdfS3Key) {
+          this.awsS3Service
+            .deleteS3Object(process.env.AWS_S3_BUCKET_NAME as string, pdfS3Key)
+            .catch((err) =>
+              this.logger.error(
+                `Falha ao deletar PDF temporário ${pdfS3Key}: ${err instanceof Error ? err.message : String(err)}`,
+              ),
+            );
+        }
+
         try {
           await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
             log: (msg) => this.logger.debug(msg),
