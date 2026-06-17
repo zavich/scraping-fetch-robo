@@ -71,20 +71,7 @@ export class ProcessDocumentsFindService {
 
       // tenta extrair bookmarks e processar
       try {
-<<<<<<< Updated upstream
         const bookmarks: ExtractedBookmark[] =
-=======
-        interface Bookmark {
-          id: string;
-          index: number;
-          title: string;
-          data: string;
-          startPage: number;
-          endPage: number;
-        }
-
-        const bookmarks: Bookmark[] =
->>>>>>> Stashed changes
           await this.pdfExtractService.extractBookmarks(fileBuffer);
 
         if (!bookmarks || bookmarks.length === 0) {

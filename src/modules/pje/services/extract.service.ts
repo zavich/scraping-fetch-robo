@@ -163,17 +163,11 @@ export class PdfExtractService {
         }
       }
 
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
       return bookmarks;
     } finally {
       await pdf.destroy();
     }
-=======
-=======
->>>>>>> Stashed changes
     await pdf.destroy();
     return bookmarks;
->>>>>>> Stashed changes
   }
 }
