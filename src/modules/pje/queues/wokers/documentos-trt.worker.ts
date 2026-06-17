@@ -80,7 +80,7 @@ export class GenericDocumentosWorker extends WorkerHost {
       }
 
       if (!pdfS3Key && !pdfBase64) {
-        this.logger.error(`❌ pdfS3Key ausente para ${numero}`);
+        this.logger.error(`❌ pdfS3Key e pdfBase64 ausentes para ${numero}`);
         const resp = normalizeResponse(
           numero,
           [],
@@ -94,7 +94,7 @@ export class GenericDocumentosWorker extends WorkerHost {
         );
         await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         webhookAlreadySent = true;
-        throw new Error(`pdfS3Key ausente para ${numero}`);
+        throw new Error(`pdfS3Key e pdfBase64 ausentes para ${numero}`);
       }
 
       // Baixa o PDF do S3 — o payload do job contém apenas a chave, não o binário,

@@ -326,16 +326,16 @@ export class GenericProcessoWorker extends WorkerHost {
           } catch (enqueueError) {
             // Remove o arquivo temporário do S3 para evitar objetos órfãos
             // quando o enqueue falha após o upload já ter sido feito.
-            this.awsS3Service
-              .deleteS3Object(
+            try {
+              await this.awsS3Service.deleteS3Object(
                 process.env.AWS_S3_BUCKET_NAME as string,
                 pdfS3Key,
-              )
-              .catch((deleteErr) =>
-                this.logger.error(
-                  `Falha ao limpar PDF temporário ${pdfS3Key} após erro de enqueue: ${deleteErr instanceof Error ? deleteErr.message : String(deleteErr)}`,
-                ),
               );
+            } catch (deleteErr) {
+              this.logger.error(
+                `Falha ao limpar PDF temporário ${pdfS3Key} após erro de enqueue: ${deleteErr instanceof Error ? deleteErr.message : String(deleteErr)}`,
+              );
+            }
             throw enqueueError;
           }
         } catch (docError) {

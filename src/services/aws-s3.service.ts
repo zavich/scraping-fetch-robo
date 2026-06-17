@@ -1,4 +1,4 @@
-// src/aws/aws-s3.service.ts
+// src/services/aws-s3.service.ts
 import { Injectable } from '@nestjs/common';
 import {
   S3Client,
@@ -68,8 +68,6 @@ export class AwsS3Service {
   }
 
   async deleteS3Object(bucket: string, key: string): Promise<void> {
-    await this.s3.send(
-      new DeleteObjectCommand({ Bucket: bucket, Key: key }),
-    );
+    await this.s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
   }
 }
