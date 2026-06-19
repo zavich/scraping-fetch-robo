@@ -282,12 +282,12 @@ export class GenericProcessoWorker extends WorkerHost {
               `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
             );
           }
-          const pdfBase64 = await this.fetchUrlMovimentService.fetchDocuments(
+          const pdfBuffer = await this.fetchUrlMovimentService.fetchDocuments(
             numero,
             instances as ProcessosResponse[],
             regionTRT,
           );
-          if (!pdfBase64) {
+          if (!pdfBuffer) {
             throw new Error(
               `fetchDocuments retornou undefined para ${numero} (TRT-${regionTRT})`,
             );
@@ -304,12 +304,12 @@ export class GenericProcessoWorker extends WorkerHost {
           }
 
           // Salva o PDF no S3 como arquivo temporário para não trafegar o
-          // base64 pelo Redis (cada PDF pode ter dezenas de MB no payload do job).
+          // buffer pelo Redis (cada PDF pode ter dezenas de MB no payload do job).
           const pdfS3Key = `temp-pdf/${numero}/${correlationId}.pdf`;
           await this.awsS3Service.uploadS3Object(
             process.env.AWS_S3_BUCKET_NAME as string,
             pdfS3Key,
-            Buffer.from(pdfBase64, 'base64'),
+            pdfBuffer,
             'application/pdf',
           );
 

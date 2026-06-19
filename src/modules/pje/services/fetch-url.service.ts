@@ -30,7 +30,9 @@ export class FetchUrlMovimentService {
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
   }
-  delayMs = Math.floor(Math.random() * (15000 - 5000 + 1)) + 5000;
+  private getDelayMs(): number {
+    return Math.floor(Math.random() * 10_001) + 5_000;
+  }
   async execute(
     numeroDoProcesso: string,
     origem?: string,
@@ -307,9 +309,6 @@ export class FetchUrlMovimentService {
         },
         null,
       );
-      this.logger.debug(
-        `⏱ Delay de ${this.delayMs}ms antes de buscar documento da ${ultimaInstancia?.instance}ª instância`,
-      );
       if (!ultimaInstancia) {
         this.logger.warn(
           `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
@@ -317,17 +316,21 @@ export class FetchUrlMovimentService {
         return;
       }
 
-      await this.delay(this.delayMs);
-      const pdfBase64 = await this.fetchDocumentoService.execute(
+      const delayMs = this.getDelayMs();
+      this.logger.debug(
+        `⏱ Delay de ${delayMs}ms antes de buscar documento da ${ultimaInstancia.instance}ª instância`,
+      );
+      await this.delay(delayMs);
+      const pdfBuffer = await this.fetchDocumentoService.execute(
         ultimaInstancia.id,
         regionTRT,
         ultimaInstancia.instance,
         processNumber,
       );
-      if (!pdfBase64) {
-        throw new Error('pdfBase64 não gerado');
+      if (!pdfBuffer || pdfBuffer.length === 0) {
+        throw new Error('PDF não gerado');
       }
-      return pdfBase64;
+      return pdfBuffer;
     } catch (error) {
       this.logger.error(
         `Erro ao buscar documentos para ${processNumber}:`,

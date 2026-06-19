@@ -27,6 +27,7 @@ const ALLOWED_REDIS_QUEUES = new Set([
 ]);
 
 import { Response } from 'express';
+import { PDFDocument } from 'pdf-lib';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { RedisService } from 'src/services/redis.service';
@@ -55,9 +56,14 @@ export class PjeController {
     }
 
     try {
+      const pdfDoc = await PDFDocument.load(file.buffer);
+      const { bookmarks, totalPages } =
+        await this.extractService.extractBookmarks(file.buffer);
       const pdfBuffer = await this.extractService.extractPagesByIndex(
-        file.buffer,
+        pdfDoc,
+        totalPages,
         documentId,
+        bookmarks,
       );
 
       if (!pdfBuffer) {
@@ -91,7 +97,7 @@ export class PjeController {
     }
 
     try {
-      const bookmarks = await this.extractService.extractBookmarks(file.buffer);
+      const { bookmarks } = await this.extractService.extractBookmarks(file.buffer);
       return res.json(bookmarks);
     } catch (err) {
       this.logger.error('Erro ao extrair bookmarks:', err);

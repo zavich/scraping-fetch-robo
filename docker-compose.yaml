@@ -5,14 +5,17 @@ services:
     build: .
     shm_size: 1gb
     container_name: scraping-robo
+    mem_limit: 2g
+    memswap_limit: 2g
     environment:
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_URL=redis://redis:6379
       - PORT=8081
     env_file:
       - .env
-    command: node dist/main
+    command: ["dumb-init", "node", "--max-old-space-size=1100", "dist/main"]
     restart: always
     depends_on:
       - redis
@@ -43,6 +46,10 @@ services:
         '10',
         '--stop-writes-on-bgsave-error',
         'no',
+        '--maxmemory',
+        '512mb',
+        '--maxmemory-policy',
+        'noeviction',
       ]
     restart: always
     volumes:
