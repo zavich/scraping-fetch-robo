@@ -15,7 +15,7 @@ services:
       - PORT=8081
     env_file:
       - .env
-    command: node --max-old-space-size=1100 dist/main
+    command: ["dumb-init", "node", "--max-old-space-size=1100", "dist/main"]
     restart: always
     depends_on:
       - redis
