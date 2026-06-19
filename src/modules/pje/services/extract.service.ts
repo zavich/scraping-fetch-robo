@@ -2,18 +2,31 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PDFDocument } from 'pdf-lib';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.js';
 import { normalizeString } from 'src/utils/normalize-string';
+
+export type BookmarkItem = {
+  title: string;
+  startPage: number;
+  endPage: number;
+  index: number;
+  data: string;
+  id: string;
+};
+
 @Injectable()
 export class PdfExtractService {
   logger = new Logger(PdfExtractService.name);
 
+  /**
+   * Extrai páginas de um bookmark específico a partir de um PDFDocument já carregado.
+   * Recebe pdfDoc e pdfjsTotalPages para evitar recarregar o PDF a cada chamada
+   * (o carregamento duplicado era o principal responsável pelo OOM em jobs concorrentes).
+   */
   async extractPagesByIndex(
-    fileBuffer: Buffer,
+    pdfDoc: PDFDocument,
+    pdfjsTotalPages: number,
     documentId: string,
-    cachedBookmarks?: Awaited<ReturnType<PdfExtractService['extractBookmarks']>>,
-  ) {
-    const bookmarks = cachedBookmarks ?? await this.extractBookmarks(fileBuffer);
-
-    // Encontra o bookmark pelo id
+    bookmarks: BookmarkItem[],
+  ): Promise<Buffer | null> {
     const bookmark = bookmarks.find(
       (b) => normalizeString(b.id) === normalizeString(documentId),
     );
@@ -25,16 +38,7 @@ export class PdfExtractService {
 
     const { startPage, endPage } = bookmark;
 
-    // Carrega PDF com pdf-lib
-    const pdfDoc = await PDFDocument.load(fileBuffer);
     const pdfLibTotalPages = pdfDoc.getPageCount();
-
-    // Carrega PDF com pdfjs apenas para calcular offset
-    const pdfjsDoc = await pdfjsLib.getDocument({
-      data: new Uint8Array(fileBuffer),
-    }).promise;
-    const pdfjsTotalPages = pdfjsDoc.numPages;
-    await pdfjsDoc.destroy();
 
     // Ajuste de offset entre pdfjs e pdf-lib
     const pageOffset = pdfjsTotalPages - pdfLibTotalPages;
@@ -61,23 +65,13 @@ export class PdfExtractService {
     pages.forEach((p) => newPdf.addPage(p));
 
     const pdfBytes = await newPdf.save();
-    // this.logger.debug(
-    //   `✅ Documento "${bookmark.title}" extraído com sucesso (páginas ${startIndex + 1}-${endIndex + 1})`,
-    // );
-
     return Buffer.from(pdfBytes);
   }
 
-  async extractBookmarks(buffer: Buffer): Promise<
-    {
-      title: string;
-      startPage: number;
-      endPage: number;
-      index: number;
-      data: string;
-      id: string;
-    }[]
-  > {
+  async extractBookmarks(buffer: Buffer): Promise<{
+    bookmarks: BookmarkItem[];
+    totalPages: number;
+  }> {
     (pdfjsLib.GlobalWorkerOptions as { workerSrc: string | null }).workerSrc =
       null;
     const uint8Array = new Uint8Array(buffer);
@@ -87,17 +81,10 @@ export class PdfExtractService {
     try {
       const outline = await pdf.getOutline();
       if (!outline) {
-        return [];
+        return { bookmarks: [], totalPages: pdf.numPages };
       }
 
-      const bookmarks: {
-        title: string;
-        startPage: number;
-        endPage: number;
-        index: number;
-        data: string;
-        id: string;
-      }[] = [];
+      const bookmarks: BookmarkItem[] = [];
 
       for (const item of outline) {
         let dest: unknown;
@@ -163,7 +150,7 @@ export class PdfExtractService {
         }
       }
 
-      return bookmarks;
+      return { bookmarks, totalPages };
     } finally {
       await pdf.destroy();
     }

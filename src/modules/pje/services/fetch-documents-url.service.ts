@@ -13,11 +13,10 @@ export class FetchDocumentoService {
     regionTRT: number,
     instancia: string,
     processNumber: string,
-  ): Promise<string> {
+  ): Promise<Buffer> {
     try {
       if (!processId || !regionTRT || !instancia) {
-        this.logger.error('Parâmetros inválidos fornecidos');
-        return '';
+        throw new Error('Parâmetros inválidos fornecidos');
       }
       const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
         ? 2
@@ -107,8 +106,7 @@ export class FetchDocumentoService {
         );
         throw new Error('Invalid PDF structure.');
       }
-      const buffer = Buffer.from(response.data);
-      return buffer.toString('base64');
+      return Buffer.from(response.data);
     } catch (error) {
       this.logger.error(
         `Erro ao buscar documento para processo ${processNumber}:`,

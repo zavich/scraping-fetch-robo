@@ -1,19 +1,48 @@
 // src/modules/pje/services/process-find.service.ts
 
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import { PDFDocument } from 'pdf-lib';
 import { Documento, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
-import { PdfExtractService } from './extract.service';
-
-type ExtractedBookmark = Awaited<
-  ReturnType<PdfExtractService['extractBookmarks']>
->[number];
+import { BookmarkItem, PdfExtractService } from './extract.service';
 
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
+
+  // Limita PDFs processados simultaneamente para evitar OOM.
+  // Cada job usa ~150 MB de pico; com mem_limit=2g e ~400 MB de base, 8 slots = ~1.6 GB máximo.
+  private static readonly MAX_CONCURRENT_PDF = parseInt(
+    process.env.MAX_CONCURRENT_PDF_JOBS ?? '8',
+    10,
+  );
+  private static activeJobs = 0;
+  private static waitQueue: Array<() => void> = [];
+
+  private acquirePdfSlot(): Promise<void> {
+    if (
+      ProcessDocumentsFindService.activeJobs <
+      ProcessDocumentsFindService.MAX_CONCURRENT_PDF
+    ) {
+      ProcessDocumentsFindService.activeJobs++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+      ProcessDocumentsFindService.waitQueue.push(() => {
+        ProcessDocumentsFindService.activeJobs++;
+        resolve();
+      });
+    });
+  }
+
+  private releasePdfSlot(): void {
+    ProcessDocumentsFindService.activeJobs--;
+    const next = ProcessDocumentsFindService.waitQueue.shift();
+    if (next) next();
+  }
+
   constructor(
     private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
@@ -63,7 +92,22 @@ export class ProcessDocumentsFindService {
     processNumber: string,
     pdfBase64: string | Buffer,
   ): Promise<Documento[]> {
-    this.logger.debug(`🔒 Iniciando upload de documentos restritos...`);
+    await this.acquirePdfSlot();
+    this.logger.debug(
+      `🔒 Iniciando upload de documentos restritos... (slots ativos: ${ProcessDocumentsFindService.activeJobs}/${ProcessDocumentsFindService.MAX_CONCURRENT_PDF})`,
+    );
+    try {
+      return await this._uploadDocumentosRestritos(processNumber, pdfBase64);
+    } finally {
+      this.releasePdfSlot();
+    }
+  }
+
+  private async _uploadDocumentosRestritos(
+    processNumber: string,
+    pdfBase64: string | Buffer,
+  ): Promise<Documento[]> {
+    this.logger.debug(`🔒 Processando documentos restritos...`);
     const uploadedDocuments: Documento[] = [];
     const processedDocumentIds = new Set<string>();
     try {
@@ -73,7 +117,7 @@ export class ProcessDocumentsFindService {
 
       // tenta extrair bookmarks e processar
       try {
-        const bookmarks: ExtractedBookmark[] =
+        const { bookmarks, totalPages } =
           await this.pdfExtractService.extractBookmarks(fileBuffer);
 
         if (!bookmarks || bookmarks.length === 0) {
@@ -94,10 +138,15 @@ export class ProcessDocumentsFindService {
           return uploadedDocuments;
         }
 
-        const processarBookmark = async (bookmark: ExtractedBookmark) => {
+        // Carrega o PDFDocument uma única vez e compartilha entre todas as extrações
+        // concorrentes — evita recarregar o PDF inteiro a cada chamada de extractPagesByIndex.
+        const pdfDoc = await PDFDocument.load(fileBuffer);
+
+        const processarBookmark = async (bookmark: BookmarkItem) => {
           const extractedPdfBuffer =
             await this.pdfExtractService.extractPagesByIndex(
-              fileBuffer,
+              pdfDoc,
+              totalPages,
               bookmark.id,
               bookmarks,
             );
@@ -142,10 +191,6 @@ export class ProcessDocumentsFindService {
           const proximo = bookmarks[index + 1];
 
           if (proximo && !processedDocumentIds.has(proximo.id)) {
-            // this.logger.debug(
-            //   `📎 Pegando também o documento seguinte a "${bookmark.title}": "${proximo.title}"`,
-            // );
-
             tasks.push(async () => {
               await processarBookmark(proximo);
             });
