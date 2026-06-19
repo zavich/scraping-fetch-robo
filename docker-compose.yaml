@@ -49,7 +49,7 @@ services:
         '--maxmemory',
         '512mb',
         '--maxmemory-policy',
-        'allkeys-lru',
+        'noeviction',
       ]
     restart: always
     volumes:
