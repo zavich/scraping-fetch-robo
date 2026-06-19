@@ -14,9 +14,9 @@ export class ProcessDocumentsFindService {
 
   // Limita PDFs processados simultaneamente para evitar OOM.
   // Cada job usa ~150 MB de pico; com mem_limit=2g e ~400 MB de base, 8 slots = ~1.6 GB máximo.
-  private static readonly MAX_CONCURRENT_PDF = parseInt(
-    process.env.MAX_CONCURRENT_PDF_JOBS ?? '8',
-    10,
+  private static readonly MAX_CONCURRENT_PDF = Math.max(
+    1,
+    parseInt(process.env.MAX_CONCURRENT_PDF_JOBS ?? '8', 10) || 8,
   );
   private static activeJobs = 0;
   private static waitQueue: Array<() => void> = [];

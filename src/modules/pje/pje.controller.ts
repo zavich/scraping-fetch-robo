@@ -97,7 +97,7 @@ export class PjeController {
     }
 
     try {
-      const bookmarks = await this.extractService.extractBookmarks(file.buffer);
+      const { bookmarks } = await this.extractService.extractBookmarks(file.buffer);
       return res.json(bookmarks);
     } catch (err) {
       this.logger.error('Erro ao extrair bookmarks:', err);
