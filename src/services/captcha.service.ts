@@ -92,6 +92,11 @@ export class CaptchaService {
       }
 
       // ⏮️ FALLBACK: Usar 2Captcha
+      if (!this.API_KEY) {
+        throw new Error(
+          'API_KEY_2CAPTCHA não configurada nas variáveis de ambiente',
+        );
+      }
       this.logger.log('🔄 Utilizando 2Captcha para resolver captcha');
       const sendResponse = await firstValueFrom(
         this.httpService.post<TwoCaptchaSendResponse>(
