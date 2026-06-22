@@ -57,8 +57,11 @@ export class CaptchaService {
       }
 
       // 🔄 NOVO: Usar Lambda como backend principal (exceto TRT3)
-      const useLambda =
-        this.USE_LAMBDA && this.lambdaCaptchaService && regionTRT !== 3;
+      const useLambda = !!(
+        this.USE_LAMBDA &&
+        this.lambdaCaptchaService &&
+        regionTRT !== 3
+      );
 
       this.logger.debug(
         `CaptchaService Debug: USE_LAMBDA=${this.USE_LAMBDA}, lambdaCaptchaService=${this.lambdaCaptchaService ? 'OK' : 'null'}, regionTRT=${regionTRT}, useLambda=${useLambda}`,

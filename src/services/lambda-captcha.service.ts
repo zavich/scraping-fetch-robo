@@ -35,6 +35,12 @@ export class LambdaCaptchaService {
    * @returns Resposta com o texto extraído e score de confiança
    */
   async resolveCaptcha(imageBase64: string): Promise<LambdaCaptchaResponse> {
+    if (!this.LAMBDA_URL || !this.API_KEY) {
+      throw new Error(
+        'LAMBDA_CAPTCHA_URL e LAMBDA_CAPTCHA_API_KEY são obrigatórios quando USE_LAMBDA_CAPTCHA está habilitado',
+      );
+    }
+
     try {
       let image = imageBase64;
 
@@ -79,8 +85,11 @@ export class LambdaCaptchaService {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Erro desconhecido';
-      this.logger.error('Erro ao resolver captcha no Lambda AWS', message);
-      throw new Error(`Falha na resolução do captcha: ${message}`);
+      const stack = error instanceof Error ? error.stack : undefined;
+      this.logger.error('Erro ao resolver captcha no Lambda AWS', stack);
+      throw new Error(`Falha na resolução do captcha: ${message}`, {
+        cause: error,
+      });
     }
   }
 }

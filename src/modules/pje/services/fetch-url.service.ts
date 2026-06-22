@@ -46,7 +46,10 @@ export class FetchUrlMovimentService {
     const instances: Partial<ProcessosResponse>[] = [];
 
     try {
-      const useLambdaCaptcha = process.env.USE_LAMBDA_CAPTCHA === 'true';
+      const useLambdaCaptcha =
+        process.env.USE_LAMBDA_CAPTCHA === 'true' &&
+        !!process.env.LAMBDA_CAPTCHA_URL &&
+        !!process.env.LAMBDA_CAPTCHA_API_KEY;
       const shouldValidate2CaptchaBalance =
         !useLambdaCaptcha || regionTRT === 3;
 
