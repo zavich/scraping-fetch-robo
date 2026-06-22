@@ -461,8 +461,10 @@ export class ScrapingProcessService {
 
           if (captchaImage) {
             this.logger.log('🔍 Resolvendo o captcha...');
-            const captchaResponse =
-              await this.captchaService.resolveCaptcha(captchaImage);
+            const captchaResponse = await this.captchaService.resolveCaptcha(
+              captchaImage,
+              regionTRT,
+            );
 
             if (captchaResponse?.resposta) {
               this.logger.log('✅ Captcha resolvido com sucesso.');

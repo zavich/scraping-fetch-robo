@@ -46,9 +46,18 @@ export class FetchUrlMovimentService {
     const instances: Partial<ProcessosResponse>[] = [];
 
     try {
-      const balance = await this.captchaService.getBalance();
-      if (balance < 0.001)
-        throw new Error(`Saldo insuficiente no 2Captcha: ${balance}`);
+      const useLambdaCaptcha =
+        process.env.USE_LAMBDA_CAPTCHA === 'true' &&
+        !!process.env.LAMBDA_CAPTCHA_URL &&
+        !!process.env.LAMBDA_CAPTCHA_API_KEY;
+      const shouldValidate2CaptchaBalance =
+        !useLambdaCaptcha || regionTRT === 3;
+
+      if (shouldValidate2CaptchaBalance) {
+        const balance = await this.captchaService.getBalance();
+        if (balance < 0.001)
+          throw new Error(`Saldo insuficiente no 2Captcha: ${balance}`);
+      }
 
       const grauMax = origem === 'TST' ? 3 : 2;
       const initialGrau = origem === 'TST' ? 3 : 1;
@@ -125,7 +134,10 @@ export class FetchUrlMovimentService {
             'imagem' in processoResponse &&
             'tokenDesafio' in processoResponse
           ) {
-            const resposta = await this.fetchCaptcha(processoResponse.imagem);
+            const resposta = await this.fetchCaptcha(
+              processoResponse.imagem,
+              regionTRT,
+            );
             processoResponse = await this.fetchProcess(
               headers,
               numeroDoProcesso,
@@ -226,12 +238,15 @@ export class FetchUrlMovimentService {
     }
   }
 
-  async fetchCaptcha(imagem: string): Promise<string> {
+  async fetchCaptcha(imagem: string, regionTRT?: number): Promise<string> {
     const MAX_RETRIES = 3;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
-        const captcha = await this.captchaService.resolveCaptcha(imagem);
+        const captcha = await this.captchaService.resolveCaptcha(
+          imagem,
+          regionTRT,
+        );
 
         if (captcha?.resposta) {
           return captcha.resposta;
