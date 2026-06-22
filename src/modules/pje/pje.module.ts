@@ -11,6 +11,7 @@ import { createDynamicDocumentsWorkers } from 'src/providers/dynamic-document-wo
 import { createDynamicWorkers } from 'src/providers/dynamic-workers.provider';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
+import { LambdaCaptchaService } from 'src/services/lambda-captcha.service';
 import { PjeController } from './pje.controller';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { PdfExtractService } from './services/extract.service';
@@ -54,6 +55,7 @@ const defaultQueueOptions = {
   providers: [
     PjeLoginService,
     CaptchaService,
+    LambdaCaptchaService,
     FetchUrlMovimentService,
     ConsultarProcessoQueue,
     AwsS3Service,

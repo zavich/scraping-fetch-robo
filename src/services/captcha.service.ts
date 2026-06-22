@@ -1,6 +1,7 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
+import { LambdaCaptchaService } from './lambda-captcha.service';
 
 // Interfaces globais para tipagem
 interface CreateTaskResponse {
@@ -34,21 +35,60 @@ export interface CaptchaResult {
 export class CaptchaService {
   private readonly logger = new Logger(CaptchaService.name);
   private readonly API_KEY = process.env.API_KEY_2CAPTCHA as string;
+  private readonly USE_LAMBDA = process.env.USE_LAMBDA_CAPTCHA === 'true';
 
-  constructor(private readonly httpService: HttpService) {}
+  constructor(
+    private readonly httpService: HttpService,
+    @Optional() private readonly lambdaCaptchaService?: LambdaCaptchaService,
+  ) {}
 
   private sleep(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async resolveCaptcha(image: string): Promise<CaptchaResult> {
+  async resolveCaptcha(
+    image: string,
+    regionTRT?: number,
+  ): Promise<CaptchaResult> {
     try {
       let imageFile = image;
       if (imageFile.startsWith('data:image')) {
         imageFile = imageFile.substring(imageFile.indexOf(',') + 1);
       }
 
-      // Envia para 2captcha
+      // 🔄 NOVO: Usar Lambda como backend principal (exceto TRT3)
+      const useLambda =
+        this.USE_LAMBDA && this.lambdaCaptchaService && regionTRT !== 3;
+
+      this.logger.debug(
+        `CaptchaService Debug: USE_LAMBDA=${this.USE_LAMBDA}, lambdaCaptchaService=${this.lambdaCaptchaService ? 'OK' : 'null'}, regionTRT=${regionTRT}, useLambda=${useLambda}`,
+      );
+
+      if (useLambda) {
+        this.logger.log(
+          `📡 Usando Lambda AWS para resolver captcha (TRT${regionTRT})`,
+        );
+        try {
+          const lambdaResult =
+            await this.lambdaCaptchaService.resolveCaptcha(imageFile);
+          return {
+            resposta: lambdaResult.text,
+          };
+        } catch (error) {
+          this.logger.warn(
+            'Falha ao usar Lambda, tentando fallback 2Captcha...',
+            error,
+          );
+          // Continua com 2Captcha como fallback
+        }
+      } else {
+        this.logger.debug(
+          `TRT${regionTRT}: Pulando Lambda, usando 2Captcha direto`,
+        );
+      }
+
+      // ⏮️ FALLBACK: Usar 2Captcha
+      this.logger.log('🔄 Utilizando 2Captcha para resolver captcha');
       const sendResponse = await firstValueFrom(
         this.httpService.post<TwoCaptchaSendResponse>(
           'https://2captcha.com/in.php',
