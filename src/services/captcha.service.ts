@@ -75,9 +75,10 @@ export class CaptchaService {
             resposta: lambdaResult.text,
           };
         } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Erro desconhecido';
           this.logger.warn(
-            'Falha ao usar Lambda, tentando fallback 2Captcha...',
-            error,
+            `Falha ao usar Lambda, tentando fallback 2Captcha... ${message}`,
           );
           // Continua com 2Captcha como fallback
         }

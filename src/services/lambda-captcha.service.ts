@@ -12,17 +12,20 @@ export class LambdaCaptchaService {
   private readonly logger = new Logger(LambdaCaptchaService.name);
   private readonly LAMBDA_URL = process.env.LAMBDA_CAPTCHA_URL as string;
   private readonly API_KEY = process.env.LAMBDA_CAPTCHA_API_KEY as string;
+  private readonly USE_LAMBDA = process.env.USE_LAMBDA_CAPTCHA === 'true';
 
   constructor(private readonly httpService: HttpService) {
-    if (!this.LAMBDA_URL) {
-      this.logger.warn(
-        'LAMBDA_CAPTCHA_URL não configurada nas variáveis de ambiente',
-      );
-    }
-    if (!this.API_KEY) {
-      this.logger.warn(
-        'LAMBDA_CAPTCHA_API_KEY não configurada nas variáveis de ambiente',
-      );
+    if (this.USE_LAMBDA) {
+      if (!this.LAMBDA_URL) {
+        this.logger.warn(
+          'LAMBDA_CAPTCHA_URL não configurada nas variáveis de ambiente',
+        );
+      }
+      if (!this.API_KEY) {
+        this.logger.warn(
+          'LAMBDA_CAPTCHA_API_KEY não configurada nas variáveis de ambiente',
+        );
+      }
     }
   }
 
@@ -58,22 +61,26 @@ export class LambdaCaptchaService {
         ),
       );
 
-      if (!response.data.text || response.data.score === undefined) {
+      if (
+        !response.data ||
+        !response.data.text ||
+        response.data.score === undefined
+      ) {
         throw new Error(
           'Resposta inválida do Lambda: ausência de campos obrigatórios',
         );
       }
 
       this.logger.log(
-        `Captcha resolvido com sucesso. Texto: ${response.data.text}, Score: ${response.data.score}`,
+        `Captcha resolvido com sucesso. Score: ${response.data.score}`,
       );
 
       return response.data;
     } catch (error) {
-      this.logger.error('Erro ao resolver captcha no Lambda AWS', error);
-      throw new Error(
-        `Falha na resolução do captcha: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
-      );
+      const message =
+        error instanceof Error ? error.message : 'Erro desconhecido';
+      this.logger.error('Erro ao resolver captcha no Lambda AWS', message);
+      throw new Error(`Falha na resolução do captcha: ${message}`);
     }
   }
 }
