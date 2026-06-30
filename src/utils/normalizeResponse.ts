@@ -158,7 +158,7 @@ export function normalizeResponse(
         });
       });
 
-      partes = atualizarNomesPartes(instance.itensProcesso, partes);
+      partes = atualizarNomesPartes(instance.itensProcesso ?? [], partes);
     }
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
@@ -175,6 +175,7 @@ export function normalizeResponse(
         conteudo: string;
         id: number;
         uniqueNameDocumento?: string;
+        texto?: string;
       } = {
         data: new Intl.DateTimeFormat('pt-BR').format(new Date(item.data)),
         conteudo: partesConteudo,
@@ -184,6 +185,10 @@ export function normalizeResponse(
       // adiciona uniqueNameDocumento apenas se existir e não for string vazia
       if (item?.idUnicoDocumento != null && item.idUnicoDocumento !== '') {
         mov.uniqueNameDocumento = String(item.idUnicoDocumento);
+      }
+
+      if (item?.texto) {
+        mov.texto = item.texto;
       }
 
       return mov;

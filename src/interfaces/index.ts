@@ -13,6 +13,7 @@ export interface ItensProcesso {
   idUnicoDocumento: string;
   instancia: string; // grau de instância
   instanciaId: number; // id da instância
+  texto?: string; // texto extraído via Lambda
 }
 
 type Assunto = {

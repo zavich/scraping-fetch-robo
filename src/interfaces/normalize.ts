@@ -107,6 +107,7 @@ export interface Movimentacoes {
   data: string;
   conteudo: string;
   idUnicoDocumento?: string;
+  texto?: string;
 }
 
 export interface Audiencia {

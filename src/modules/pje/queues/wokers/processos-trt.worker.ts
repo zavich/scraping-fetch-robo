@@ -8,6 +8,7 @@ import { LoginErrorTrt } from 'src/utils/trt-validate';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
 import { ProcessosResponse } from 'src/interfaces';
+import { DocumentoExtraido } from '../../services/fetch-public-documents.service';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { Root } from 'src/interfaces/normalize';
 import { AwsS3Service } from 'src/services/aws-s3.service';
@@ -218,7 +219,40 @@ export class GenericProcessoWorker extends WorkerHost {
       }
 
       // --------------------------
-      // ✅ Resposta final
+      // 📄 Documentos públicos (best-effort — enriquece as movimentações antes do webhook)
+      // --------------------------
+      try {
+        this.logger.log(
+          `📄 [${job.queueName}] Extraindo documentos públicos para ${numero} (TRT-${regionTRT})`,
+        );
+        const publicDocs: DocumentoExtraido[] =
+          await this.fetchUrlMovimentService.fetchPublicDocuments(
+            numero,
+            instances as ProcessosResponse[],
+            regionTRT,
+          );
+
+        for (const instance of instances as ProcessosResponse[]) {
+          if (!instance.itensProcesso?.length) continue;
+          for (const item of instance.itensProcesso) {
+            const found = publicDocs.find(
+              (d) => d.idUnicoDocumento === item.idUnicoDocumento,
+            );
+            if (found) item.texto = found.texto;
+          }
+        }
+
+        this.logger.log(
+          `✅ [${job.queueName}] ${publicDocs.length} documento(s) público(s) extraído(s) para ${numero}`,
+        );
+      } catch (publicDocError) {
+        this.logger.warn(
+          `⚠️ Falha ao extrair documentos públicos para ${numero}: ${publicDocError instanceof Error ? publicDocError.message : String(publicDocError)}`,
+        );
+      }
+
+      // --------------------------
+      // ✅ Resposta final (inclui texto dos docs públicos se extraídos)
       // --------------------------
       const response = normalizeResponse(
         numero,
@@ -241,10 +275,9 @@ export class GenericProcessoWorker extends WorkerHost {
       const alreadySentMovements = await this.redis.get(movementsOkKey);
       if (!alreadySentMovements) {
         await axios.post(webhookUrl, response, { headers: webhookHeaders });
-        successWebhookSent = true; // setado antes do redis.set para evitar double-webhook se o set falhar
+        successWebhookSent = true;
         await this.redis.set(movementsOkKey, '1', 'EX', 86400);
       }
-      // Se alreadySentMovements=true (retry anterior), o webhook já foi enviado
       successWebhookSent = true;
 
       if (documents) {

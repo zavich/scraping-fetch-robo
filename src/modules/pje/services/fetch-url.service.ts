@@ -4,9 +4,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import Redis from 'ioredis';
-import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
+import { DetalheProcesso, ItensProcesso, ProcessosResponse } from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
 import { FetchDocumentoService } from './fetch-documents-url.service';
+import { DocumentoExtraido, FetchPublicDocumentsService } from './fetch-public-documents.service';
 import { userAgents } from 'src/utils/user-agents';
 
 interface AxiosLikeError {
@@ -26,6 +27,7 @@ export class FetchUrlMovimentService {
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly fetchDocumentoService: FetchDocumentoService,
+    private readonly fetchPublicDocumentsService: FetchPublicDocumentsService,
   ) {}
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
@@ -283,47 +285,50 @@ export class FetchUrlMovimentService {
     // fallback final
     return '';
   }
+  private findUltimaInstancia(
+    instances: ProcessosResponse[],
+  ): {
+    id: number;
+    instance: string;
+    itensProcesso: ItensProcesso[];
+    ultimaMovimentacao: ItensProcesso;
+  } | null {
+    const movimentsInstances = instances.map((inst, index) => {
+      if (!inst.itensProcesso?.length) return null;
+      const ultimaMovimentacao = inst.itensProcesso.reduce(
+        (maisRecente, atual) => {
+          const dataMaisRecente = new Date(maisRecente.data);
+          const dataAtual = new Date(atual.data);
+          return dataAtual > dataMaisRecente ? atual : maisRecente;
+        },
+      );
+      return {
+        id: inst.id,
+        instance: (index + 1).toString(),
+        itensProcesso: inst.itensProcesso,
+        ultimaMovimentacao,
+      };
+    });
+
+    return movimentsInstances.reduce(
+      (maisRecente, atual) => {
+        if (!maisRecente) return atual;
+        if (!atual) return maisRecente;
+        const dataMaisRecente = new Date(maisRecente.ultimaMovimentacao.data);
+        const dataAtual = new Date(atual.ultimaMovimentacao.data);
+        return dataAtual > dataMaisRecente ? atual : maisRecente;
+      },
+      null,
+    );
+  }
+
   async fetchDocuments(
     processNumber: string,
     instances: ProcessosResponse[],
     regionTRT: number,
   ) {
     try {
-      const movimentsInstances = instances.map((inst, index) => {
-        // garante que há movimentações
-        if (!inst.itensProcesso?.length) return null;
-
-        // encontra a movimentação mais recente
-        const ultimaMovimentacao = inst.itensProcesso.reduce(
-          (maisRecente, atual) => {
-            const dataMaisRecente = new Date(maisRecente.data);
-            const dataAtual = new Date(atual.data);
-            return dataAtual > dataMaisRecente ? atual : maisRecente;
-          },
-        );
-
-        return {
-          id: inst.id,
-          instance: (index + 1).toString(),
-          ultimaMovimentacao,
-        };
-      });
-      const ultimaInstancia = movimentsInstances.reduce(
-        (maisRecente, atual) => {
-          if (!maisRecente) return atual;
-          if (!atual) return maisRecente;
-
-          const dataMaisRecente = new Date(maisRecente.ultimaMovimentacao.data);
-          const dataAtual = new Date(atual.ultimaMovimentacao.data);
-
-          // se a data atual for mais recente, retorna ela
-          if (dataAtual > dataMaisRecente) return atual;
-
-          // se for igual ou menor, mantém a maisRecente
-          return maisRecente;
-        },
-        null,
-      );
+      const ultimaInstancia = this.findUltimaInstancia(instances);
       if (!ultimaInstancia) {
         this.logger.warn(
           `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
@@ -352,5 +357,34 @@ export class FetchUrlMovimentService {
         error,
       );
     }
+  }
+
+  async fetchPublicDocuments(
+    processNumber: string,
+    instances: ProcessosResponse[],
+    regionTRT: number,
+  ): Promise<DocumentoExtraido[]> {
+    const ultimaInstancia = this.findUltimaInstancia(instances);
+
+    if (!ultimaInstancia) {
+      this.logger.warn(
+        `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
+      );
+      return [];
+    }
+
+    const delayMs = this.getDelayMs();
+    this.logger.debug(
+      `⏱ Delay de ${delayMs}ms antes de buscar documentos públicos da ${ultimaInstancia.instance}ª instância`,
+    );
+    await this.delay(delayMs);
+
+    return this.fetchPublicDocumentsService.execute(
+      ultimaInstancia.id,
+      regionTRT,
+      ultimaInstancia.instance,
+      processNumber,
+      ultimaInstancia.itensProcesso,
+    );
   }
 }
