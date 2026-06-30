@@ -55,8 +55,8 @@
         { "name": "WEBHOOK_URL",         "valueFrom": "<SECRET_ARN_PREFIX>:WEBHOOK_URL::" },
         { "name": "WEBHOOK_SERVICE_KEY", "valueFrom": "<SECRET_ARN_PREFIX>:WEBHOOK_SERVICE_KEY::" },
         { "name": "REDIS_URL",           "valueFrom": "<SECRET_ARN_PREFIX>:REDIS_URL::" }
-        { "name": "USE_LAMBDA_CAPTCHA",           "valueFrom": "<SECRET_ARN_PREFIX>:USE_LAMBDA_CAPTCHA::" }
-        { "name": "LAMBDA_CAPTCHA_URL",           "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_CAPTCHA_URL::" }
+        { "name": "USE_LAMBDA_CAPTCHA",           "valueFrom": "<SECRET_ARN_PREFIX>:USE_LAMBDA_CAPTCHA::" },
+        { "name": "LAMBDA_CAPTCHA_URL",           "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_CAPTCHA_URL::" },
         { "name": "LAMBDA_CAPTCHA_API_KEY",           "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_CAPTCHA_API_KEY::" }
       ],
 
