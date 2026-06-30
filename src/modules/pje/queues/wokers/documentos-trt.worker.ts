@@ -72,7 +72,7 @@ export class GenericDocumentosWorker extends WorkerHost {
             motivoErro: 'NUMERO_INVALIDO',
           },
         );
-        // await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         webhookAlreadySent = true;
         throw new Error(
           `Número inválido para consulta de documentos: ${numero}`,
@@ -92,7 +92,7 @@ export class GenericDocumentosWorker extends WorkerHost {
             motivoErro: 'PDF_NAO_GERADO',
           },
         );
-        // await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         webhookAlreadySent = true;
         throw new Error(`pdfS3Key e pdfBase64 ausentes para ${numero}`);
       }
@@ -132,7 +132,7 @@ export class GenericDocumentosWorker extends WorkerHost {
             motivoErro: 'DOCUMENTOS_NAO_ENCONTRADOS',
           },
         );
-        // await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+        await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         webhookAlreadySent = true;
         throw new Error(`Nenhum documento encontrado para ${numero}`);
       }
@@ -141,7 +141,7 @@ export class GenericDocumentosWorker extends WorkerHost {
         autos: true,
         webhookId: `${correlationId}:autos-success`,
       });
-      // await axios.post(webhookUrl, response, { headers: webhookHeaders });
+      await axios.post(webhookUrl, response, { headers: webhookHeaders });
       webhookAlreadySent = true;
       completed = true;
     } catch (error: unknown) {
@@ -160,7 +160,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           },
         );
         try {
-          // await axios.post(webhookUrl, resp, { headers: webhookHeaders });
+          await axios.post(webhookUrl, resp, { headers: webhookHeaders });
         } catch (webhookError) {
           this.logger.error(
             `Falha crítica: erro no processamento E no envio do webhook para ${numero}:`,
