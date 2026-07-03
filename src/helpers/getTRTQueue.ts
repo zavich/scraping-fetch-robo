@@ -16,8 +16,3 @@ export const ALL_TRT_QUEUES = Array.from(
   { length: 24 },
   (_, i) => `pje-trt${i + 1}`,
 );
-
-export const ALL_TRT_DOCUMENT_QUEUES = Array.from(
-  { length: 24 },
-  (_, i) => `pje-documentos-trt${i + 1}`,
-);

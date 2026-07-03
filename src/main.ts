@@ -71,13 +71,6 @@ async function bootstrap() {
         if (queue) bullQueues.push(queue);
       } catch {}
     }
-    for (let i = 1; i <= 24; i++) {
-      const queueName = `BullQueue_pje-documentos-trt${i}`;
-      try {
-        const queue = app.get<Queue>(queueName);
-        if (queue) bullQueues.push(queue);
-      } catch {}
-    }
     // Fila TST
     try {
       const tstQueue = app.get<Queue>('BullQueue_pje-tst');

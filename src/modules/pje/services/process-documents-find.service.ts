@@ -1,51 +1,17 @@
-// src/modules/pje/services/process-find.service.ts
-
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
-import { PDFDocument } from 'pdf-lib';
-import { Documento, ProcessosResponse } from 'src/interfaces';
+import { Documento, ItensProcesso, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
-import { BookmarkItem, PdfExtractService } from './extract.service';
+import { FetchDocumentoService } from './fetch-documents-url.service';
 
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
 
-  // Limita PDFs processados simultaneamente para evitar OOM.
-  // Cada job usa ~150 MB de pico; com mem_limit=2g e ~400 MB de base, 8 slots = ~1.6 GB máximo.
-  private static readonly MAX_CONCURRENT_PDF = Math.max(
-    1,
-    parseInt(process.env.MAX_CONCURRENT_PDF_JOBS ?? '8', 10) || 8,
-  );
-  private static activeJobs = 0;
-  private static waitQueue: Array<() => void> = [];
-
-  private acquirePdfSlot(): Promise<void> {
-    if (
-      ProcessDocumentsFindService.activeJobs <
-      ProcessDocumentsFindService.MAX_CONCURRENT_PDF
-    ) {
-      ProcessDocumentsFindService.activeJobs++;
-      return Promise.resolve();
-    }
-    return new Promise((resolve) => {
-      ProcessDocumentsFindService.waitQueue.push(() => {
-        ProcessDocumentsFindService.activeJobs++;
-        resolve();
-      });
-    });
-  }
-
-  private releasePdfSlot(): void {
-    ProcessDocumentsFindService.activeJobs--;
-    const next = ProcessDocumentsFindService.waitQueue.shift();
-    if (next) next();
-  }
-
   constructor(
     private readonly awsS3Service: AwsS3Service,
-    private readonly pdfExtractService: PdfExtractService,
+    private readonly fetchDocumentoService: FetchDocumentoService,
   ) {}
 
   private getErrorMessage(error: unknown): string {
@@ -55,7 +21,7 @@ export class ProcessDocumentsFindService {
   async execute(
     numeroDoProcesso: string,
     instances: ProcessosResponse[],
-    pdfBase64: string | Buffer,
+    regionTRT: number,
   ): Promise<ProcessosResponse[]> {
     try {
       const instancesWithGrau = instances.map((instance, i) => {
@@ -67,9 +33,11 @@ export class ProcessDocumentsFindService {
         };
       });
       if (!instancesWithGrau || instancesWithGrau.length === 0) return [];
-      const documentosRestritos = await this.uploadDocumentosRestritos(
+
+      const documentosRestritos = await this.fetchDocumentosRestritos(
         numeroDoProcesso,
-        pdfBase64,
+        instances,
+        regionTRT,
       );
 
       const newInstances = instancesWithGrau.map((instance) => ({
@@ -79,153 +47,134 @@ export class ProcessDocumentsFindService {
       return newInstances;
     } catch (error: unknown) {
       const errorMessage = this.getErrorMessage(error);
-      this.logger.error(
-        `Error uploading restricted documents: ${errorMessage}`,
-      );
+      this.logger.error(`Error fetching restricted documents: ${errorMessage}`);
       throw new BadGatewayException(
-        `Error uploading restricted documents: ${errorMessage}`,
+        `Error fetching restricted documents: ${errorMessage}`,
       );
     }
   }
 
-  async uploadDocumentosRestritos(
+  private async fetchDocumentosRestritos(
     processNumber: string,
-    pdfBase64: string | Buffer,
+    instances: ProcessosResponse[],
+    regionTRT: number,
   ): Promise<Documento[]> {
-    await this.acquirePdfSlot();
-    this.logger.debug(
-      `🔒 Iniciando upload de documentos restritos... (slots ativos: ${ProcessDocumentsFindService.activeJobs}/${ProcessDocumentsFindService.MAX_CONCURRENT_PDF})`,
+    const instanceEntries = instances
+      .map((instance, i) => ({
+        id: instance.id,
+        instancia: (i + 1).toString(),
+        itensProcesso: instance.itensProcesso ?? [],
+      }))
+      .filter((entry) => entry.itensProcesso.length > 0);
+
+    if (instanceEntries.length === 0) {
+      this.logger.warn(
+        `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
+      );
+      return [];
+    }
+
+    // Busca os documentos relevantes de TODAS as instâncias (não só a
+    // última), montando um contexto de headers/tokenCaptcha por instância.
+    const perInstanceResults = await Promise.all(
+      instanceEntries.map((entry) =>
+        this.fetchDocumentosDaInstancia(
+          processNumber,
+          regionTRT,
+          entry.id,
+          entry.instancia,
+          entry.itensProcesso,
+        ),
+      ),
     );
-    try {
-      return await this._uploadDocumentosRestritos(processNumber, pdfBase64);
-    } finally {
-      this.releasePdfSlot();
-    }
-  }
 
-  private async _uploadDocumentosRestritos(
-    processNumber: string,
-    pdfBase64: string | Buffer,
-  ): Promise<Documento[]> {
-    this.logger.debug(`🔒 Processando documentos restritos...`);
-    const uploadedDocuments: Documento[] = [];
-    const processedDocumentIds = new Set<string>();
-    try {
-      const fileBuffer = Buffer.isBuffer(pdfBase64)
-        ? pdfBase64
-        : Buffer.from(pdfBase64, 'base64');
+    const uploadedDocuments = perInstanceResults.flat();
 
-      // tenta extrair bookmarks e processar
-      try {
-        const { bookmarks, totalPages } =
-          await this.pdfExtractService.extractBookmarks(fileBuffer);
-
-        if (!bookmarks || bookmarks.length === 0) {
-          this.logger.warn(
-            `⚠️ Nenhum bookmark encontrado no arquivo. Verifique o conteúdo do PDF.`,
-          );
-          return uploadedDocuments;
-        }
-
-        const bookmarksFiltrados = bookmarks.filter((b) =>
-          regexDocumentos.some((r) => r.test(normalizeString(b.title))),
-        );
-
-        if (bookmarksFiltrados.length === 0) {
-          this.logger.warn(
-            `⚠️ Nenhum bookmark relevante encontrado no arquivo`,
-          );
-          return uploadedDocuments;
-        }
-
-        // Carrega o PDFDocument uma única vez e compartilha entre todas as extrações
-        // concorrentes — evita recarregar o PDF inteiro a cada chamada de extractPagesByIndex.
-        const pdfDoc = await PDFDocument.load(fileBuffer);
-
-        const processarBookmark = async (bookmark: BookmarkItem) => {
-          const extractedPdfBuffer =
-            await this.pdfExtractService.extractPagesByIndex(
-              pdfDoc,
-              totalPages,
-              bookmark.id,
-              bookmarks,
-            );
-
-          if (!extractedPdfBuffer) {
-            this.logger.warn(
-              `⚠️ Não foi possível extrair PDF para o bookmark "${bookmark.title}" (id: ${bookmark.id})`,
-            );
-            return;
-          }
-
-          const fileKey = `${normalizeString(bookmark.title)}_${bookmark.index}_${Date.now()}_${Math.random()
-            .toString(36)
-            .slice(2, 8)}.pdf`;
-          await this.awsS3Service.uploadS3Object(
-            process.env.AWS_S3_BUCKET_NAME as string,
-            fileKey,
-            extractedPdfBuffer,
-            'application/pdf',
-          );
-          uploadedDocuments.push({
-            title: bookmark.title,
-            temp_link: fileKey,
-            uniqueName: bookmark.id,
-            date: bookmark.data ?? '',
-          });
-
-          processedDocumentIds.add(bookmark.id);
-        };
-
-        const tasks: (() => Promise<void>)[] = [];
-
-        for (const bookmark of bookmarksFiltrados) {
-          if (processedDocumentIds.has(bookmark.id)) continue;
-
-          const index = bookmarks.findIndex((b) => b.id === bookmark.id);
-
-          tasks.push(async () => {
-            await processarBookmark(bookmark);
-          });
-
-          const proximo = bookmarks[index + 1];
-
-          if (proximo && !processedDocumentIds.has(proximo.id)) {
-            tasks.push(async () => {
-              await processarBookmark(proximo);
-            });
-          }
-        }
-
-        await this.runInBatches(tasks, 4);
-      } catch (pdfError: unknown) {
-        const errorMessage = this.getErrorMessage(pdfError);
-        this.logger.error(
-          `❌ Erro ao processar PDF da instância: ${errorMessage}`,
-        );
-        throw new BadGatewayException(
-          `Erro ao processar PDF da instância: ${errorMessage}`,
-        );
-      }
-    } catch (error: unknown) {
-      const errorMessage = this.getErrorMessage(error);
-      this.logger.error(
-        `❌ Erro ao baixar PDF do processo ${processNumber}: ${errorMessage}`,
-      );
-      throw new BadGatewayException(
-        `Não foi possível baixar documentos restritos para o processo ${processNumber}: ${errorMessage}`,
+    if (uploadedDocuments.length === 0) {
+      this.logger.warn(
+        `⚠️ Nenhum documento relevante encontrado para ${processNumber}`,
       );
     }
 
     return uploadedDocuments;
   }
-  private async runInBatches(
-    tasks: (() => Promise<void>)[],
-    limit = 4,
-  ): Promise<void> {
-    for (let i = 0; i < tasks.length; i += limit) {
-      const batch = tasks.slice(i, i + limit);
-      await Promise.all(batch.map((task) => task()));
-    }
+
+  private async fetchDocumentosDaInstancia(
+    processNumber: string,
+    regionTRT: number,
+    processId: number,
+    instancia: string,
+    itensProcesso: ItensProcesso[],
+  ): Promise<Documento[]> {
+    const itensRestritos = itensProcesso.filter(
+      (item) =>
+        item.documento &&
+        regexDocumentos.some((r) => r.test(normalizeString(item.titulo))),
+    );
+
+    if (itensRestritos.length === 0) return [];
+
+    const publicos = itensRestritos.filter((item) => item.publico).length;
+    this.logger.log(
+      `📊 Instância ${instancia} (${processNumber}): ${itensRestritos.length} documento(s) relevante(s) pra buscar (${publicos} público(s), ${itensRestritos.length - publicos} restrito(s))`,
+    );
+
+    // Monta headers/cookies/tokenCaptcha uma única vez por instância e busca
+    // todos os documentos relevantes dela de uma só vez.
+    const context = await this.fetchDocumentoService.buildContext(
+      regionTRT,
+      instancia,
+      processNumber,
+    );
+
+    const results = await Promise.all(
+      itensRestritos.map(async (item) => {
+        try {
+          const { buffer, contentType } =
+            await this.fetchDocumentoService.fetchDocumento(
+              context,
+              processId,
+              item.id,
+              processNumber,
+              item.titulo,
+            );
+
+          const extension = contentType.includes('pdf') ? 'pdf' : 'html';
+          const fileKey = `${normalizeString(item.titulo)}_${item.id}_${Date.now()}_${Math.random()
+            .toString(36)
+            .slice(2, 8)}.${extension}`;
+
+          await this.awsS3Service.uploadS3Object(
+            process.env.AWS_S3_BUCKET_NAME as string,
+            fileKey,
+            buffer,
+            contentType,
+          );
+
+          const documento: Documento = {
+            title: item.titulo,
+            temp_link: fileKey,
+            uniqueName: item.idUnicoDocumento,
+            date: item.data,
+          };
+          return documento;
+        } catch (error: unknown) {
+          this.logger.error(
+            `⚠️ Falha ao buscar documento "${item.titulo}" (id=${item.id}) para ${processNumber}: ${this.getErrorMessage(error)}`,
+          );
+          return null;
+        }
+      }),
+    );
+
+    const uploaded = results.filter(
+      (documento): documento is Documento => documento !== null,
+    );
+
+    this.logger.log(
+      `✅ Instância ${instancia} (${processNumber}): ${uploaded.length}/${itensRestritos.length} documento(s) baixado(s) com sucesso`,
+    );
+
+    return uploaded;
   }
 }

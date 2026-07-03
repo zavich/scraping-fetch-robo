@@ -26,17 +26,20 @@ export class FetchPublicDocumentsService {
     instance: string,
     processNumber: string,
     itensProcesso: ItensProcesso[],
+    filter: (item: ItensProcesso) => boolean = (item) =>
+      Boolean(item.publico && item.documento && item.idUnicoDocumento),
   ): Promise<DocumentoExtraido[]> {
-    const publicDocs = itensProcesso.filter(
-      (item) => item.publico && item.documento && item.idUnicoDocumento,
-    );
+    const targetDocs = itensProcesso.filter(filter);
 
-    if (publicDocs.length === 0) {
-      this.logger.warn(
-        `⚠️ Nenhum documento público encontrado para ${processNumber}`,
-      );
+    if (targetDocs.length === 0) {
+      this.logger.warn(`⚠️ Nenhum documento encontrado para ${processNumber}`);
       return [];
     }
+
+    const publicos = targetDocs.filter((item) => item.publico).length;
+    this.logger.log(
+      `📊 Instância ${instance} (${processNumber}): ${targetDocs.length} documento(s) pra buscar (${publicos} público(s), ${targetDocs.length - publicos} restrito(s))`,
+    );
 
     const typeUrl = instance === '3' ? 'tst' : `trt${regionTRT}`;
     const awsWafToken =
@@ -64,58 +67,74 @@ export class FetchPublicDocumentsService {
       referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instance}`,
     };
 
-    const extracted: DocumentoExtraido[] = [];
+    const results = await Promise.all(
+      targetDocs.map(async (item) => {
+        try {
+          const tokenQuery = tokenCaptcha
+            ? `?tokenCaptcha=${tokenCaptcha}`
+            : '';
+          const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${item.id}${tokenQuery}`;
 
-    for (const item of publicDocs) {
-      try {
-        const tokenQuery = tokenCaptcha ? `?tokenCaptcha=${tokenCaptcha}` : '';
-        const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${item.id}${tokenQuery}`;
+          this.logger.debug(
+            `📄 GET ${url} (documento="${item.titulo}", idUnico=${item.idUnicoDocumento})`,
+          );
 
-        this.logger.debug(
-          `📄 GET ${url} (idUnico=${item.idUnicoDocumento})`,
-        );
+          const docResponse = await axios.get<ArrayBuffer>(url, {
+            headers,
+            responseType: 'arraybuffer',
+            timeout: 60000,
+          });
 
-        const docResponse = await axios.get<ArrayBuffer>(url, {
-          headers,
-          responseType: 'arraybuffer',
-          timeout: 60000,
-        });
+          const contentType =
+            (docResponse.headers['content-type'] as string) ?? '';
+          const buffer = Buffer.from(docResponse.data);
+          this.logger.debug(
+            `📦 Documento "${item.titulo}" (id=${item.id}): content-type=${contentType} size=${buffer.length}bytes`,
+          );
 
-        const contentType =
-          (docResponse.headers['content-type'] as string) ?? '';
-        const buffer = Buffer.from(docResponse.data);
-        this.logger.debug(
-          `📦 Documento ${item.id}: content-type=${contentType} size=${buffer.length}bytes`,
-        );
+          const contentB64 = buffer.toString('base64');
 
-        const contentB64 = buffer.toString('base64');
+          const texto = await this.extractTextFromLambda(
+            contentB64,
+            contentType,
+            item.idUnicoDocumento,
+            item.titulo,
+            processNumber,
+          );
 
-        const texto = await this.extractTextFromLambda(
-          contentB64,
-          contentType,
-          item.idUnicoDocumento,
-          processNumber,
-        );
-
-        extracted.push({ idUnicoDocumento: item.idUnicoDocumento, texto });
-      } catch (err) {
-        const status = axios.isAxiosError(err) ? err.response?.status : null;
-        let responseData: string | null = null;
-        if (axios.isAxiosError(err) && err.response?.data) {
-          const raw = err.response.data as Buffer | ArrayBuffer | unknown;
-          if (Buffer.isBuffer(raw)) {
-            responseData = raw.toString('utf-8');
-          } else if (raw instanceof ArrayBuffer) {
-            responseData = Buffer.from(raw).toString('utf-8');
-          } else {
-            responseData = JSON.stringify(raw);
+          const documento: DocumentoExtraido = {
+            idUnicoDocumento: item.idUnicoDocumento,
+            texto,
+          };
+          return documento;
+        } catch (err) {
+          const status = axios.isAxiosError(err) ? err.response?.status : null;
+          let responseData: string | null = null;
+          if (axios.isAxiosError(err) && err.response?.data) {
+            const raw: unknown = err.response.data;
+            if (Buffer.isBuffer(raw)) {
+              responseData = raw.toString('utf-8');
+            } else if (raw instanceof ArrayBuffer) {
+              responseData = Buffer.from(raw).toString('utf-8');
+            } else {
+              responseData = JSON.stringify(raw);
+            }
           }
+          this.logger.error(
+            `Erro ao processar documento público "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: HTTP ${status ?? 'n/a'} — ${err instanceof Error ? err.message : String(err)} | body=${responseData}`,
+          );
+          return null;
         }
-        this.logger.error(
-          `Erro ao processar documento público ${item.idUnicoDocumento} (id=${item.id}) para ${processNumber}: HTTP ${status ?? 'n/a'} — ${err instanceof Error ? err.message : String(err)} | body=${responseData}`,
-        );
-      }
-    }
+      }),
+    );
+
+    const extracted = results.filter(
+      (documento): documento is DocumentoExtraido => documento !== null,
+    );
+
+    this.logger.log(
+      `✅ Instância ${instance} (${processNumber}): ${extracted.length}/${targetDocs.length} documento(s) extraído(s) com sucesso`,
+    );
 
     return extracted;
   }
@@ -124,6 +143,7 @@ export class FetchPublicDocumentsService {
     contentB64: string,
     pjeContentType: string,
     idUnicoDocumento: string,
+    titulo: string,
     processNumber: string,
   ): Promise<string> {
     if (!this.LAMBDA_URL || !this.LAMBDA_API_KEY) {
@@ -148,7 +168,7 @@ export class FetchPublicDocumentsService {
     );
 
     this.logger.debug(
-      `🔍 Lambda response para ${idUnicoDocumento} (content_type=${lambdaContentType}): keys=${Object.keys(response.data ?? {}).join(',')}`,
+      `🔍 Lambda response para "${titulo}" (idUnico=${idUnicoDocumento}, content_type=${lambdaContentType}): keys=${Object.keys(response.data ?? {}).join(',')}`,
     );
 
     const texto =
@@ -159,7 +179,7 @@ export class FetchPublicDocumentsService {
       '';
 
     this.logger.debug(
-      `✅ Texto extraído para documento ${idUnicoDocumento} de ${processNumber} (${texto.length} chars)`,
+      `✅ Texto extraído para documento "${titulo}" (idUnico=${idUnicoDocumento}) de ${processNumber} (${texto.length} chars)`,
     );
 
     return texto;

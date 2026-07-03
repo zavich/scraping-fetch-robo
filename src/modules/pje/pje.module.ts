@@ -2,12 +2,8 @@ import { HttpModule } from '@nestjs/axios';
 
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import {
-  ALL_TRT_DOCUMENT_QUEUES,
-  ALL_TRT_QUEUES,
-} from 'src/helpers/getTRTQueue';
+import { ALL_TRT_QUEUES } from 'src/helpers/getTRTQueue';
 import { ScrapingService } from 'src/helpers/scraping.service';
-import { createDynamicDocumentsWorkers } from 'src/providers/dynamic-document-workers.provider';
 import { createDynamicWorkers } from 'src/providers/dynamic-workers.provider';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
@@ -33,7 +29,6 @@ const defaultQueueOptions = {
 @Module({
   imports: [
     HttpModule,
-    // ✅ registra filas de documentos por TRT
 
     BullModule.registerQueue(
       // fila geral
@@ -41,12 +36,6 @@ const defaultQueueOptions = {
 
       // filas de processos por TRT
       ...ALL_TRT_QUEUES.map((q) => ({
-        name: q,
-        defaultJobOptions: defaultQueueOptions,
-      })),
-
-      // filas de documentos por TRT
-      ...ALL_TRT_DOCUMENT_QUEUES.map((q) => ({
         name: q,
         defaultJobOptions: defaultQueueOptions,
       })),
@@ -68,7 +57,6 @@ const defaultQueueOptions = {
     ScrapingService,
     RedisService,
     ...createDynamicWorkers(),
-    ...createDynamicDocumentsWorkers(),
   ],
   exports: [],
 })
