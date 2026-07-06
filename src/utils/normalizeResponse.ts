@@ -183,6 +183,7 @@ export function normalizeResponse(
         data: string;
         conteudo: string;
         id: number;
+        pje_doc_id?: number;
         uniqueNameDocumento?: string;
         texto?: string;
       } = {
@@ -190,6 +191,13 @@ export function normalizeResponse(
         conteudo: partesConteudo,
         id: generateId(),
       };
+
+      // `item.id` é o id real do documento no PJe (o mesmo usado na URL de
+      // busca do documento) — só existe quando o item é de fato um
+      // documento, não uma movimentação textual comum.
+      if (item?.documento && item.id != null) {
+        mov.pje_doc_id = item.id;
+      }
 
       // adiciona uniqueNameDocumento apenas se existir e não for string vazia
       if (item?.idUnicoDocumento != null && item.idUnicoDocumento !== '') {
