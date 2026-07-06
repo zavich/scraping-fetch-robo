@@ -76,7 +76,7 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
       if (regionTRT === 3 || regionTRT === 9) {
@@ -135,7 +135,7 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -168,7 +168,7 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'SEGREDO_JUSTICA',
           },
         );
-        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -192,7 +192,7 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'PJE_ERRO',
           },
         );
-        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -234,111 +234,118 @@ export class GenericProcessoWorker extends WorkerHost {
         }
       }
 
-      // --------------------------
-      // ✅ Resposta final (inclui texto dos docs públicos se extraídos)
-      // --------------------------
-      const response = normalizeResponse(
-        numero,
-        result as ProcessosResponse[],
-        '',
-        {
-          origem,
-          webhookId: `${correlationId}:movements-success`,
-        },
-      );
-
-      this.logger.debug(
-        `RESPONSE: numero=${numero} status=${response?.resposta ?? 'n/a'}`,
-      );
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
       // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi
       // enviado numa tentativa anterior (correlationId é estável por estar no job data).
-      const movementsOkKey = `scraper:movements-ok:${correlationId}`;
-      const alreadySentMovements = await this.redis.get(movementsOkKey);
-      if (!alreadySentMovements) {
-        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
-        successWebhookSent = true;
-        await this.redis.set(movementsOkKey, '1', 'EX', 86400);
-      }
-      successWebhookSent = true;
+      const successOkKey = `scraper:movements-ok:${correlationId}`;
+      const alreadySent = await this.redis.get(successOkKey);
 
-      if (documents) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        this.logger.log(
-          `🔐 [${job.queueName}] Consulta de documentos restritos para ${numero} (TRT-${regionTRT})`,
+      const sendOnce = async (payload: Root) => {
+        if (!alreadySent) {
+          await axios.post(webhookUrl, payload, { headers: webhookHeaders });
+          await this.redis.set(successOkKey, '1', 'EX', 86400);
+        }
+        successWebhookSent = true;
+      };
+
+      if (!documents) {
+        // --------------------------
+        // ✅ Resposta final (inclui texto dos docs públicos se extraídos)
+        // --------------------------
+        const response = normalizeResponse(
+          numero,
+          result as ProcessosResponse[],
+          '',
+          {
+            origem,
+            webhookId: `${correlationId}:movements-success`,
+          },
+        );
+        await sendOnce(response);
+        return;
+      }
+
+      // Com documents:true, manda só UM webhook de sucesso ao final (em vez
+      // de um pras movimentações e outro pros documentos restritos) —
+      // cada webhook vira uma gravação completa de processo/instâncias/
+      // partes/movimentações no Parquet (SaveWebhookToAthenaService), então
+      // dois webhooks pro mesmo job duplicavam essas linhas no Athena.
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      this.logger.log(
+        `🔐 [${job.queueName}] Consulta de documentos restritos para ${numero} (TRT-${regionTRT})`,
+      );
+
+      // Busca os documentos restritos direto aqui — o login já foi feito
+      // acima pra autenticar a busca de movimentações, então não faz mais
+      // sentido delegar isso a um worker/fila separado que ia logar de novo.
+      try {
+        const documentos = await this.processDocsService.execute(
+          numero,
+          instances as ProcessosResponse[],
+          regionTRT,
         );
 
-        // Busca os documentos restritos direto aqui — o login já foi feito
-        // acima pra autenticar a busca de movimentações, então não faz mais
-        // sentido delegar isso a um worker/fila separado que ia logar de novo.
-        try {
-          const documentos = await this.processDocsService.execute(
+        if (documentos.length === 0 || documentos[0].documentos.length === 0) {
+          // Nenhum documento restrito relevante encontrado — as movimentações
+          // em si foram coletadas com sucesso, então manda só elas em vez de
+          // descartar tudo como erro.
+          this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
+          const resp = normalizeResponse(
             numero,
-            instances as ProcessosResponse[],
-            regionTRT,
+            result as ProcessosResponse[],
+            '',
+            {
+              origem,
+              webhookId: `${correlationId}:docs-empty`,
+            },
           );
-
-          if (
-            documentos.length === 0 ||
-            documentos[0].documentos.length === 0
-          ) {
-            this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
-            const resp = normalizeResponse(
-              numero,
-              [],
-              `Nenhum documento encontrado, tente novamente mais tarde.`,
-              {
-                autos: true,
-                webhookId: `${correlationId}:docs-empty`,
-                status: 'ERRO',
-                motivoErro: 'DOCUMENTOS_NAO_ENCONTRADOS',
-              },
-            );
-            await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-          } else {
-            const docsResult = documentos.slice(0, 2);
-            const docsResponse = normalizeResponse(numero, docsResult, '', {
-              autos: true,
-              webhookId: `${correlationId}:autos-success`,
-            });
-            await axios.post(webhookUrl, docsResponse, {
-              headers: webhookHeaders,
-            });
-          }
-        } catch (docError) {
-          const mensagem = axios.isAxiosError(docError)
-            ? `Erro ao buscar documentos (HTTP ${docError.response?.status ?? 'sem status'}): ${docError.message}`
-            : `Erro ao processar documentos: ${docError instanceof Error ? docError.message : String(docError)}`;
-          const resp: Root = normalizeResponse(numero, [], mensagem, {
-            status: 'ERRO',
-            motivoErro: 'PJE_ERRO',
-            webhookId: `${correlationId}:docs-error`,
+          await sendOnce(resp);
+        } else {
+          const docsResult = documentos.slice(0, 2);
+          const docsResponse = normalizeResponse(numero, docsResult, '', {
+            autos: true,
             origem,
+            webhookId: `${correlationId}:autos-success`,
           });
-          await axios
-            .post(webhookUrl, resp, { headers: webhookHeaders })
-            .catch((webhookErr) => {
-              this.logger.error(
-                `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
-              );
-            });
-          throw docError instanceof Error
-            ? docError
-            : new Error(String(docError));
-        } finally {
-          try {
-            await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
-              log: (msg) => this.logger.debug(msg),
-            });
-            await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
-              log: (msg) => this.logger.debug(msg),
-            });
-          } catch (cleanupError) {
-            this.logger.error(
-              `Falha na limpeza de tokens para ${numero}: ${cleanupError instanceof Error ? cleanupError.stack : String(cleanupError)}`,
-            );
-          }
+          await sendOnce(docsResponse);
+        }
+      } catch (docError) {
+        // Falha ao buscar os documentos restritos, mas as movimentações já
+        // foram coletadas com sucesso — manda o que temos em vez de perder
+        // os dados de movimentação por causa de uma falha só nos documentos.
+        this.logger.warn(
+          `⚠️ Falha ao buscar documentos restritos para ${numero}, enviando webhook só com movimentações: ${docError instanceof Error ? docError.message : String(docError)}`,
+        );
+        const fallbackResponse = normalizeResponse(
+          numero,
+          result as ProcessosResponse[],
+          '',
+          {
+            origem,
+            webhookId: `${correlationId}:docs-error`,
+          },
+        );
+        await sendOnce(fallbackResponse).catch((webhookErr) => {
+          this.logger.error(
+            `Falha ao enviar webhook de fallback (movimentações) para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
+          );
+        });
+        throw docError instanceof Error
+          ? docError
+          : new Error(String(docError));
+      } finally {
+        try {
+          await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+          await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+        } catch (cleanupError) {
+          this.logger.error(
+            `Falha na limpeza de tokens para ${numero}: ${cleanupError instanceof Error ? cleanupError.stack : String(cleanupError)}`,
+          );
         }
       }
     } catch (error) {
@@ -360,7 +367,7 @@ export class GenericProcessoWorker extends WorkerHost {
       });
 
       try {
-        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await axios.post(webhookUrl, response, { headers: webhookHeaders });
       } catch (webhookError) {
         this.logger.error(
           `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,
