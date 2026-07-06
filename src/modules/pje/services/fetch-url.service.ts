@@ -238,7 +238,12 @@ export class FetchUrlMovimentService {
             );
           }
 
-          instances.push(processoResponse);
+          // Carimba o grau real (o `i` do loop) na resposta — o JSON do PJe
+          // não vem com esse campo, e sem ele quem consome `instances` não
+          // tem como saber a que grau cada elemento pertence quando alguma
+          // instância é pulada (ex.: Ação Rescisória, que não tem 1º grau) e
+          // a posição no array deixa de corresponder ao grau real.
+          instances.push({ ...processoResponse, instance: i.toString() });
         } catch (err: unknown) {
           if (i === 1) {
             this.logger.error(

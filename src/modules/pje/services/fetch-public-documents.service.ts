@@ -3,6 +3,7 @@ import axios from 'axios';
 import Redis from 'ioredis';
 import { ItensProcesso } from 'src/interfaces';
 import { userAgents } from 'src/utils/user-agents';
+import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
 
 export interface DocumentoExtraido {
   idUnicoDocumento: string;
@@ -13,12 +14,10 @@ export interface DocumentoExtraido {
 export class FetchPublicDocumentsService {
   private readonly logger = new Logger(FetchPublicDocumentsService.name);
 
-  private readonly LAMBDA_URL =
-    process.env.LAMBDA_DOCUMENT_EXTRACTOR_URL as string;
-  private readonly LAMBDA_API_KEY =
-    process.env.LAMBDA_DOCUMENT_EXTRACTOR_API_KEY as string;
-
-  constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
+  constructor(
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    private readonly lambdaExtractorService: LambdaDocumentExtractorService,
+  ) {}
 
   async execute(
     processId: number,
@@ -92,14 +91,14 @@ export class FetchPublicDocumentsService {
             `📦 Documento "${item.titulo}" (id=${item.id}): content-type=${contentType} size=${buffer.length}bytes`,
           );
 
-          const contentB64 = buffer.toString('base64');
-
-          const texto = await this.extractTextFromLambda(
-            contentB64,
+          const texto = await this.lambdaExtractorService.extractText(
+            buffer,
             contentType,
-            item.idUnicoDocumento,
-            item.titulo,
-            processNumber,
+            {
+              titulo: item.titulo,
+              idUnicoDocumento: item.idUnicoDocumento,
+              processNumber,
+            },
           );
 
           const documento: DocumentoExtraido = {
@@ -137,51 +136,5 @@ export class FetchPublicDocumentsService {
     );
 
     return extracted;
-  }
-
-  private async extractTextFromLambda(
-    contentB64: string,
-    pjeContentType: string,
-    idUnicoDocumento: string,
-    titulo: string,
-    processNumber: string,
-  ): Promise<string> {
-    if (!this.LAMBDA_URL || !this.LAMBDA_API_KEY) {
-      throw new Error(
-        'LAMBDA_DOCUMENT_EXTRACTOR_URL e LAMBDA_DOCUMENT_EXTRACTOR_API_KEY são obrigatórios',
-      );
-    }
-
-    const lambdaContentType = pjeContentType.includes('pdf') ? 'pdf' : 'html';
-
-    const response = await axios.post<Record<string, unknown>>(
-      this.LAMBDA_URL,
-      {
-        api_key: this.LAMBDA_API_KEY,
-        content_type: lambdaContentType,
-        content_b64: contentB64,
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 60000,
-      },
-    );
-
-    this.logger.debug(
-      `🔍 Lambda response para "${titulo}" (idUnico=${idUnicoDocumento}, content_type=${lambdaContentType}): keys=${Object.keys(response.data ?? {}).join(',')}`,
-    );
-
-    const texto =
-      (response.data?.texto as string) ??
-      (response.data?.text as string) ??
-      (response.data?.result as string) ??
-      (response.data?.content as string) ??
-      '';
-
-    this.logger.debug(
-      `✅ Texto extraído para documento "${titulo}" (idUnico=${idUnicoDocumento}) de ${processNumber} (${texto.length} chars)`,
-    );
-
-    return texto;
   }
 }

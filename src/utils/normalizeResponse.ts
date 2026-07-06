@@ -101,8 +101,17 @@ export function normalizeResponse(
     return isBetterNameCandidate(baseTrim, fromMap) ? fromMap : baseTrim;
   }
 
+  // Rótulo por grau real (`instance.instance`, carimbado em
+  // FetchUrlMovimentService.execute), não pela posição no array — quando uma
+  // instância é pulada (ex.: Ação Rescisória sem 1º grau), o índice deixa de
+  // corresponder ao grau real e mandava "PRIMEIRO_GRAU" pra uma 2ª instância.
+  const GRAU_POR_INSTANCIA: Record<string, string> = {
+    '1': 'PRIMEIRO_GRAU',
+    '2': 'SEGUNDO_GRAU',
+    '3': 'TERCEIRO_GRAU',
+  };
+
   const instancias = body.map((instance, index) => {
-    const grauInstanciaMap = ['PRIMEIRO_GRAU', 'SEGUNDO_GRAU'];
     const arquivado = instance?.itensProcesso?.some((item) =>
       item.titulo.match(
         /\bArquivados\s+os\s+autos\s+definitivamente\b[.!]?\s*$/i,
@@ -198,7 +207,7 @@ export function normalizeResponse(
       id: instance.id,
       assunto: instance.assuntos,
       sistema: 'PJE',
-      instancia: grauInstanciaMap[index],
+      instancia: GRAU_POR_INSTANCIA[instance.instance] ?? undefined,
       segredo: instance.segredoJustica,
       numero: null,
       classe: instance.classe,

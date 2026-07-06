@@ -14,6 +14,7 @@ import { PdfExtractService } from './services/extract.service';
 import { FetchDocumentoService } from './services/fetch-documents-url.service';
 import { FetchPublicDocumentsService } from './services/fetch-public-documents.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
+import { LambdaDocumentExtractorService } from './services/lambda-document-extractor.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
@@ -54,6 +55,7 @@ const defaultQueueOptions = {
     LoginPoolService,
     ProcessDocumentsFindService,
     FetchDocumentoService,
+    LambdaDocumentExtractorService,
     ScrapingService,
     RedisService,
     ...createDynamicWorkers(),

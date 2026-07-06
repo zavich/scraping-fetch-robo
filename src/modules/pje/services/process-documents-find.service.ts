@@ -4,6 +4,7 @@ import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
 import { FetchDocumentoService } from './fetch-documents-url.service';
+import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
 
 @Injectable()
 export class ProcessDocumentsFindService {
@@ -12,6 +13,7 @@ export class ProcessDocumentsFindService {
   constructor(
     private readonly awsS3Service: AwsS3Service,
     private readonly fetchDocumentoService: FetchDocumentoService,
+    private readonly lambdaExtractorService: LambdaDocumentExtractorService,
   ) {}
 
   private getErrorMessage(error: unknown): string {
@@ -24,14 +26,10 @@ export class ProcessDocumentsFindService {
     regionTRT: number,
   ): Promise<ProcessosResponse[]> {
     try {
-      const instancesWithGrau = instances.map((instance, i) => {
-        const instanceNumber = i + 1;
-        return {
-          ...instance,
-          grau: instanceNumber === 1 ? 'PRIMEIRO_GRAU' : 'SEGUNDO_GRAU',
-          instance: instanceNumber.toString(),
-        };
-      });
+      const instancesWithGrau = instances.map((instance) => ({
+        ...instance,
+        grau: instance.instance === '1' ? 'PRIMEIRO_GRAU' : 'SEGUNDO_GRAU',
+      }));
       if (!instancesWithGrau || instancesWithGrau.length === 0) return [];
 
       const documentosRestritos = await this.fetchDocumentosRestritos(
@@ -59,10 +57,15 @@ export class ProcessDocumentsFindService {
     instances: ProcessosResponse[],
     regionTRT: number,
   ): Promise<Documento[]> {
+    // `instancia` vem do campo carimbado em `FetchUrlMovimentService.execute`
+    // (o grau real da consulta), não da posição no array — quando uma
+    // instância é pulada (ex.: Ação Rescisória sem 1º grau), a posição não
+    // corresponde mais ao grau real, e usar `(i + 1)` aqui mandava o
+    // tokenCaptcha/x-grau-instancia errado pro PJe (que rejeita o request).
     const instanceEntries = instances
-      .map((instance, i) => ({
+      .map((instance) => ({
         id: instance.id,
-        instancia: (i + 1).toString(),
+        instancia: instance.instance,
         itensProcesso: instance.itensProcesso ?? [],
       }))
       .filter((entry) => entry.itensProcesso.length > 0);
@@ -144,12 +147,32 @@ export class ProcessDocumentsFindService {
             .toString(36)
             .slice(2, 8)}.${extension}`;
 
-          await this.awsS3Service.uploadS3Object(
-            process.env.AWS_S3_BUCKET_NAME as string,
-            fileKey,
-            buffer,
-            contentType,
-          );
+          // Reaproveita o buffer já baixado pro fetch do S3 — evita buscar o
+          // mesmo documento duas vezes só pra extrair o texto via Lambda.
+          const [texto] = await Promise.all([
+            this.lambdaExtractorService
+              .extractText(buffer, contentType, {
+                titulo: item.titulo,
+                idUnicoDocumento: item.idUnicoDocumento,
+                processNumber,
+              })
+              .catch((extractError: unknown) => {
+                this.logger.warn(
+                  `⚠️ Falha ao extrair texto do documento "${item.titulo}" (id=${item.id}) para ${processNumber}: ${this.getErrorMessage(extractError)}`,
+                );
+                return undefined;
+              }),
+            this.awsS3Service.uploadS3Object(
+              process.env.AWS_S3_BUCKET_NAME as string,
+              fileKey,
+              buffer,
+              contentType,
+            ),
+          ]);
+
+          if (texto) {
+            item.texto = texto;
+          }
 
           const documento: Documento = {
             title: item.titulo,

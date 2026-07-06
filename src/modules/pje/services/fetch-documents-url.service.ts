@@ -136,6 +136,19 @@ export class FetchDocumentoService {
       this.logger.debug(
         `📦 Documento "${titulo}" (id=${documentId}): content-type=${contentType} size=${buffer.length}bytes`,
       );
+
+      // O PJe responde 200 mesmo quando rejeita o tokenCaptcha (ex.: token de
+      // uma instância usado em outra) — devolve um JSON de erro pequeno em vez
+      // do PDF/HTML real. Sem essa checagem isso subia pro S3 como se fosse o
+      // documento de verdade.
+      const isDocumentoValido =
+        /pdf|html/.test(contentType) && buffer.length > 1024;
+      if (!isDocumentoValido) {
+        throw new Error(
+          `Resposta inválida do PJe para o documento (content-type=${contentType}, size=${buffer.length}bytes) — provável tokenCaptcha rejeitado`,
+        );
+      }
+
       return { buffer, contentType };
     } catch (error) {
       const status = axios.isAxiosError(error) ? error.response?.status : null;
