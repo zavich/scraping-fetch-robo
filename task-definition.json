@@ -35,26 +35,100 @@
         }
       ],
       "secrets": [
-        { "name": "API_KEY",             "valueFrom": "<SECRET_ARN_PREFIX>:API_KEY::" },
-        { "name": "API_KEY_2CAPTCHA",    "valueFrom": "<SECRET_ARN_PREFIX>:API_KEY_2CAPTCHA::" },
-        { "name": "SCRAPER_API_KEY",     "valueFrom": "<SECRET_ARN_PREFIX>:SCRAPER_API_KEY::" },
-        { "name": "PJE_USER_FIRST",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_FIRST::" },
-        { "name": "PJE_PASS_FIRST",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FIRST::" },
-        { "name": "PJE_USER_SECOND",     "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_SECOND::" },
-        { "name": "PJE_PASS_SECOND",     "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_SECOND::" },
-        { "name": "PJE_USER_THIRD",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_THIRD::" },
-        { "name": "PJE_PASS_THIRD",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_THIRD::" },
-        { "name": "PJE_USER_FOURTH",     "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_FOURTH::" },
-        { "name": "PJE_PASS_FOURTH",     "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FOURTH::" },
-        { "name": "PJE_USER_FIFTH",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_FIFTH::" },
-        { "name": "PJE_PASS_FIFTH",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FIFTH::" },
-        { "name": "PJE_USER_SIXTH",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_SIXTH::" },
-        { "name": "PJE_PASS_SIXTH",      "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_SIXTH::" },
-        { "name": "AWS_S3_REGION",       "valueFrom": "<SECRET_ARN_PREFIX>:AWS_S3_REGION::" },
-        { "name": "AWS_S3_BUCKET_NAME",  "valueFrom": "<SECRET_ARN_PREFIX>:AWS_S3_BUCKET_NAME::" },
-        { "name": "WEBHOOK_URL",         "valueFrom": "<SECRET_ARN_PREFIX>:WEBHOOK_URL::" },
-        { "name": "WEBHOOK_SERVICE_KEY", "valueFrom": "<SECRET_ARN_PREFIX>:WEBHOOK_SERVICE_KEY::" },
-        { "name": "REDIS_URL",           "valueFrom": "<SECRET_ARN_PREFIX>:REDIS_URL::" }
+        { "name": "API_KEY", "valueFrom": "<SECRET_ARN_PREFIX>:API_KEY::" },
+        {
+          "name": "API_KEY_2CAPTCHA",
+          "valueFrom": "<SECRET_ARN_PREFIX>:API_KEY_2CAPTCHA::"
+        },
+        {
+          "name": "SCRAPER_API_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:SCRAPER_API_KEY::"
+        },
+        {
+          "name": "PJE_USER_FIRST",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_FIRST::"
+        },
+        {
+          "name": "PJE_PASS_FIRST",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FIRST::"
+        },
+        {
+          "name": "PJE_USER_SECOND",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_SECOND::"
+        },
+        {
+          "name": "PJE_PASS_SECOND",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_SECOND::"
+        },
+        {
+          "name": "PJE_USER_THIRD",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_THIRD::"
+        },
+        {
+          "name": "PJE_PASS_THIRD",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_THIRD::"
+        },
+        {
+          "name": "PJE_USER_FOURTH",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_FOURTH::"
+        },
+        {
+          "name": "PJE_PASS_FOURTH",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FOURTH::"
+        },
+        {
+          "name": "PJE_USER_FIFTH",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_FIFTH::"
+        },
+        {
+          "name": "PJE_PASS_FIFTH",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FIFTH::"
+        },
+        {
+          "name": "PJE_USER_SIXTH",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_SIXTH::"
+        },
+        {
+          "name": "PJE_PASS_SIXTH",
+          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_SIXTH::"
+        },
+        {
+          "name": "AWS_S3_REGION",
+          "valueFrom": "<SECRET_ARN_PREFIX>:AWS_S3_REGION::"
+        },
+        {
+          "name": "AWS_S3_BUCKET_NAME",
+          "valueFrom": "<SECRET_ARN_PREFIX>:AWS_S3_BUCKET_NAME::"
+        },
+        {
+          "name": "WEBHOOK_URL",
+          "valueFrom": "<SECRET_ARN_PREFIX>:WEBHOOK_URL::"
+        },
+        {
+          "name": "WEBHOOK_SERVICE_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:WEBHOOK_SERVICE_KEY::"
+        },
+        { "name": "REDIS_URL", "valueFrom": "<SECRET_ARN_PREFIX>:REDIS_URL::" },
+        {
+          "name": "USE_LAMBDA_CAPTCHA",
+          "valueFrom": "<SECRET_ARN_PREFIX>:USE_LAMBDA_CAPTCHA::"
+        },
+        {
+          "name": "LAMBDA_CAPTCHA_URL",
+          "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_CAPTCHA_URL::"
+        },
+        {
+          "name": "LAMBDA_CAPTCHA_API_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_CAPTCHA_API_KEY::"
+        },
+        {
+          "name": "LAMBDA_DOCUMENT_EXTRACTOR_URL",
+          "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_DOCUMENT_EXTRACTOR_URL::"
+        },
+        {
+          "name": "LAMBDA_DOCUMENT_EXTRACTOR_API_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_DOCUMENT_EXTRACTOR_API_KEY::"
+        }
       ],
 
       "logConfiguration": {
