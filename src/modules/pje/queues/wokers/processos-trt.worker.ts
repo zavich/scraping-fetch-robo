@@ -119,7 +119,10 @@ export class GenericProcessoWorker extends WorkerHost {
         sessionCookies,
       );
 
-      const result = instances.slice(0, 2);
+      // Sem cap aqui — processo pode ter até 3 instâncias (1º grau, 2º grau
+      // e TST). Um `.slice(0, 2)` de antes do suporte a TST descartava a 3ª
+      // instância do webhook mesmo quando ela era buscada com sucesso.
+      const result = instances;
 
       if (!instances || instances.length === 0) {
         this.logger.warn(
@@ -302,7 +305,7 @@ export class GenericProcessoWorker extends WorkerHost {
           );
           await sendOnce(resp);
         } else {
-          const docsResult = documentos.slice(0, 2);
+          const docsResult = documentos;
           const docsResponse = normalizeResponse(numero, docsResult, '', {
             autos: true,
             origem,

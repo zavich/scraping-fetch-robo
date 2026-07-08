@@ -10,6 +10,27 @@ export interface DocumentoRequestContext {
   headers: Record<string, string>;
 }
 
+// Erro pra quando o PJe responde 200 com um conteúdo que genuinamente não é
+// o documento e a causa não é clara (provável tokenCaptcha rejeitado).
+// Diferenciado de erros de rede/parâmetro pra quem chama poder decidir
+// renovar o token e tentar de novo, em vez de desistir direto.
+export class InvalidPjeDocumentResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidPjeDocumentResponseError';
+  }
+}
+
+// Erro pra quando o PJe diz explicitamente, num JSON de erro de verdade, que
+// aquele ID de documento não existe naquele processo — não tem token que
+// resolva isso, renovar captcha e tentar de novo é desperdício.
+export class DocumentoNaoEncontradoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DocumentoNaoEncontradoError';
+  }
+}
+
 @Injectable()
 export class FetchDocumentoService {
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
@@ -102,12 +123,17 @@ export class FetchDocumentoService {
     return { typeUrl, tokenCaptcha: tokenCaptcha || '', headers };
   }
 
+  private async delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async fetchDocumento(
     context: DocumentoRequestContext,
     processId: number,
     documentId: number,
     processNumber: string,
     titulo: string,
+    tentativa = 1,
   ): Promise<{ buffer: Buffer; contentType: string }> {
     try {
       if (!processId || !documentId) {
@@ -130,27 +156,78 @@ export class FetchDocumentoService {
         );
         throw new Error('Invalid document structure.');
       }
-      const contentType =
+      const contentTypeHeader =
         (response.headers['content-type'] as string) ?? 'application/pdf';
       const buffer = Buffer.from(response.data);
       this.logger.debug(
-        `📦 Documento "${titulo}" (id=${documentId}): content-type=${contentType} size=${buffer.length}bytes`,
+        `📦 Documento "${titulo}" (id=${documentId}): content-type=${contentTypeHeader} size=${buffer.length}bytes`,
       );
 
-      // O PJe responde 200 mesmo quando rejeita o tokenCaptcha (ex.: token de
-      // uma instância usado em outra) — devolve um JSON de erro pequeno em vez
-      // do PDF/HTML real. Sem essa checagem isso subia pro S3 como se fosse o
-      // documento de verdade.
-      const isDocumentoValido =
-        /pdf|html/.test(contentType) && buffer.length > 1024;
+      // O PJe às vezes manda o documento de verdade (HTML com o conteúdo
+      // real) com o header `content-type: application/json` errado — sem
+      // olhar o corpo, esses documentos válidos eram rejeitados. `%PDF`/`<`
+      // no início do buffer é bem mais confiável que o header nesse caso.
+      const inicioBuffer = buffer.toString('utf-8', 0, 50).trimStart();
+      const pareceHtml = inicioBuffer.startsWith('<');
+      const parecePdf = buffer.subarray(0, 4).toString('latin1') === '%PDF';
+      const contentTypeReal = /pdf|html/.test(contentTypeHeader)
+        ? contentTypeHeader
+        : parecePdf
+          ? 'application/pdf'
+          : pareceHtml
+            ? 'text/html'
+            : contentTypeHeader;
+
+      // Documentos reais podem ser bem curtos (ex.: uma petição de juntada
+      // de uma linha só, ~100 bytes) — um piso mínimo de tamanho rejeitava
+      // esses documentos válidos. Quem decide validade agora é só o
+      // sniffing de conteúdo acima (contentTypeReal), e a checagem de JSON
+      // de erro abaixo, não o tamanho do buffer.
+      const isDocumentoValido = /pdf|html/.test(contentTypeReal);
       if (!isDocumentoValido) {
-        throw new Error(
-          `Resposta inválida do PJe para o documento (content-type=${contentType}, size=${buffer.length}bytes) — provável tokenCaptcha rejeitado`,
+        // Loga o corpo aqui mesmo — o catch genérico logo abaixo só extrai
+        // `body` de erros do axios, e esse é um Error comum, então sem isso
+        // o conteúdo real da rejeição do PJe se perdia (log só mostrava
+        // "body=null", impossível saber o motivo de verdade).
+        const corpoResposta = buffer.toString('utf-8').slice(0, 2000);
+        this.logger.error(
+          `Resposta inválida do PJe pro documento "${titulo}" (id=${documentId}, processo=${processNumber}): content-type=${contentTypeHeader} size=${buffer.length}bytes | body=${corpoResposta}`,
+        );
+
+        // JSON de erro de verdade dizendo que o documento não existe — não é
+        // problema de token, renovar captcha não resolve.
+        try {
+          const parsed = JSON.parse(buffer.toString('utf-8')) as {
+            mensagemErro?: string;
+          };
+          if (parsed?.mensagemErro) {
+            throw new DocumentoNaoEncontradoError(parsed.mensagemErro);
+          }
+        } catch (parseError) {
+          if (parseError instanceof DocumentoNaoEncontradoError) {
+            throw parseError;
+          }
+          // não era JSON de verdade — segue como InvalidPjeDocumentResponseError
+        }
+
+        throw new InvalidPjeDocumentResponseError(
+          `Resposta inválida do PJe para o documento (content-type=${contentTypeHeader}, size=${buffer.length}bytes)`,
         );
       }
 
-      return { buffer, contentType };
+      return { buffer, contentType: contentTypeReal };
     } catch (error) {
+      if (
+        error instanceof InvalidPjeDocumentResponseError ||
+        error instanceof DocumentoNaoEncontradoError
+      ) {
+        // Já logado com o corpo da resposta acima — relança como está, sem
+        // embrulhar, pra quem chamou poder identificar esse caso específico
+        // (`instanceof`) e decidir se vale a pena renovar o tokenCaptcha e
+        // tentar de novo, ou desistir direto (documento não encontrado).
+        throw error;
+      }
+
       const status = axios.isAxiosError(error) ? error.response?.status : null;
       let responseData: string | null = null;
       if (axios.isAxiosError(error) && error.response?.data) {
@@ -166,6 +243,40 @@ export class FetchDocumentoService {
       this.logger.error(
         `Erro ao buscar documento "${titulo}" (id=${documentId}) para processo ${processNumber}: HTTP ${status ?? 'n/a'} — ${error instanceof Error ? error.message : String(error)} | body=${responseData}`,
       );
+
+      // 5xx do PJe (ex.: ARQ-509 "Erro inesperado na consulta ao banco de
+      // dados") costuma ser sobrecarga/contenção transitória no backend
+      // deles, e 429 é bloqueio explícito por excesso de requisições — os
+      // dois valem retry com espera, diferente de 404/tokenCaptcha inválido,
+      // que não se resolvem tentando de novo. 429 espera mais (é bloqueio de
+      // taxa, não só um hiccup pontual) e respeita o header `retry-after`
+      // quando o PJe manda um.
+      const isRateLimited = status === 429;
+      const isServerError = !!status && status >= 500;
+      const MAX_TENTATIVAS = 3;
+      if ((isRateLimited || isServerError) && tentativa < MAX_TENTATIVAS) {
+        const retryAfterHeader = axios.isAxiosError(error)
+          ? error.response?.headers?.['retry-after']
+          : undefined;
+        const retryAfterMs = retryAfterHeader
+          ? Number(retryAfterHeader) * 1000
+          : undefined;
+        const esperaMs =
+          retryAfterMs || (isRateLimited ? 5000 : 2000) * tentativa;
+        this.logger.warn(
+          `🔄 HTTP ${status} do PJe pro documento "${titulo}" (id=${documentId}) — tentativa ${tentativa}/${MAX_TENTATIVAS}, retry em ${esperaMs}ms`,
+        );
+        await this.delay(esperaMs);
+        return this.fetchDocumento(
+          context,
+          processId,
+          documentId,
+          processNumber,
+          titulo,
+          tentativa + 1,
+        );
+      }
+
       throw new Error('Erro ao executar DocumentoService');
     }
   }

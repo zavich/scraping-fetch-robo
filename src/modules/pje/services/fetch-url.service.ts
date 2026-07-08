@@ -15,8 +15,6 @@ import {
   FetchPublicDocumentsService,
 } from './fetch-public-documents.service';
 import { userAgents } from 'src/utils/user-agents';
-import { normalizeString } from 'src/utils/normalize-string';
-import { regexDocumentos } from 'src/utils/regex-documents';
 import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
 
 interface AxiosLikeError {
@@ -82,6 +80,12 @@ export class FetchUrlMovimentService {
       const initialGrau = 1;
       for (let i = initialGrau; i <= grauMax; i++) {
         try {
+          // A 3ª instância é o TST — um domínio totalmente à parte do TRT de
+          // origem, não "mais um grau" dentro do mesmo `pje.trt{regionTRT}`.
+          // Usar o domínio do TRT pra consultar dadosbasicos da instância 3
+          // fazia o PJE devolver vazio/sem id, e a instância era pulada.
+          const typeUrl = i === 3 ? 'tst' : `trt${regionTRT}`;
+
           const tokenCaptcha = (await this.redis.get(
             `pje:token:captcha:${numeroDoProcesso}:${i}`,
           )) as string;
@@ -102,7 +106,7 @@ export class FetchUrlMovimentService {
           } else {
             headersRedis = {
               'x-grau-instancia': i.toString(),
-              referer: `https://pje.${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
+              referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
               accept: 'application/json, text/plain, */*',
               'user-agent':
                 userAgents[Math.floor(Math.random() * userAgents.length)],
@@ -111,7 +115,7 @@ export class FetchUrlMovimentService {
           const awsWafTokenKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(awsWafTokenKey);
 
-          const url = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
+          const url = `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
           // Resolve o desafio de captcha SEM autenticação — autenticar essa
           // etapa faz o PJE invalidar a resposta do captcha (visto em
           // produção: instância que resolvia de primeira sem login passou a
@@ -122,7 +126,7 @@ export class FetchUrlMovimentService {
             Cookie: `${awsWafToken || ''}`,
           };
           const { data } = await axios.get<DetalheProcesso[]>(
-            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+            `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
             { headers },
           );
 
@@ -338,6 +342,102 @@ export class FetchUrlMovimentService {
     }
   }
 
+  // Renova o tokenCaptcha de uma instância/processo específico, repetindo o
+  // mesmo desafio de captcha resolvido em `execute()` (o endpoint de
+  // documento não tem desafio próprio — só consome um tokenCaptcha já
+  // resolvido por aqui). Usado quando `FetchDocumentoService` detecta que o
+  // token salvo no Redis foi rejeitado pelo PJe.
+  async refreshTokenCaptcha(
+    numeroDoProcesso: string,
+    processId: number | string,
+    instancia: string,
+    regionTRT: number,
+  ): Promise<string | null> {
+    try {
+      // Mesmo caso da instância 3 (TST) em `execute()` — domínio próprio,
+      // não é "mais um grau" dentro do `pje.trt{regionTRT}`.
+      const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
+
+      const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
+      let headersRedis: Record<string, string> = {};
+      if (headersRedisRaw) {
+        try {
+          headersRedis = JSON.parse(headersRedisRaw) as Record<
+            string,
+            string
+          >;
+        } catch (error: unknown) {
+          headersRedis = {};
+        }
+      } else {
+        headersRedis = {
+          'x-grau-instancia': instancia,
+          referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instancia}`,
+          accept: 'application/json, text/plain, */*',
+          'user-agent':
+            userAgents[Math.floor(Math.random() * userAgents.length)],
+        };
+      }
+      const awsWafToken = await this.redis.get(
+        `aws-waf-token:${numeroDoProcesso}`,
+      );
+      const url = `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
+      const headers = {
+        ...headersRedis,
+        referer: url,
+        Cookie: `${awsWafToken || ''}`,
+      };
+
+      let processoResponse = await this.fetchProcess(
+        headers,
+        numeroDoProcesso,
+        String(processId),
+        instancia,
+      );
+
+      const temDesafioDeCaptcha = (resp: ProcessosResponse) =>
+        !!resp &&
+        'imagem' in resp &&
+        'tokenDesafio' in resp &&
+        !resp.itensProcesso?.length;
+
+      let tentativas = 0;
+      while (temDesafioDeCaptcha(processoResponse) && tentativas < 3) {
+        tentativas++;
+        const resposta = await this.fetchCaptcha(
+          processoResponse.imagem,
+          regionTRT,
+        );
+        processoResponse = await this.fetchProcess(
+          headers,
+          numeroDoProcesso,
+          String(processId),
+          instancia,
+          undefined,
+          processoResponse.tokenDesafio,
+          resposta,
+        );
+      }
+
+      const tokenCaptchaRenovado = await this.redis.get(
+        `tokencaptcha:${numeroDoProcesso}:${instancia}`,
+      );
+
+      if (!tokenCaptchaRenovado) {
+        this.logger.warn(
+          `⚠️ Não foi possível renovar o tokenCaptcha de ${numeroDoProcesso} (instância ${instancia})`,
+        );
+      }
+
+      return tokenCaptchaRenovado || null;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `⚠️ Falha ao renovar tokenCaptcha de ${numeroDoProcesso} (instância ${instancia}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
   async fetchCaptcha(imagem: string, regionTRT?: number): Promise<string> {
     const MAX_RETRIES = 3;
 
@@ -404,19 +504,12 @@ export class FetchUrlMovimentService {
     );
     await this.delay(delayMs);
 
-    // Quando includeRestricted, busca também os documentos restritos relevantes
-    // (petição inicial, sentença, planilha de cálculo etc.) via /documentos/{id},
-    // sem depender do fluxo de login + /integra.
+    // Quando includeRestricted, busca também os documentos restritos (todos,
+    // sem filtro por título) via /documentos/{id}, sem depender do fluxo de
+    // login + /integra.
     const filter = includeRestricted
       ? (item: ItensProcesso) =>
-          Boolean(
-            item.documento &&
-              item.idUnicoDocumento &&
-              (item.publico ||
-                regexDocumentos.some((r) =>
-                  r.test(normalizeString(item.titulo)),
-                )),
-          )
+          Boolean(item.documento && item.idUnicoDocumento)
       : undefined;
 
     return this.fetchPublicDocumentsService.execute(

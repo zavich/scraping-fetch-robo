@@ -2,8 +2,12 @@ import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { Documento, ItensProcesso, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
-import { regexDocumentos } from 'src/utils/regex-documents';
-import { FetchDocumentoService } from './fetch-documents-url.service';
+import {
+  DocumentoRequestContext,
+  FetchDocumentoService,
+  InvalidPjeDocumentResponseError,
+} from './fetch-documents-url.service';
+import { FetchUrlMovimentService } from './fetch-url.service';
 import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
 
 @Injectable()
@@ -14,6 +18,7 @@ export class ProcessDocumentsFindService {
     private readonly awsS3Service: AwsS3Service,
     private readonly fetchDocumentoService: FetchDocumentoService,
     private readonly lambdaExtractorService: LambdaDocumentExtractorService,
+    private readonly fetchUrlMovimentService: FetchUrlMovimentService,
   ) {}
 
   private getErrorMessage(error: unknown): string {
@@ -28,7 +33,12 @@ export class ProcessDocumentsFindService {
     try {
       const instancesWithGrau = instances.map((instance) => ({
         ...instance,
-        grau: instance.instance === '1' ? 'PRIMEIRO_GRAU' : 'SEGUNDO_GRAU',
+        grau:
+          instance.instance === '1'
+            ? 'PRIMEIRO_GRAU'
+            : instance.instance === '3'
+              ? 'TERCEIRO_GRAU'
+              : 'SEGUNDO_GRAU',
       }));
       if (!instancesWithGrau || instancesWithGrau.length === 0) return [];
 
@@ -77,21 +87,142 @@ export class ProcessDocumentsFindService {
       return [];
     }
 
-    // Busca os documentos relevantes de TODAS as instâncias (não só a
-    // última), montando um contexto de headers/tokenCaptcha por instância.
-    const perInstanceResults = await Promise.all(
-      instanceEntries.map((entry) =>
-        this.fetchDocumentosDaInstancia(
-          processNumber,
-          regionTRT,
-          entry.id,
-          entry.instancia,
-          entry.itensProcesso,
-        ),
-      ),
+    // O PJe ecoa o mesmo documento na listagem de mais de uma instância (ex:
+    // um documento do TST aparece referenciado também na listagem do 1º/2º
+    // grau). O atributo `item.instancia` desse item ecoado costuma apontar
+    // pra instância "de origem" do documento — mas usar esse atributo pra
+    // decidir ONDE buscar o documento (em vez da instância cuja LISTAGEM
+    // realmente trouxe esse item) faz o fetch usar o processId/contexto
+    // errado, que o PJe rejeita como "documento não encontrado". Cada
+    // instância que lista um item tem, por definição, um processId válido
+    // pra buscá-lo — por isso agrupa por `entry.instancia` (onde o item foi
+    // encontrado), não por `item.instancia` (pra onde ele aponta). Isso pode
+    // buscar o mesmo documento mais de uma vez quando ele é ecoado em mais
+    // de uma instância, mas garante que ele apareça associado a TODAS as
+    // instâncias que o referenciam nas movimentações — antes, ao colapsar
+    // pra uma única instância "dona", o documento sumia da instância que não
+    // "ganhou" o dedup (era assim que o TST ficava sem documentos nas
+    // movimentações mesmo tendo itens que os referenciavam).
+    const itensPorInstanciaReal = new Map<string, ItensProcesso[]>();
+
+    for (const entry of instanceEntries) {
+      const relevantes = entry.itensProcesso.filter((item) => item.documento);
+
+      // Dedup só dentro da própria listagem — evita repetir o mesmo item
+      // duas vezes se ele aparecer duplicado dentro da resposta de UMA
+      // instância, mas não colapsa ocorrências de instâncias diferentes.
+      const vistosNestaInstancia = new Set<string>();
+      for (const item of relevantes) {
+        const chave = item.idUnicoDocumento || String(item.id);
+        if (vistosNestaInstancia.has(chave)) continue;
+        vistosNestaInstancia.add(chave);
+
+        const lista = itensPorInstanciaReal.get(entry.instancia) ?? [];
+        lista.push(item);
+        itensPorInstanciaReal.set(entry.instancia, lista);
+      }
+    }
+
+    const processIdPorInstancia = new Map(
+      instanceEntries.map((entry) => [entry.instancia, entry.id]),
     );
 
-    const uploadedDocuments = perInstanceResults.flat();
+    // Achata os itens de TODAS as instâncias numa lista só, pra buscar com um
+    // único limite de concorrência GLOBAL — antes cada instância rodava sua
+    // própria leva de N em paralelo, e com 3 instâncias ativas ao mesmo tempo
+    // a concorrência real contra o PJe somava N×instâncias, passando do
+    // limite de taxa deles e derrubando tudo em HTTP 429.
+    const todosOsItens: {
+      grau: string;
+      processId: number;
+      item: ItensProcesso;
+    }[] = [];
+
+    for (const [grau, itens] of itensPorInstanciaReal.entries()) {
+      const processId = processIdPorInstancia.get(grau);
+      if (!processId) {
+        this.logger.warn(
+          `⚠️ ${itens.length} documento(s) referenciam a instância ${grau} (${processNumber}), mas essa instância não foi consultada — pulando.`,
+        );
+        continue;
+      }
+      for (const item of itens) {
+        todosOsItens.push({ grau, processId, item });
+      }
+    }
+
+    if (todosOsItens.length === 0) {
+      this.logger.warn(
+        `⚠️ Nenhum documento relevante encontrado para ${processNumber}`,
+      );
+      return [];
+    }
+
+    for (const grau of new Set(todosOsItens.map((i) => i.grau))) {
+      const total = todosOsItens.filter((i) => i.grau === grau).length;
+      this.logger.log(
+        `📊 Instância ${grau} (${processNumber}): ${total} documento(s) relevante(s) pra buscar`,
+      );
+    }
+
+    // Contexto (headers/cookies/tokenCaptcha) montado uma vez por instância
+    // e reaproveitado por todos os documentos dela, mesmo rodando num pool
+    // de concorrência global.
+    const contextosPorInstancia = new Map<
+      string,
+      Promise<DocumentoRequestContext>
+    >();
+    const getContexto = (grau: string) => {
+      let contextoPromise = contextosPorInstancia.get(grau);
+      if (!contextoPromise) {
+        contextoPromise = this.fetchDocumentoService.buildContext(
+          regionTRT,
+          grau,
+          processNumber,
+        );
+        contextosPorInstancia.set(grau, contextoPromise);
+      }
+      return contextoPromise;
+    };
+
+    const CONCORRENCIA_MAXIMA = 3;
+    // Respiro entre requisições além do limite de concorrência — o PJe
+    // aparentemente limita por taxa (req/s), não só por conexões simultâneas:
+    // mesmo com N workers, se cada um reencadeia a próxima busca assim que a
+    // anterior falha rápido (ex.: 429 quase instantâneo), a rajada efetiva
+    // continua alta.
+    const INTERVALO_ENTRE_REQUESTS_MS = 300;
+
+    const resultados = await this.comConcorrenciaLimitada(
+      todosOsItens,
+      CONCORRENCIA_MAXIMA,
+      async ({ grau, processId, item }) => {
+        await this.delay(INTERVALO_ENTRE_REQUESTS_MS);
+        const context = await getContexto(grau);
+        return this.processarDocumento(
+          context,
+          processId,
+          item,
+          processNumber,
+          regionTRT,
+          grau,
+        );
+      },
+    );
+
+    for (const grau of new Set(todosOsItens.map((i) => i.grau))) {
+      const doGrau = resultados.filter(
+        (_, idx) => todosOsItens[idx].grau === grau,
+      );
+      const sucesso = doGrau.filter((d) => d !== null).length;
+      this.logger.log(
+        `✅ Instância ${grau} (${processNumber}): ${sucesso}/${doGrau.length} documento(s) baixado(s) com sucesso`,
+      );
+    }
+
+    const uploadedDocuments = resultados.filter(
+      (documento): documento is Documento => documento !== null,
+    );
 
     if (uploadedDocuments.length === 0) {
       this.logger.warn(
@@ -102,102 +233,164 @@ export class ProcessDocumentsFindService {
     return uploadedDocuments;
   }
 
-  private async fetchDocumentosDaInstancia(
+  private async delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Só tenta renovar o tokenCaptcha e buscar de novo pra
+  // `InvalidPjeDocumentResponseError` (causa ambígua, pode ser token
+  // rejeitado). `DocumentoNaoEncontradoError` (PJe confirma que o ID não
+  // existe naquele processo) cai direto no `throw error` abaixo — nenhum
+  // token novo faz um documento inexistente aparecer, então renovar aqui
+  // seria só desperdiçar uma resolução de captcha (custo real).
+  private async fetchDocumentoComRenovacao(
+    context: DocumentoRequestContext,
+    processId: number,
+    item: ItensProcesso,
     processNumber: string,
     regionTRT: number,
-    processId: number,
     instancia: string,
-    itensProcesso: ItensProcesso[],
-  ): Promise<Documento[]> {
-    const itensRestritos = itensProcesso.filter(
-      (item) =>
-        item.documento &&
-        regexDocumentos.some((r) => r.test(normalizeString(item.titulo))),
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    try {
+      return await this.fetchDocumentoService.fetchDocumento(
+        context,
+        processId,
+        item.id,
+        processNumber,
+        item.titulo,
+      );
+    } catch (error: unknown) {
+      if (!(error instanceof InvalidPjeDocumentResponseError)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `🔄 tokenCaptcha rejeitado pro documento "${item.titulo}" (id=${item.id}, instância ${instancia}) de ${processNumber} — renovando e tentando de novo.`,
+      );
+
+      const tokenRenovado = await this.fetchUrlMovimentService.refreshTokenCaptcha(
+        processNumber,
+        processId,
+        instancia,
+        regionTRT,
+      );
+
+      if (!tokenRenovado) {
+        throw error;
+      }
+
+      return this.fetchDocumentoService.fetchDocumento(
+        { ...context, tokenCaptcha: tokenRenovado },
+        processId,
+        item.id,
+        processNumber,
+        item.titulo,
+      );
+    }
+  }
+
+  // Processa a lista com no máximo `concorrencia` chamadas de `fn` em voo ao
+  // mesmo tempo. Sem isso, `Promise.all` disparava uma requisição por
+  // documento simultaneamente contra o mesmo processId — e, desde que
+  // paramos de filtrar por regex (agora busca TODOS os documentos, não só os
+  // relevantes), essa rajada de concorrência passou a derrubar o PJe com
+  // "Erro inesperado na consulta ao banco de dados" (ARQ-509) em vários
+  // documentos do mesmo processo.
+  private async comConcorrenciaLimitada<T, R>(
+    items: T[],
+    concorrencia: number,
+    fn: (item: T) => Promise<R>,
+  ): Promise<R[]> {
+    const resultados: R[] = new Array(items.length);
+    let proximoIndice = 0;
+
+    const worker = async () => {
+      while (proximoIndice < items.length) {
+        const indiceAtual = proximoIndice++;
+        resultados[indiceAtual] = await fn(items[indiceAtual]);
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(concorrencia, items.length) }, worker),
     );
 
-    if (itensRestritos.length === 0) return [];
+    return resultados;
+  }
 
-    const publicos = itensRestritos.filter((item) => item.publico).length;
-    this.logger.log(
-      `📊 Instância ${instancia} (${processNumber}): ${itensRestritos.length} documento(s) relevante(s) pra buscar (${publicos} público(s), ${itensRestritos.length - publicos} restrito(s))`,
+  private async processarDocumento(
+    context: DocumentoRequestContext,
+    processId: number,
+    item: ItensProcesso,
+    processNumber: string,
+    regionTRT: number,
+    instancia: string,
+  ): Promise<Documento | null> {
+    // Diagnóstico temporário: registra `instanciaId` de todo item (não só
+    // os que falham) pra comparar contra `processId` na próxima execução
+    // real e confirmar se é mesmo o id do processo apenso/relacionado.
+    this.logger.debug(
+      `🔎 Documento "${item.titulo}" (id=${item.id}): instancia=${item.instancia}, instanciaId=${item.instanciaId}, processId=${processId}`,
     );
+    try {
+      const { buffer, contentType } = await this.fetchDocumentoComRenovacao(
+        context,
+        processId,
+        item,
+        processNumber,
+        regionTRT,
+        instancia,
+      );
 
-    // Monta headers/cookies/tokenCaptcha uma única vez por instância e busca
-    // todos os documentos relevantes dela de uma só vez.
-    const context = await this.fetchDocumentoService.buildContext(
-      regionTRT,
-      instancia,
-      processNumber,
-    );
+      const extension = contentType.includes('pdf') ? 'pdf' : 'html';
+      const fileKey = `${normalizeString(item.titulo)}_${item.id}_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}.${extension}`;
 
-    const results = await Promise.all(
-      itensRestritos.map(async (item) => {
-        try {
-          const { buffer, contentType } =
-            await this.fetchDocumentoService.fetchDocumento(
-              context,
-              processId,
-              item.id,
-              processNumber,
-              item.titulo,
+      // Reaproveita o buffer já baixado pro fetch do S3 — evita buscar o
+      // mesmo documento duas vezes só pra extrair o texto via Lambda.
+      const [texto] = await Promise.all([
+        this.lambdaExtractorService
+          .extractText(buffer, contentType, {
+            titulo: item.titulo,
+            idUnicoDocumento: item.idUnicoDocumento,
+            processNumber,
+          })
+          .catch((extractError: unknown) => {
+            this.logger.warn(
+              `⚠️ Falha ao extrair texto do documento "${item.titulo}" (id=${item.id}) para ${processNumber}: ${this.getErrorMessage(extractError)}`,
             );
+            return undefined;
+          }),
+        this.awsS3Service.uploadS3Object(
+          process.env.AWS_S3_BUCKET_NAME as string,
+          fileKey,
+          buffer,
+          contentType,
+        ),
+      ]);
 
-          const extension = contentType.includes('pdf') ? 'pdf' : 'html';
-          const fileKey = `${normalizeString(item.titulo)}_${item.id}_${Date.now()}_${Math.random()
-            .toString(36)
-            .slice(2, 8)}.${extension}`;
+      if (texto) {
+        item.texto = texto;
+      }
 
-          // Reaproveita o buffer já baixado pro fetch do S3 — evita buscar o
-          // mesmo documento duas vezes só pra extrair o texto via Lambda.
-          const [texto] = await Promise.all([
-            this.lambdaExtractorService
-              .extractText(buffer, contentType, {
-                titulo: item.titulo,
-                idUnicoDocumento: item.idUnicoDocumento,
-                processNumber,
-              })
-              .catch((extractError: unknown) => {
-                this.logger.warn(
-                  `⚠️ Falha ao extrair texto do documento "${item.titulo}" (id=${item.id}) para ${processNumber}: ${this.getErrorMessage(extractError)}`,
-                );
-                return undefined;
-              }),
-            this.awsS3Service.uploadS3Object(
-              process.env.AWS_S3_BUCKET_NAME as string,
-              fileKey,
-              buffer,
-              contentType,
-            ),
-          ]);
-
-          if (texto) {
-            item.texto = texto;
-          }
-
-          const documento: Documento = {
-            title: item.titulo,
-            temp_link: fileKey,
-            uniqueName: item.idUnicoDocumento,
-            date: item.data,
-          };
-          return documento;
-        } catch (error: unknown) {
-          this.logger.error(
-            `⚠️ Falha ao buscar documento "${item.titulo}" (id=${item.id}) para ${processNumber}: ${this.getErrorMessage(error)}`,
-          );
-          return null;
-        }
-      }),
-    );
-
-    const uploaded = results.filter(
-      (documento): documento is Documento => documento !== null,
-    );
-
-    this.logger.log(
-      `✅ Instância ${instancia} (${processNumber}): ${uploaded.length}/${itensRestritos.length} documento(s) baixado(s) com sucesso`,
-    );
-
-    return uploaded;
+      const documento: Documento = {
+        title: item.titulo,
+        temp_link: fileKey,
+        uniqueName: item.idUnicoDocumento,
+        date: item.data,
+      };
+      return documento;
+    } catch (error: unknown) {
+      // `instanciaId`/`processId`/`instancia` aqui são diagnóstico —
+      // suspeita de que documentos "não encontrados" no processId atual
+      // (`instance.id`) podem pertencer a um processo apenso/relacionado
+      // diferente, e `item.instanciaId` (nunca lido hoje) pode ser o id
+      // certo pra esses casos. Ainda não confirmado contra payload real.
+      this.logger.error(
+        `⚠️ Falha ao buscar documento "${item.titulo}" (id=${item.id}, instanciaId=${item.instanciaId}, processId usado=${processId}, instancia=${instancia}) para ${processNumber}: ${this.getErrorMessage(error)}`,
+      );
+      return null;
+    }
   }
 }

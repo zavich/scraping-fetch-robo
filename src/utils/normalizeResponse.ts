@@ -171,10 +171,14 @@ export function normalizeResponse(
     }
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
+      // Um documento só é público de verdade quando `publico` E não marcado
+      // `documentoSigiloso` — o PJe permite os dois sinais independentes.
+      const documentoPublico = Boolean(item?.publico) && !item?.documentoSigiloso;
+
       const partesConteudo = [
         item?.titulo,
         item?.tipo ? `| ${item.tipo}` : '',
-        !item?.publico && item?.documento ? '(Restrito)' : '',
+        !documentoPublico && item?.documento ? '(Restrito)' : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -184,6 +188,7 @@ export function normalizeResponse(
         conteudo: string;
         id: number;
         pje_doc_id?: number;
+        publico?: boolean;
         uniqueNameDocumento?: string;
         texto?: string;
       } = {
@@ -197,6 +202,7 @@ export function normalizeResponse(
       // documento, não uma movimentação textual comum.
       if (item?.documento && item.id != null) {
         mov.pje_doc_id = item.id;
+        mov.publico = documentoPublico;
       }
 
       // adiciona uniqueNameDocumento apenas se existir e não for string vazia
