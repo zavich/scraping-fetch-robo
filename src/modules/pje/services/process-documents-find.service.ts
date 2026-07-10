@@ -74,9 +74,13 @@ export class ProcessDocumentsFindService {
     // corresponde mais ao grau real, e usar `(i + 1)` aqui mandava o
     // tokenCaptcha/x-grau-instancia errado pro PJe (que rejeita o request).
     const instanceEntries = instances
-      .map((instance) => ({
+      .map((instance, index) => ({
         id: instance.id,
-        instancia: instance.instance,
+        // Mesmo fallback usado em normalizeResponse — sem ele, uma instância
+        // sem `instance.instance` (vazio/fora do esperado) usaria essa chave
+        // vazia/undefined no Map abaixo, colapsando com outra instância no
+        // mesmo bucket e buscando documentos com processId/contexto errado.
+        instancia: instance.instance ?? (index + 1).toString(),
         itensProcesso: instance.itensProcesso ?? [],
       }))
       .filter((entry) => entry.itensProcesso.length > 0);

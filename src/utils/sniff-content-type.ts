@@ -10,7 +10,7 @@ export function sniffContentType(
   const pareceHtml = inicioBuffer.startsWith('<');
   const parecePdf = buffer.subarray(0, 4).toString('latin1') === '%PDF';
 
-  if (/pdf|html/.test(headerContentType)) return headerContentType;
+  if (/pdf|html/i.test(headerContentType)) return headerContentType;
   if (parecePdf) return 'application/pdf';
   if (pareceHtml) return 'text/html';
   return headerContentType;

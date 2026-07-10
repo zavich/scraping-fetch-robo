@@ -118,7 +118,7 @@ export class FetchPublicDocumentsService {
           // Nem o header nem o sniffing do buffer indicam PDF/HTML — não é um
           // documento de verdade (ex.: JSON de erro do PJe). Não vale mandar
           // pra Lambda, só geraria falha/ruído e gasto desnecessário.
-          if (!/pdf|html/.test(contentType)) {
+          if (!/pdf|html/i.test(contentType)) {
             this.logger.warn(
               `⚠️ Documento "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: content-type=${contentType} não parece PDF/HTML, pulando extração.`,
             );

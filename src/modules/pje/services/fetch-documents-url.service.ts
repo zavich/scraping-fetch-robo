@@ -179,7 +179,7 @@ export class FetchDocumentoService {
       // esses documentos válidos. Quem decide validade agora é só o
       // sniffing de conteúdo acima (contentTypeReal), e a checagem de JSON
       // de erro abaixo, não o tamanho do buffer.
-      const isDocumentoValido = /pdf|html/.test(contentTypeReal);
+      const isDocumentoValido = /pdf|html/i.test(contentTypeReal);
       if (!isDocumentoValido) {
         // Não loga o corpo — essa rota também serve documentos restritos, e
         // o conteúdo pode ser sensível. Só metadados (content-type/size)
