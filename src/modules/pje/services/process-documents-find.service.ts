@@ -80,7 +80,7 @@ export class ProcessDocumentsFindService {
         // sem `instance.instance` (vazio/fora do esperado) usaria essa chave
         // vazia/undefined no Map abaixo, colapsando com outra instância no
         // mesmo bucket e buscando documentos com processId/contexto errado.
-        instancia: instance.instance ?? (index + 1).toString(),
+        instancia: instance.instance || (index + 1).toString(),
         itensProcesso: instance.itensProcesso ?? [],
       }))
       .filter((entry) => entry.itensProcesso.length > 0);

@@ -301,7 +301,13 @@ export class GenericProcessoWorker extends WorkerHost {
           regionTRT,
         );
 
-        if (documentos.length === 0 || documentos[0].documentos.length === 0) {
+        // Checa TODAS as instâncias, não só a primeira — com até 3 (incluindo
+        // TST), é comum a primeira vir sem documentos e outra vir com.
+        const totalDocumentos = documentos.reduce(
+          (total, doc) => total + doc.documentos.length,
+          0,
+        );
+        if (documentos.length === 0 || totalDocumentos === 0) {
           // Nenhum documento restrito relevante encontrado — as movimentações
           // em si foram coletadas com sucesso, então manda só elas em vez de
           // descartar tudo como erro.
