@@ -265,15 +265,21 @@ export class FetchUrlMovimentService {
           // a posição no array deixa de corresponder ao grau real.
           instances.push({ ...processoResponse, instance: i.toString() });
         } catch (err: unknown) {
+          // Sempre continua pras próximas instâncias, mesmo quando a 1ª
+          // falha — um 403/429/erro transitório na instância 1 (ex.: WAF,
+          // rate limit) não significa que o processo não existe em 2º grau
+          // ou no TST. Abortar o loop aqui fazia o worker devolver "nenhum
+          // resultado encontrado" com dado real esperando nas outras
+          // instâncias, nunca consultadas.
           if (i === 1) {
             this.logger.error(
               `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
             );
-            break;
+          } else {
+            this.logger.warn(
+              `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
+            );
           }
-          this.logger.warn(
-            `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
-          );
           continue;
         }
       }

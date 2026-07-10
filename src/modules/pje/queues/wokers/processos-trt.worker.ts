@@ -388,13 +388,20 @@ export class GenericProcessoWorker extends WorkerHost {
         throw error instanceof Error ? error : new Error(String(error));
       }
 
-      const mensagem = axios.isAxiosError(error)
+      // Loga o erro real (HTTP/mensagem original) para debug — o motivo
+      // mandado no webhook fica padronizado como "fora do ar", já que quem
+      // consome isso não precisa do detalhe técnico, só saber que o PJe
+      // não respondeu normalmente pra esse processo.
+      const detalheErro = axios.isAxiosError(error)
         ? `Erro PJE (HTTP ${error.response?.status ?? 'sem status'}): ${error.message}`
         : `Erro inesperado: ${error instanceof Error ? error.message : String(error)}`;
+      this.logger.error(`Detalhe do erro para ${numero}: ${detalheErro}`);
+
+      const mensagem = `Pje ${numero} fora do ar`;
 
       const response: Root = normalizeResponse(numero, [], mensagem, {
         status: 'ERRO',
-        motivoErro: 'PJE_ERRO',
+        motivoErro: 'PJE_FORA_DO_AR',
         webhookId: `${correlationId}:process-error`,
         origem,
       });
