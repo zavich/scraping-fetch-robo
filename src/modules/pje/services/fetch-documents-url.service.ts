@@ -185,13 +185,12 @@ export class FetchDocumentoService {
       // de erro abaixo, não o tamanho do buffer.
       const isDocumentoValido = /pdf|html/.test(contentTypeReal);
       if (!isDocumentoValido) {
-        // Loga o corpo aqui mesmo — o catch genérico logo abaixo só extrai
-        // `body` de erros do axios, e esse é um Error comum, então sem isso
-        // o conteúdo real da rejeição do PJe se perdia (log só mostrava
-        // "body=null", impossível saber o motivo de verdade).
-        const corpoResposta = buffer.toString('utf-8').slice(0, 2000);
+        // Não loga o corpo — essa rota também serve documentos restritos, e
+        // o conteúdo pode ser sensível. Só metadados (content-type/size)
+        // vão pro log; o corpo em si só é inspecionado em memória abaixo
+        // pra decidir se é um JSON de erro de "documento não encontrado".
         this.logger.error(
-          `Resposta inválida do PJe pro documento "${titulo}" (id=${documentId}, processo=${processNumber}): content-type=${contentTypeHeader} size=${buffer.length}bytes | body=${corpoResposta}`,
+          `Resposta inválida do PJe pro documento "${titulo}" (id=${documentId}, processo=${processNumber}): content-type=${contentTypeHeader} size=${buffer.length}bytes`,
         );
 
         // JSON de erro de verdade dizendo que o documento não existe — não é
@@ -241,7 +240,7 @@ export class FetchDocumentoService {
         }
       }
       this.logger.error(
-        `Erro ao buscar documento "${titulo}" (id=${documentId}) para processo ${processNumber}: HTTP ${status ?? 'n/a'} — ${error instanceof Error ? error.message : String(error)} | body=${responseData}`,
+        `Erro ao buscar documento "${titulo}" (id=${documentId}) para processo ${processNumber}: HTTP ${status ?? 'n/a'} — ${error instanceof Error ? error.message : String(error)} | body=${responseData ? responseData.slice(0, 2000) : null}`,
       );
 
       // 5xx do PJe (ex.: ARQ-509 "Erro inesperado na consulta ao banco de
@@ -277,7 +276,7 @@ export class FetchDocumentoService {
         );
       }
 
-      throw new Error('Erro ao executar DocumentoService');
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 }

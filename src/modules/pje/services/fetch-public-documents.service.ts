@@ -73,9 +73,20 @@ export class FetchPublicDocumentsService {
       referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instance}`,
     };
 
-    const results = await Promise.all(
-      targetDocs.map(async (item) => {
+    // Limita a concorrência real contra o PJe (mesmo padrão usado pros
+    // documentos restritos em process-documents-find.service.ts) — disparar
+    // uma requisição por documento simultaneamente derruba o PJe com erros
+    // 429/5xx em processos com muitos documentos.
+    const CONCORRENCIA_MAXIMA = 3;
+    const INTERVALO_ENTRE_REQUESTS_MS = 300;
+
+    const results = await this.comConcorrenciaLimitada(
+      targetDocs,
+      CONCORRENCIA_MAXIMA,
+      async (item) => {
         try {
+          await this.delay(INTERVALO_ENTRE_REQUESTS_MS);
+
           const tokenQuery = tokenCaptcha
             ? `?tokenCaptcha=${tokenCaptcha}`
             : '';
@@ -126,12 +137,15 @@ export class FetchPublicDocumentsService {
               responseData = JSON.stringify(raw);
             }
           }
+          // Trunca o body no log — essa rota também serve documentos
+          // restritos, e o corpo pode conter conteúdo sensível além de
+          // inflar o tamanho do log.
           this.logger.error(
-            `Erro ao processar documento público "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: HTTP ${status ?? 'n/a'} — ${err instanceof Error ? err.message : String(err)} | body=${responseData}`,
+            `Erro ao processar documento público "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: HTTP ${status ?? 'n/a'} — ${err instanceof Error ? err.message : String(err)} | body=${responseData ? responseData.slice(0, 2000) : null}`,
           );
           return null;
         }
-      }),
+      },
     );
 
     const extracted = results.filter(
@@ -143,5 +157,31 @@ export class FetchPublicDocumentsService {
     );
 
     return extracted;
+  }
+
+  private async delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async comConcorrenciaLimitada<T, R>(
+    items: T[],
+    concorrencia: number,
+    fn: (item: T) => Promise<R>,
+  ): Promise<R[]> {
+    const resultados: R[] = new Array(items.length);
+    let proximoIndice = 0;
+
+    const worker = async () => {
+      while (proximoIndice < items.length) {
+        const indiceAtual = proximoIndice++;
+        resultados[indiceAtual] = await fn(items[indiceAtual]);
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(concorrencia, items.length) }, worker),
+    );
+
+    return resultados;
   }
 }

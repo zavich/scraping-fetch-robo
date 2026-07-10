@@ -214,7 +214,7 @@ export class GenericProcessoWorker extends WorkerHost {
               numero,
               instances as ProcessosResponse[],
               regionTRT,
-              true,
+              false,
             );
 
           for (const instance of instances as ProcessosResponse[]) {
