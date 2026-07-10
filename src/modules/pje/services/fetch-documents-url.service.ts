@@ -150,7 +150,14 @@ export class FetchDocumentoService {
         withCredentials: true,
       });
 
-      if (!Buffer.isBuffer(response.data)) {
+      // Com `responseType: 'arraybuffer'`, o axios no Node pode devolver um
+      // ArrayBuffer puro (não um Buffer) — `Buffer.isBuffer` sozinho rejeitava
+      // esses casos válidos. `Buffer.from` abaixo já sabe converter os dois.
+      const isBufferConvertible =
+        Buffer.isBuffer(response.data) ||
+        response.data instanceof ArrayBuffer ||
+        ArrayBuffer.isView(response.data);
+      if (!isBufferConvertible) {
         this.logger.error(
           'Erro: O conteúdo retornado pela API não é um arquivo válido.',
         );

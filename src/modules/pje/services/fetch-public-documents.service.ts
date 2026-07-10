@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import Redis from 'ioredis';
 import { ItensProcesso } from 'src/interfaces';
+import { comConcorrenciaLimitada } from 'src/utils/concurrency';
 import { userAgents } from 'src/utils/user-agents';
 import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
 
@@ -80,7 +81,7 @@ export class FetchPublicDocumentsService {
     const CONCORRENCIA_MAXIMA = 3;
     const INTERVALO_ENTRE_REQUESTS_MS = 300;
 
-    const results = await this.comConcorrenciaLimitada(
+    const results = await comConcorrenciaLimitada(
       targetDocs,
       CONCORRENCIA_MAXIMA,
       async (item) => {
@@ -161,27 +162,5 @@ export class FetchPublicDocumentsService {
 
   private async delay(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  private async comConcorrenciaLimitada<T, R>(
-    items: T[],
-    concorrencia: number,
-    fn: (item: T) => Promise<R>,
-  ): Promise<R[]> {
-    const resultados: R[] = new Array(items.length);
-    let proximoIndice = 0;
-
-    const worker = async () => {
-      while (proximoIndice < items.length) {
-        const indiceAtual = proximoIndice++;
-        resultados[indiceAtual] = await fn(items[indiceAtual]);
-      }
-    };
-
-    await Promise.all(
-      Array.from({ length: Math.min(concorrencia, items.length) }, worker),
-    );
-
-    return resultados;
   }
 }

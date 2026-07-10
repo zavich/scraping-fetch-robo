@@ -1,6 +1,7 @@
 import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { Documento, ItensProcesso, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
+import { comConcorrenciaLimitada } from 'src/utils/concurrency';
 import { normalizeString } from 'src/utils/normalize-string';
 import {
   DocumentoRequestContext,
@@ -261,7 +262,7 @@ export class ProcessDocumentsFindService {
       return promise;
     };
 
-    const resultados = await this.comConcorrenciaLimitada(
+    const resultados = await comConcorrenciaLimitada(
       todosOsItens,
       CONCORRENCIA_MAXIMA,
       buscarComCache,
@@ -357,34 +358,6 @@ export class ProcessDocumentsFindService {
     }
   }
 
-  // Processa a lista com no máximo `concorrencia` chamadas de `fn` em voo ao
-  // mesmo tempo. Sem isso, `Promise.all` disparava uma requisição por
-  // documento simultaneamente contra o mesmo processId — e, desde que
-  // paramos de filtrar por regex (agora busca TODOS os documentos, não só os
-  // relevantes), essa rajada de concorrência passou a derrubar o PJe com
-  // "Erro inesperado na consulta ao banco de dados" (ARQ-509) em vários
-  // documentos do mesmo processo.
-  private async comConcorrenciaLimitada<T, R>(
-    items: T[],
-    concorrencia: number,
-    fn: (item: T) => Promise<R>,
-  ): Promise<R[]> {
-    const resultados: R[] = new Array(items.length);
-    let proximoIndice = 0;
-
-    const worker = async () => {
-      while (proximoIndice < items.length) {
-        const indiceAtual = proximoIndice++;
-        resultados[indiceAtual] = await fn(items[indiceAtual]);
-      }
-    };
-
-    await Promise.all(
-      Array.from({ length: Math.min(concorrencia, items.length) }, worker),
-    );
-
-    return resultados;
-  }
 
   private async processarDocumento(
     context: DocumentoRequestContext,
@@ -397,9 +370,13 @@ export class ProcessDocumentsFindService {
     // Diagnóstico temporário: registra `instanciaId` de todo item (não só
     // os que falham) pra comparar contra `processId` na próxima execução
     // real e confirmar se é mesmo o id do processo apenso/relacionado.
-    this.logger.debug(
-      `🔎 Documento "${item.titulo}" (id=${item.id}): instancia=${item.instancia}, instanciaId=${item.instanciaId}, processId=${processId}`,
-    );
+    // Atrás de flag e sem `titulo` — pode conter conteúdo sensível e o log
+    // roda pra todo item, não só falhas.
+    if (process.env.DEBUG_PJE_DOCUMENT_FETCH === '1') {
+      this.logger.debug(
+        `🔎 Documento (id=${item.id}): instancia=${item.instancia}, instanciaId=${item.instanciaId}, processId=${processId}`,
+      );
+    }
     try {
       const { buffer, contentType } = await this.fetchDocumentoComRenovacao(
         context,
