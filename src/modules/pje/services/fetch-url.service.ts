@@ -296,7 +296,7 @@ export class FetchUrlMovimentService {
       });
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
-        `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
+        `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance})`,
       );
       // Só grava quando vem um token novo — chamadas subsequentes (ex.: a
       // busca autenticada extra, que reaproveita um tokenCaptcha já válido)

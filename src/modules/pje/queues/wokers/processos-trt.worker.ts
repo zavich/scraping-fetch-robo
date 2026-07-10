@@ -217,13 +217,14 @@ export class GenericProcessoWorker extends WorkerHost {
               false,
             );
 
+          const publicDocsById = new Map(
+            publicDocs.map((d) => [d.idUnicoDocumento, d.texto]),
+          );
           for (const instance of instances as ProcessosResponse[]) {
             if (!instance.itensProcesso?.length) continue;
             for (const item of instance.itensProcesso) {
-              const found = publicDocs.find(
-                (d) => d.idUnicoDocumento === item.idUnicoDocumento,
-              );
-              if (found) item.texto = found.texto;
+              const texto = publicDocsById.get(item.idUnicoDocumento);
+              if (texto) item.texto = texto;
             }
           }
 

@@ -74,9 +74,7 @@ export class FetchDocumentoService {
         tokenCaptcha = await this.redis.get(alternativaKey);
 
         if (tokenCaptcha) {
-          this.logger.debug(
-            `Token encontrado na instância ${inst}: ${tokenCaptcha}`,
-          );
+          this.logger.debug(`Token encontrado na instância ${inst}`);
           break;
         }
       }
@@ -140,8 +138,11 @@ export class FetchDocumentoService {
         throw new Error('Parâmetros inválidos fornecidos');
       }
 
-      const url = `https://pje.${context.typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${documentId}?tokenCaptcha=${context.tokenCaptcha}`;
-      this.logger.debug(`📄 GET ${url} (documento="${titulo}")`);
+      const urlBase = `https://pje.${context.typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${documentId}`;
+      const url = `${urlBase}?tokenCaptcha=${context.tokenCaptcha}`;
+      this.logger.debug(
+        `📄 GET ${urlBase} (documento="${titulo}", tokenCaptcha=REDACTED)`,
+      );
 
       const response = await axios.get(url, {
         headers: context.headers,

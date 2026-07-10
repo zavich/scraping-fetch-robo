@@ -92,9 +92,12 @@ export class FetchPublicDocumentsService {
             ? `?tokenCaptcha=${tokenCaptcha}`
             : '';
           const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${item.id}${tokenQuery}`;
+          const urlForLog = tokenQuery
+            ? url.replace(/tokenCaptcha=[^&]+/, 'tokenCaptcha=REDACTED')
+            : url;
 
           this.logger.debug(
-            `📄 GET ${url} (documento="${item.titulo}", idUnico=${item.idUnicoDocumento})`,
+            `📄 GET ${urlForLog} (documento="${item.titulo}", idUnico=${item.idUnicoDocumento})`,
           );
 
           const docResponse = await axios.get<ArrayBuffer>(url, {

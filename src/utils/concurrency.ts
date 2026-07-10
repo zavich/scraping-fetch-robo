@@ -7,6 +7,8 @@ export async function comConcorrenciaLimitada<T, R>(
   concorrencia: number,
   fn: (item: T) => Promise<R>,
 ): Promise<R[]> {
+  if (items.length === 0) return [];
+
   const resultados: R[] = new Array(items.length);
   let proximoIndice = 0;
 
@@ -17,9 +19,15 @@ export async function comConcorrenciaLimitada<T, R>(
     }
   };
 
-  await Promise.all(
-    Array.from({ length: Math.min(concorrencia, items.length) }, worker),
+  // `concorrencia` <= 0/NaN não pode zerar o pool de workers — isso faria
+  // Promise.all resolver sem processar nada, devolvendo `resultados` com
+  // undefined em todas as posições.
+  const poolSize = Math.max(
+    1,
+    Math.min(Math.trunc(concorrencia || 1), items.length),
   );
+
+  await Promise.all(Array.from({ length: poolSize }, worker));
 
   return resultados;
 }
