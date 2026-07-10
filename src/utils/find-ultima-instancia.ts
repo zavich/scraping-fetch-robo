@@ -17,7 +17,7 @@ export function findUltimaInstancia(instances: ProcessosResponse[]): {
     );
     return {
       id: inst.id,
-      instance: (index + 1).toString(),
+      instance: inst.instance ?? (index + 1).toString(),
       itensProcesso: inst.itensProcesso,
       ultimaMovimentacao,
     };

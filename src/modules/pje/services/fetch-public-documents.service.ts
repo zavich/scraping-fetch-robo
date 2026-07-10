@@ -26,7 +26,12 @@ export class FetchPublicDocumentsService {
     processNumber: string,
     itensProcesso: ItensProcesso[],
     filter: (item: ItensProcesso) => boolean = (item) =>
-      Boolean(item.publico && item.documento && item.idUnicoDocumento),
+      Boolean(
+        item.publico &&
+          !item.documentoSigiloso &&
+          item.documento &&
+          item.idUnicoDocumento,
+      ),
   ): Promise<DocumentoExtraido[]> {
     const targetDocs = itensProcesso.filter(filter);
 
@@ -35,7 +40,9 @@ export class FetchPublicDocumentsService {
       return [];
     }
 
-    const publicos = targetDocs.filter((item) => item.publico).length;
+    const publicos = targetDocs.filter(
+      (item) => item.publico && !item.documentoSigiloso,
+    ).length;
     this.logger.log(
       `📊 Instância ${instance} (${processNumber}): ${targetDocs.length} documento(s) pra buscar (${publicos} público(s), ${targetDocs.length - publicos} restrito(s))`,
     );

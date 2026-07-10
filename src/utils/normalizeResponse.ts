@@ -221,7 +221,9 @@ export function normalizeResponse(
       id: instance.id,
       assunto: instance.assuntos,
       sistema: 'PJE',
-      instancia: GRAU_POR_INSTANCIA[instance.instance] ?? undefined,
+      instancia:
+        GRAU_POR_INSTANCIA[instance.instance] ??
+        GRAU_POR_INSTANCIA[(index + 1).toString()],
       segredo: instance.segredoJustica,
       numero: null,
       classe: instance.classe,

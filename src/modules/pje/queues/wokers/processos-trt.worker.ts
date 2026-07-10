@@ -245,11 +245,22 @@ export class GenericProcessoWorker extends WorkerHost {
       const alreadySent = await this.redis.get(successOkKey);
 
       const sendOnce = async (payload: Root) => {
-        if (!alreadySent) {
-          await axios.post(webhookUrl, payload, { headers: webhookHeaders });
-          await this.redis.set(successOkKey, '1', 'EX', 86400);
+        if (alreadySent) {
+          successWebhookSent = true;
+          return;
         }
+        await axios.post(webhookUrl, payload, { headers: webhookHeaders });
+        // Marca como enviado antes do redis.set: se o POST deu certo mas o
+        // set falhar, o catch externo não deve mandar um webhook de erro
+        // por cima de um sucesso já entregue.
         successWebhookSent = true;
+        try {
+          await this.redis.set(successOkKey, '1', 'EX', 86400);
+        } catch (redisErr: unknown) {
+          this.logger.warn(
+            `Falha ao gravar ${successOkKey} no Redis (webhook já enviado): ${redisErr instanceof Error ? redisErr.message : String(redisErr)}`,
+          );
+        }
       };
 
       if (!documents) {
