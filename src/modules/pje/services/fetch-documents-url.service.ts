@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
 import Redis from 'ioredis';
+import { sniffContentType } from 'src/utils/sniff-content-type';
 import { LoginErrorTrt } from 'src/utils/trt-validate';
 
 export interface DocumentoRequestContext {
@@ -171,20 +172,7 @@ export class FetchDocumentoService {
         `📦 Documento "${titulo}" (id=${documentId}): content-type=${contentTypeHeader} size=${buffer.length}bytes`,
       );
 
-      // O PJe às vezes manda o documento de verdade (HTML com o conteúdo
-      // real) com o header `content-type: application/json` errado — sem
-      // olhar o corpo, esses documentos válidos eram rejeitados. `%PDF`/`<`
-      // no início do buffer é bem mais confiável que o header nesse caso.
-      const inicioBuffer = buffer.toString('utf-8', 0, 50).trimStart();
-      const pareceHtml = inicioBuffer.startsWith('<');
-      const parecePdf = buffer.subarray(0, 4).toString('latin1') === '%PDF';
-      const contentTypeReal = /pdf|html/.test(contentTypeHeader)
-        ? contentTypeHeader
-        : parecePdf
-          ? 'application/pdf'
-          : pareceHtml
-            ? 'text/html'
-            : contentTypeHeader;
+      const contentTypeReal = sniffContentType(buffer, contentTypeHeader);
 
       // Documentos reais podem ser bem curtos (ex.: uma petição de juntada
       // de uma linha só, ~100 bytes) — um piso mínimo de tamanho rejeitava

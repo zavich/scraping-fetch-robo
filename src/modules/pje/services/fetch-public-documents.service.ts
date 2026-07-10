@@ -3,6 +3,7 @@ import axios from 'axios';
 import Redis from 'ioredis';
 import { ItensProcesso } from 'src/interfaces';
 import { comConcorrenciaLimitada } from 'src/utils/concurrency';
+import { sniffContentType } from 'src/utils/sniff-content-type';
 import { userAgents } from 'src/utils/user-agents';
 import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
 
@@ -106,9 +107,10 @@ export class FetchPublicDocumentsService {
             timeout: 60000,
           });
 
-          const contentType =
+          const contentTypeHeader =
             (docResponse.headers['content-type'] as string) ?? '';
           const buffer = Buffer.from(docResponse.data);
+          const contentType = sniffContentType(buffer, contentTypeHeader);
           this.logger.debug(
             `📦 Documento "${item.titulo}" (id=${item.id}): content-type=${contentType} size=${buffer.length}bytes`,
           );

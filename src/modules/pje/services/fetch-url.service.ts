@@ -86,8 +86,12 @@ export class FetchUrlMovimentService {
           // fazia o PJE devolver vazio/sem id, e a instância era pulada.
           const typeUrl = i === 3 ? 'tst' : `trt${regionTRT}`;
 
+          // Mesma chave usada em toda gravação/leitura de tokenCaptcha nesta
+          // classe (`fetchProcess`/`refreshTokenCaptcha`, linhas ~199/306/423)
+          // — antes lia de `pje:token:captcha:*`, uma chave em que nada nunca
+          // grava, então o token recém-resolvido nunca era reaproveitado.
           const tokenCaptcha = (await this.redis.get(
-            `pje:token:captcha:${numeroDoProcesso}:${i}`,
+            `tokencaptcha:${numeroDoProcesso}:${i}`,
           )) as string;
           const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
           let headersRedis: Record<string, string> = {};
@@ -240,6 +244,18 @@ export class FetchUrlMovimentService {
             this.logger.log(
               `📊 Instância ${i} (${numeroDoProcesso}): ${docs.length} documento(s) no itensProcesso (${publicos} público(s), ${docs.length - publicos} restrito(s))`,
             );
+          }
+
+          // Não inclui a instância se ela ficou travada num desafio de
+          // captcha não resolvido (só `imagem`/`tokenDesafio`, sem
+          // `itensProcesso`) — sem isso, o worker via `instances.length > 0`
+          // e tratava um payload incompleto como sucesso, mandando um
+          // webhook com uma "instância" que na verdade é só um captcha.
+          if (temDesafioDeCaptcha(processoResponse)) {
+            this.logger.warn(
+              `⚠️ Instância ${i} do processo ${numeroDoProcesso} ficou travada em desafio de captcha após ${captchaAttempts} tentativa(s) — não será incluída no resultado.`,
+            );
+            continue;
           }
 
           // Carimba o grau real (o `i` do loop) na resposta — o JSON do PJe
