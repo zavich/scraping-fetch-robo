@@ -228,27 +228,22 @@ export class FetchDocumentoService {
         error instanceof InvalidPjeDocumentResponseError ||
         error instanceof DocumentoNaoEncontradoError
       ) {
-        // Já logado com o corpo da resposta acima — relança como está, sem
-        // embrulhar, pra quem chamou poder identificar esse caso específico
+        // Já logado (sem o corpo) acima — relança como está, sem embrulhar,
+        // pra quem chamou poder identificar esse caso específico
         // (`instanceof`) e decidir se vale a pena renovar o tokenCaptcha e
         // tentar de novo, ou desistir direto (documento não encontrado).
         throw error;
       }
 
       const status = axios.isAxiosError(error) ? error.response?.status : null;
-      let responseData: string | null = null;
-      if (axios.isAxiosError(error) && error.response?.data) {
-        const raw: unknown = error.response.data;
-        if (Buffer.isBuffer(raw)) {
-          responseData = raw.toString('utf-8');
-        } else if (raw instanceof ArrayBuffer) {
-          responseData = Buffer.from(raw).toString('utf-8');
-        } else {
-          responseData = JSON.stringify(raw);
-        }
-      }
+      const contentType = axios.isAxiosError(error)
+        ? (error.response?.headers?.['content-type'] as string | undefined)
+        : undefined;
+      // Não loga o body — essa rota também baixa documentos restritos, e o
+      // corpo pode conter conteúdo sensível. Só metadados (status,
+      // content-type) vão pro log.
       this.logger.error(
-        `Erro ao buscar documento "${titulo}" (id=${documentId}) para processo ${processNumber}: HTTP ${status ?? 'n/a'} — ${error instanceof Error ? error.message : String(error)} | body=${responseData ? responseData.slice(0, 2000) : null}`,
+        `Erro ao buscar documento "${titulo}" (id=${documentId}) para processo ${processNumber}: HTTP ${status ?? 'n/a'} content-type=${contentType ?? 'n/a'} — ${error instanceof Error ? error.message : String(error)}`,
       );
 
       // 5xx do PJe (ex.: ARQ-509 "Erro inesperado na consulta ao banco de

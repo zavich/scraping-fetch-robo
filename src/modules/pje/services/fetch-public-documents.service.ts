@@ -130,22 +130,14 @@ export class FetchPublicDocumentsService {
           return documento;
         } catch (err) {
           const status = axios.isAxiosError(err) ? err.response?.status : null;
-          let responseData: string | null = null;
-          if (axios.isAxiosError(err) && err.response?.data) {
-            const raw: unknown = err.response.data;
-            if (Buffer.isBuffer(raw)) {
-              responseData = raw.toString('utf-8');
-            } else if (raw instanceof ArrayBuffer) {
-              responseData = Buffer.from(raw).toString('utf-8');
-            } else {
-              responseData = JSON.stringify(raw);
-            }
-          }
-          // Trunca o body no log — essa rota também serve documentos
-          // restritos, e o corpo pode conter conteúdo sensível além de
-          // inflar o tamanho do log.
+          const contentType = axios.isAxiosError(err)
+            ? (err.response?.headers?.['content-type'] as string | undefined)
+            : undefined;
+          // Não loga o body — essa rota também serve documentos restritos,
+          // e o corpo pode conter conteúdo sensível. Só metadados (status,
+          // content-type) vão pro log.
           this.logger.error(
-            `Erro ao processar documento público "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: HTTP ${status ?? 'n/a'} — ${err instanceof Error ? err.message : String(err)} | body=${responseData ? responseData.slice(0, 2000) : null}`,
+            `Erro ao processar documento público "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: HTTP ${status ?? 'n/a'} content-type=${contentType ?? 'n/a'} — ${err instanceof Error ? err.message : String(err)}`,
           );
           return null;
         }

@@ -346,6 +346,18 @@ export class GenericProcessoWorker extends WorkerHost {
             `Falha ao enviar webhook de fallback (movimentações) para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
           );
         });
+
+        if (successWebhookSent) {
+          // O fallback (só movimentações) já foi entregue — não relança.
+          // Um retry aqui reprocessaria documentos/uploads à toa (o
+          // resultado nunca seria publicado, já que `scraper:movements-ok`
+          // já foi gravado por `sendOnce` e as tentativas seguintes nem
+          // mandariam um eventual webhook de autos-success).
+          return;
+        }
+
+        // Fallback também falhou ao enviar — nada foi publicado ainda,
+        // então vale relançar pra deixar o BullMQ tentar de novo.
         throw docError instanceof Error
           ? docError
           : new Error(String(docError));
