@@ -193,13 +193,50 @@ export class ProcessDocumentsFindService {
     // continua alta.
     const INTERVALO_ENTRE_REQUESTS_MS = 300;
 
-    const resultados = await this.comConcorrenciaLimitada(
-      todosOsItens,
-      CONCORRENCIA_MAXIMA,
-      async ({ grau, processId, item }) => {
+    // Mesmo documento (mesma `chave`) pode aparecer em `todosOsItens` mais de
+    // uma vez — uma ocorrência por instância que o referencia. Sem esse
+    // cache, cada ocorrência disparava uma busca de verdade no PJe pro MESMO
+    // documento, uma pra cada instância — desperdiçando captcha/requests pra
+    // buscar de novo algo que a primeira ocorrência já baixou e salvou.
+    // Guarda a Promise (não só o resultado) e faz o get+set de forma síncrona
+    // — sem nenhum `await` entre eles — pra duas ocorrências concorrentes da
+    // mesma chave não caírem na janela de corrida e buscarem em paralelo.
+    const resultadoPorChave = new Map<string, Promise<Documento | null>>();
+    const textoPorChave = new Map<string, string>();
+
+    const buscarComCache = ({
+      grau,
+      processId,
+      item,
+    }: {
+      grau: string;
+      processId: number;
+      item: ItensProcesso;
+    }): Promise<Documento | null> => {
+      const chave = item.idUnicoDocumento || String(item.id);
+
+      const emAndamentoOuFeito = resultadoPorChave.get(chave);
+      if (emAndamentoOuFeito) {
+        this.logger.debug(
+          `♻️ Documento "${item.titulo}" (idUnico=${chave}) já foi buscado via outra instância — reaproveitando o que já foi salvo, sem nova requisição ao PJe.`,
+        );
+        // `item` aqui é um objeto diferente do que foi de fato buscado (cada
+        // instância tem sua própria cópia do item ecoado) — `.texto` só fica
+        // marcado no objeto que `processarDocumento` recebeu originalmente,
+        // então precisa ser replicado manualmente pra essa ocorrência também.
+        return emAndamentoOuFeito.then((documento) => {
+          const texto = textoPorChave.get(chave);
+          if (texto) {
+            item.texto = texto;
+          }
+          return documento;
+        });
+      }
+
+      const promise = (async () => {
         await this.delay(INTERVALO_ENTRE_REQUESTS_MS);
         const context = await getContexto(grau);
-        return this.processarDocumento(
+        const documento = await this.processarDocumento(
           context,
           processId,
           item,
@@ -207,7 +244,27 @@ export class ProcessDocumentsFindService {
           regionTRT,
           grau,
         );
-      },
+
+        if (documento === null) {
+          // Falhou com o contexto dessa instância — remove do cache pra uma
+          // ocorrência em OUTRA instância (processId/contexto diferente)
+          // poder tentar buscar de novo, em vez de herdar essa mesma falha.
+          resultadoPorChave.delete(chave);
+        } else if (item.texto) {
+          textoPorChave.set(chave, item.texto);
+        }
+
+        return documento;
+      })();
+
+      resultadoPorChave.set(chave, promise);
+      return promise;
+    };
+
+    const resultados = await this.comConcorrenciaLimitada(
+      todosOsItens,
+      CONCORRENCIA_MAXIMA,
+      buscarComCache,
     );
 
     for (const grau of new Set(todosOsItens.map((i) => i.grau))) {
@@ -220,8 +277,19 @@ export class ProcessDocumentsFindService {
       );
     }
 
+    // Com o cache por chave, o mesmo `Documento` pode aparecer mais de uma
+    // vez em `resultados` (uma vez por instância que referenciava o
+    // documento) — dedup pelo mesmo `uniqueName`/`temp_link` pra não mandar
+    // o mesmo upload repetido no payload final.
+    const chavesVistas = new Set<string>();
     const uploadedDocuments = resultados.filter(
-      (documento): documento is Documento => documento !== null,
+      (documento): documento is Documento => {
+        if (documento === null) return false;
+        const chave = documento.uniqueName || documento.temp_link;
+        if (chavesVistas.has(chave)) return false;
+        chavesVistas.add(chave);
+        return true;
+      },
     );
 
     if (uploadedDocuments.length === 0) {
