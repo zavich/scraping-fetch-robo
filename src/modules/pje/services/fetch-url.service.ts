@@ -302,9 +302,10 @@ export class FetchUrlMovimentService {
 
     const typeUrl = instance === '3' ? 'tst' : `trt${regionTRT}`;
     let url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${detalheProcessoId}`;
-    if (tockenCaptcha) url += `?tokenCaptcha=${tockenCaptcha}`;
+    if (tockenCaptcha)
+      url += `?tokenCaptcha=${encodeURIComponent(tockenCaptcha)}`;
     else if (tokenDesafio && resposta)
-      url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
+      url += `?tokenDesafio=${encodeURIComponent(tokenDesafio)}&resposta=${encodeURIComponent(resposta)}`;
 
     try {
       const response = await axios.get<ProcessosResponse>(url, {

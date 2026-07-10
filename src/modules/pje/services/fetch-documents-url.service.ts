@@ -140,7 +140,7 @@ export class FetchDocumentoService {
       }
 
       const urlBase = `https://pje.${context.typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${documentId}`;
-      const url = `${urlBase}?tokenCaptcha=${context.tokenCaptcha}`;
+      const url = `${urlBase}?tokenCaptcha=${encodeURIComponent(context.tokenCaptcha)}`;
       this.logger.debug(
         `📄 GET ${urlBase} (documento="${titulo}", tokenCaptcha=REDACTED)`,
       );

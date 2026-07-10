@@ -90,7 +90,7 @@ export class FetchPublicDocumentsService {
           await this.delay(INTERVALO_ENTRE_REQUESTS_MS);
 
           const tokenQuery = tokenCaptcha
-            ? `?tokenCaptcha=${tokenCaptcha}`
+            ? `?tokenCaptcha=${encodeURIComponent(tokenCaptcha)}`
             : '';
           const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${item.id}${tokenQuery}`;
           const urlForLog = tokenQuery
@@ -114,6 +114,16 @@ export class FetchPublicDocumentsService {
           this.logger.debug(
             `📦 Documento "${item.titulo}" (id=${item.id}): content-type=${contentType} size=${buffer.length}bytes`,
           );
+
+          // Nem o header nem o sniffing do buffer indicam PDF/HTML — não é um
+          // documento de verdade (ex.: JSON de erro do PJe). Não vale mandar
+          // pra Lambda, só geraria falha/ruído e gasto desnecessário.
+          if (!/pdf|html/.test(contentType)) {
+            this.logger.warn(
+              `⚠️ Documento "${item.titulo}" (id=${item.id}, idUnico=${item.idUnicoDocumento}) para ${processNumber}: content-type=${contentType} não parece PDF/HTML, pulando extração.`,
+            );
+            return null;
+          }
 
           const texto = await this.lambdaExtractorService.extractText(
             buffer,
