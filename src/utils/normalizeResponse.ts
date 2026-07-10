@@ -101,8 +101,17 @@ export function normalizeResponse(
     return isBetterNameCandidate(baseTrim, fromMap) ? fromMap : baseTrim;
   }
 
+  // Rótulo por grau real (`instance.instance`, carimbado em
+  // FetchUrlMovimentService.execute), não pela posição no array — quando uma
+  // instância é pulada (ex.: Ação Rescisória sem 1º grau), o índice deixa de
+  // corresponder ao grau real e mandava "PRIMEIRO_GRAU" pra uma 2ª instância.
+  const GRAU_POR_INSTANCIA: Record<string, string> = {
+    '1': 'PRIMEIRO_GRAU',
+    '2': 'SEGUNDO_GRAU',
+    '3': 'TERCEIRO_GRAU',
+  };
+
   const instancias = body.map((instance, index) => {
-    const grauInstanciaMap = ['PRIMEIRO_GRAU', 'SEGUNDO_GRAU'];
     const arquivado = instance?.itensProcesso?.some((item) =>
       item.titulo.match(
         /\bArquivados\s+os\s+autos\s+definitivamente\b[.!]?\s*$/i,
@@ -158,14 +167,18 @@ export function normalizeResponse(
         });
       });
 
-      partes = atualizarNomesPartes(instance.itensProcesso, partes);
+      partes = atualizarNomesPartes(instance.itensProcesso ?? [], partes);
     }
 
     const movimentacoes = instance?.itensProcesso?.map((item) => {
+      // Um documento só é público de verdade quando `publico` E não marcado
+      // `documentoSigiloso` — o PJe permite os dois sinais independentes.
+      const documentoPublico = Boolean(item?.publico) && !item?.documentoSigiloso;
+
       const partesConteudo = [
         item?.titulo,
         item?.tipo ? `| ${item.tipo}` : '',
-        !item?.publico && item?.documento ? '(Restrito)' : '',
+        !documentoPublico && item?.documento ? '(Restrito)' : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -174,16 +187,31 @@ export function normalizeResponse(
         data: string;
         conteudo: string;
         id: number;
+        pje_doc_id?: number;
+        publico?: boolean;
         uniqueNameDocumento?: string;
+        texto?: string;
       } = {
         data: new Intl.DateTimeFormat('pt-BR').format(new Date(item.data)),
         conteudo: partesConteudo,
         id: generateId(),
       };
 
+      // `item.id` é o id real do documento no PJe (o mesmo usado na URL de
+      // busca do documento) — só existe quando o item é de fato um
+      // documento, não uma movimentação textual comum.
+      if (item?.documento && item.id != null) {
+        mov.pje_doc_id = item.id;
+        mov.publico = documentoPublico;
+      }
+
       // adiciona uniqueNameDocumento apenas se existir e não for string vazia
       if (item?.idUnicoDocumento != null && item.idUnicoDocumento !== '') {
         mov.uniqueNameDocumento = String(item.idUnicoDocumento);
+      }
+
+      if (item?.texto) {
+        mov.texto = item.texto;
       }
 
       return mov;
@@ -193,7 +221,9 @@ export function normalizeResponse(
       id: instance.id,
       assunto: instance.assuntos,
       sistema: 'PJE',
-      instancia: grauInstanciaMap[index],
+      instancia:
+        GRAU_POR_INSTANCIA[instance.instance] ??
+        GRAU_POR_INSTANCIA[(index + 1).toString()],
       segredo: instance.segredoJustica,
       numero: null,
       classe: instance.classe,

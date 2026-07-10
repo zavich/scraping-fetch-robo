@@ -107,6 +107,9 @@ export interface Movimentacoes {
   data: string;
   conteudo: string;
   idUnicoDocumento?: string;
+  texto?: string;
+  pje_doc_id?: number;
+  publico?: boolean;
 }
 
 export interface Audiencia {

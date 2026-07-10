@@ -10,9 +10,13 @@ export interface ItensProcesso {
   titulo: string;
   tipo: string;
   publico: boolean;
+  // PJe também marca documentos sigilosos independente de `publico` — um
+  // documento só é público de verdade quando os dois batem.
+  documentoSigiloso?: boolean;
   idUnicoDocumento: string;
   instancia: string; // grau de instância
   instanciaId: number; // id da instância
+  texto?: string; // texto extraído via Lambda
 }
 
 type Assunto = {

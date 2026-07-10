@@ -4,10 +4,18 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 import Redis from 'ioredis';
-import { DetalheProcesso, ProcessosResponse } from 'src/interfaces';
+import {
+  DetalheProcesso,
+  ItensProcesso,
+  ProcessosResponse,
+} from 'src/interfaces';
 import { CaptchaService } from 'src/services/captcha.service';
-import { FetchDocumentoService } from './fetch-documents-url.service';
+import {
+  DocumentoExtraido,
+  FetchPublicDocumentsService,
+} from './fetch-public-documents.service';
 import { userAgents } from 'src/utils/user-agents';
+import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
 
 interface AxiosLikeError {
   response?: { status?: number };
@@ -25,7 +33,7 @@ export class FetchUrlMovimentService {
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    private readonly fetchDocumentoService: FetchDocumentoService,
+    private readonly fetchPublicDocumentsService: FetchPublicDocumentsService,
   ) {}
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
@@ -33,9 +41,16 @@ export class FetchUrlMovimentService {
   private getDelayMs(): number {
     return Math.floor(Math.random() * 10_001) + 5_000;
   }
+  private buildAuthHeaders(sessionCookies: string): Record<string, string> {
+    const match = sessionCookies.match(/access_token_1g=([^;]+)/);
+    const accessToken1g = match?.[1];
+    return accessToken1g ? { Authorization: `Bearer ${accessToken1g}` } : {};
+  }
+
   async execute(
     numeroDoProcesso: string,
     origem?: string,
+    sessionCookies?: string,
   ): Promise<Partial<ProcessosResponse>[]> {
     const regionTRT = numeroDoProcesso?.includes('.')
       ? Number(numeroDoProcesso.split('.')[3])
@@ -59,12 +74,24 @@ export class FetchUrlMovimentService {
           throw new Error(`Saldo insuficiente no 2Captcha: ${balance}`);
       }
 
-      const grauMax = origem === 'TST' ? 3 : 2;
-      const initialGrau = origem === 'TST' ? 3 : 1;
+      // Sempre tenta as 3 instâncias (1º grau, 2º grau e TST) — o try/catch
+      // por instância abaixo já lida com quem não existir para esse processo.
+      const grauMax = 3;
+      const initialGrau = 1;
       for (let i = initialGrau; i <= grauMax; i++) {
         try {
+          // A 3ª instância é o TST — um domínio totalmente à parte do TRT de
+          // origem, não "mais um grau" dentro do mesmo `pje.trt{regionTRT}`.
+          // Usar o domínio do TRT pra consultar dadosbasicos da instância 3
+          // fazia o PJE devolver vazio/sem id, e a instância era pulada.
+          const typeUrl = i === 3 ? 'tst' : `trt${regionTRT}`;
+
+          // Mesma chave usada em toda gravação/leitura de tokenCaptcha nesta
+          // classe (`fetchProcess`/`refreshTokenCaptcha`, linhas ~199/306/423)
+          // — antes lia de `pje:token:captcha:*`, uma chave em que nada nunca
+          // grava, então o token recém-resolvido nunca era reaproveitado.
           const tokenCaptcha = (await this.redis.get(
-            `pje:token:captcha:${numeroDoProcesso}:${i}`,
+            `tokencaptcha:${numeroDoProcesso}:${i}`,
           )) as string;
           const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
           let headersRedis: Record<string, string> = {};
@@ -83,7 +110,7 @@ export class FetchUrlMovimentService {
           } else {
             headersRedis = {
               'x-grau-instancia': i.toString(),
-              referer: `https://pje.${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
+              referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
               accept: 'application/json, text/plain, */*',
               'user-agent':
                 userAgents[Math.floor(Math.random() * userAgents.length)],
@@ -92,19 +119,26 @@ export class FetchUrlMovimentService {
           const awsWafTokenKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(awsWafTokenKey);
 
-          const url = `https://pje.trt${regionTRT}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
+          const url = `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
+          // Resolve o desafio de captcha SEM autenticação — autenticar essa
+          // etapa faz o PJE invalidar a resposta do captcha (visto em
+          // produção: instância que resolvia de primeira sem login passou a
+          // falhar sempre com Authorization/Cookie de sessão presentes).
           const headers = {
             ...headersRedis,
             referer: url,
             Cookie: `${awsWafToken || ''}`,
           };
           const { data } = await axios.get<DetalheProcesso[]>(
-            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+            `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
             { headers },
           );
 
           const detalheProcesso = data[0];
           if (!detalheProcesso?.id) {
+            this.logger.warn(
+              `⚠️ dadosbasicos sem id para ${numeroDoProcesso} (instância ${i}), pulando`,
+            );
             continue;
           }
 
@@ -127,13 +161,21 @@ export class FetchUrlMovimentService {
             tokenCaptcha,
           );
 
-          // Caso retorne captcha
-          if (
-            processoResponse &&
-            typeof processoResponse === 'object' &&
-            'imagem' in processoResponse &&
-            'tokenDesafio' in processoResponse
-          ) {
+          // Caso retorne captcha, resolve e tenta de novo — em até 3
+          // tentativas, já que a resolução pode vir com resposta errada e o
+          // PJE simplesmente devolver outro desafio em vez dos dados reais.
+          let captchaAttempts = 0;
+          const temDesafioDeCaptcha = (resp: ProcessosResponse) =>
+            !!resp &&
+            'imagem' in resp &&
+            'tokenDesafio' in resp &&
+            !resp.itensProcesso?.length;
+
+          while (temDesafioDeCaptcha(processoResponse) && captchaAttempts < 3) {
+            captchaAttempts++;
+            this.logger.warn(
+              `⚠️ PJE retornou desafio de captcha para ${numeroDoProcesso} (instância ${i}), tentativa ${captchaAttempts}/3`,
+            );
             const resposta = await this.fetchCaptcha(
               processoResponse.imagem,
               regionTRT,
@@ -149,7 +191,79 @@ export class FetchUrlMovimentService {
             );
           }
 
-          instances.push(processoResponse);
+          if (!processoResponse?.itensProcesso?.length) {
+            this.logger.warn(
+              `⚠️ Instância ${i} do processo ${numeroDoProcesso} não retornou itensProcesso após ${captchaAttempts} tentativa(s) de captcha`,
+            );
+          } else if (sessionCookies) {
+            // Captcha já resolvido (tokenCaptcha válido salvo no Redis por
+            // fetchProcess) — agora sim busca a versão autenticada, que traz
+            // itensProcesso mais completo (com documentos restritos).
+            const tokenCaptchaValido = await this.redis.get(
+              `tokencaptcha:${numeroDoProcesso}:${i}`,
+            );
+
+            if (tokenCaptchaValido) {
+              const authHeaders = {
+                ...headers,
+                ...this.buildAuthHeaders(sessionCookies),
+                Cookie: [sessionCookies, awsWafToken]
+                  .filter(Boolean)
+                  .join('; '),
+              };
+
+              try {
+                const authResponse = await this.fetchProcess(
+                  authHeaders,
+                  numeroDoProcesso,
+                  detalheProcesso.id,
+                  i.toString(),
+                  tokenCaptchaValido,
+                );
+
+                if (authResponse?.itensProcesso?.length) {
+                  processoResponse = authResponse;
+                } else {
+                  this.logger.warn(
+                    `⚠️ Busca autenticada da instância ${i} não retornou itensProcesso, mantendo versão sem login`,
+                  );
+                }
+              } catch (authError: unknown) {
+                this.logger.warn(
+                  `⚠️ Falha ao buscar versão autenticada da instância ${i} de ${numeroDoProcesso}: ${authError instanceof Error ? authError.message : String(authError)}`,
+                );
+              }
+            }
+          }
+
+          if (processoResponse?.itensProcesso?.length) {
+            const docs = processoResponse.itensProcesso.filter(
+              (item) => item.documento,
+            );
+            const publicos = docs.filter((item) => item.publico).length;
+            this.logger.log(
+              `📊 Instância ${i} (${numeroDoProcesso}): ${docs.length} documento(s) no itensProcesso (${publicos} público(s), ${docs.length - publicos} restrito(s))`,
+            );
+          }
+
+          // Não inclui a instância se ela ficou travada num desafio de
+          // captcha não resolvido (só `imagem`/`tokenDesafio`, sem
+          // `itensProcesso`) — sem isso, o worker via `instances.length > 0`
+          // e tratava um payload incompleto como sucesso, mandando um
+          // webhook com uma "instância" que na verdade é só um captcha.
+          if (temDesafioDeCaptcha(processoResponse)) {
+            this.logger.warn(
+              `⚠️ Instância ${i} do processo ${numeroDoProcesso} ficou travada em desafio de captcha após ${captchaAttempts} tentativa(s) — não será incluída no resultado.`,
+            );
+            continue;
+          }
+
+          // Carimba o grau real (o `i` do loop) na resposta — o JSON do PJe
+          // não vem com esse campo, e sem ele quem consome `instances` não
+          // tem como saber a que grau cada elemento pertence quando alguma
+          // instância é pulada (ex.: Ação Rescisória, que não tem 1º grau) e
+          // a posição no array deixa de corresponder ao grau real.
+          instances.push({ ...processoResponse, instance: i.toString() });
         } catch (err: unknown) {
           if (i === 1) {
             this.logger.error(
@@ -188,9 +302,10 @@ export class FetchUrlMovimentService {
 
     const typeUrl = instance === '3' ? 'tst' : `trt${regionTRT}`;
     let url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${detalheProcessoId}`;
-    if (tockenCaptcha) url += `?tokenCaptcha=${tockenCaptcha}`;
+    if (tockenCaptcha)
+      url += `?tokenCaptcha=${encodeURIComponent(tockenCaptcha)}`;
     else if (tokenDesafio && resposta)
-      url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
+      url += `?tokenDesafio=${encodeURIComponent(tokenDesafio)}&resposta=${encodeURIComponent(resposta)}`;
 
     try {
       const response = await axios.get<ProcessosResponse>(url, {
@@ -198,15 +313,21 @@ export class FetchUrlMovimentService {
       });
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
-        `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
+        `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance})`,
       );
-      const catchaTokenRedisKey = `tokencaptcha:${numeroDoProcesso}:${instance}`;
-      await this.redis.set(
-        catchaTokenRedisKey,
-        captchaToken,
-        'EX',
-        600, // expira em 10 minutos (captcha válido por ~5 min)
-      );
+      // Só grava quando vem um token novo — chamadas subsequentes (ex.: a
+      // busca autenticada extra, que reaproveita um tokenCaptcha já válido)
+      // não recebem um captchatoken novo, e gravar undefined aqui apagava o
+      // token bom salvo segundos antes (ioredis grava undefined como '').
+      if (captchaToken) {
+        const catchaTokenRedisKey = `tokencaptcha:${numeroDoProcesso}:${instance}`;
+        await this.redis.set(
+          catchaTokenRedisKey,
+          captchaToken,
+          'EX',
+          600, // expira em 10 minutos (captcha válido por ~5 min)
+        );
+      }
       return response.data;
     } catch (error: unknown) {
       const isTRT15 = regionTRT === 15;
@@ -235,6 +356,102 @@ export class FetchUrlMovimentService {
       }
 
       throw error;
+    }
+  }
+
+  // Renova o tokenCaptcha de uma instância/processo específico, repetindo o
+  // mesmo desafio de captcha resolvido em `execute()` (o endpoint de
+  // documento não tem desafio próprio — só consome um tokenCaptcha já
+  // resolvido por aqui). Usado quando `FetchDocumentoService` detecta que o
+  // token salvo no Redis foi rejeitado pelo PJe.
+  async refreshTokenCaptcha(
+    numeroDoProcesso: string,
+    processId: number | string,
+    instancia: string,
+    regionTRT: number,
+  ): Promise<string | null> {
+    try {
+      // Mesmo caso da instância 3 (TST) em `execute()` — domínio próprio,
+      // não é "mais um grau" dentro do `pje.trt{regionTRT}`.
+      const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
+
+      const headersRedisRaw = await this.redis.get(`headers:${regionTRT}`);
+      let headersRedis: Record<string, string> = {};
+      if (headersRedisRaw) {
+        try {
+          headersRedis = JSON.parse(headersRedisRaw) as Record<
+            string,
+            string
+          >;
+        } catch (error: unknown) {
+          headersRedis = {};
+        }
+      } else {
+        headersRedis = {
+          'x-grau-instancia': instancia,
+          referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instancia}`,
+          accept: 'application/json, text/plain, */*',
+          'user-agent':
+            userAgents[Math.floor(Math.random() * userAgents.length)],
+        };
+      }
+      const awsWafToken = await this.redis.get(
+        `aws-waf-token:${numeroDoProcesso}`,
+      );
+      const url = `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}`;
+      const headers = {
+        ...headersRedis,
+        referer: url,
+        Cookie: `${awsWafToken || ''}`,
+      };
+
+      let processoResponse = await this.fetchProcess(
+        headers,
+        numeroDoProcesso,
+        String(processId),
+        instancia,
+      );
+
+      const temDesafioDeCaptcha = (resp: ProcessosResponse) =>
+        !!resp &&
+        'imagem' in resp &&
+        'tokenDesafio' in resp &&
+        !resp.itensProcesso?.length;
+
+      let tentativas = 0;
+      while (temDesafioDeCaptcha(processoResponse) && tentativas < 3) {
+        tentativas++;
+        const resposta = await this.fetchCaptcha(
+          processoResponse.imagem,
+          regionTRT,
+        );
+        processoResponse = await this.fetchProcess(
+          headers,
+          numeroDoProcesso,
+          String(processId),
+          instancia,
+          undefined,
+          processoResponse.tokenDesafio,
+          resposta,
+        );
+      }
+
+      const tokenCaptchaRenovado = await this.redis.get(
+        `tokencaptcha:${numeroDoProcesso}:${instancia}`,
+      );
+
+      if (!tokenCaptchaRenovado) {
+        this.logger.warn(
+          `⚠️ Não foi possível renovar o tokenCaptcha de ${numeroDoProcesso} (instância ${instancia})`,
+        );
+      }
+
+      return tokenCaptchaRenovado || null;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `⚠️ Falha ao renovar tokenCaptcha de ${numeroDoProcesso} (instância ${instancia}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
     }
   }
 
@@ -283,74 +500,42 @@ export class FetchUrlMovimentService {
     // fallback final
     return '';
   }
-  async fetchDocuments(
+  async fetchPublicDocuments(
     processNumber: string,
     instances: ProcessosResponse[],
     regionTRT: number,
-  ) {
-    try {
-      const movimentsInstances = instances.map((inst, index) => {
-        // garante que há movimentações
-        if (!inst.itensProcesso?.length) return null;
+    includeRestricted = false,
+  ): Promise<DocumentoExtraido[]> {
+    const ultimaInstancia = findUltimaInstancia(instances);
 
-        // encontra a movimentação mais recente
-        const ultimaMovimentacao = inst.itensProcesso.reduce(
-          (maisRecente, atual) => {
-            const dataMaisRecente = new Date(maisRecente.data);
-            const dataAtual = new Date(atual.data);
-            return dataAtual > dataMaisRecente ? atual : maisRecente;
-          },
-        );
-
-        return {
-          id: inst.id,
-          instance: (index + 1).toString(),
-          ultimaMovimentacao,
-        };
-      });
-      const ultimaInstancia = movimentsInstances.reduce(
-        (maisRecente, atual) => {
-          if (!maisRecente) return atual;
-          if (!atual) return maisRecente;
-
-          const dataMaisRecente = new Date(maisRecente.ultimaMovimentacao.data);
-          const dataAtual = new Date(atual.ultimaMovimentacao.data);
-
-          // se a data atual for mais recente, retorna ela
-          if (dataAtual > dataMaisRecente) return atual;
-
-          // se for igual ou menor, mantém a maisRecente
-          return maisRecente;
-        },
-        null,
+    if (!ultimaInstancia) {
+      this.logger.warn(
+        `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
       );
-      if (!ultimaInstancia) {
-        this.logger.warn(
-          `⚠️ Nenhuma movimentação encontrada para ${processNumber}`,
-        );
-        return;
-      }
-
-      const delayMs = this.getDelayMs();
-      this.logger.debug(
-        `⏱ Delay de ${delayMs}ms antes de buscar documento da ${ultimaInstancia.instance}ª instância`,
-      );
-      await this.delay(delayMs);
-      const pdfBuffer = await this.fetchDocumentoService.execute(
-        ultimaInstancia.id,
-        regionTRT,
-        ultimaInstancia.instance,
-        processNumber,
-      );
-      if (!pdfBuffer || pdfBuffer.length === 0) {
-        throw new Error('PDF não gerado');
-      }
-      return pdfBuffer;
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar documentos para ${processNumber}:`,
-        error,
-      );
+      return [];
     }
+
+    const delayMs = this.getDelayMs();
+    this.logger.debug(
+      `⏱ Delay de ${delayMs}ms antes de buscar documentos públicos da ${ultimaInstancia.instance}ª instância`,
+    );
+    await this.delay(delayMs);
+
+    // Quando includeRestricted, busca também os documentos restritos (todos,
+    // sem filtro por título) via /documentos/{id}, sem depender do fluxo de
+    // login + /integra.
+    const filter = includeRestricted
+      ? (item: ItensProcesso) =>
+          Boolean(item.documento && item.idUnicoDocumento)
+      : undefined;
+
+    return this.fetchPublicDocumentsService.execute(
+      ultimaInstancia.id,
+      regionTRT,
+      ultimaInstancia.instance,
+      processNumber,
+      ultimaInstancia.itensProcesso,
+      filter,
+    );
   }
 }

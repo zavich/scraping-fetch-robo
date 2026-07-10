@@ -2,117 +2,272 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
 
 import Redis from 'ioredis';
+import { sniffContentType } from 'src/utils/sniff-content-type';
 import { LoginErrorTrt } from 'src/utils/trt-validate';
+
+export interface DocumentoRequestContext {
+  typeUrl: string;
+  tokenCaptcha: string;
+  headers: Record<string, string>;
+}
+
+// Erro pra quando o PJe responde 200 com um conteúdo que genuinamente não é
+// o documento e a causa não é clara (provável tokenCaptcha rejeitado).
+// Diferenciado de erros de rede/parâmetro pra quem chama poder decidir
+// renovar o token e tentar de novo, em vez de desistir direto.
+export class InvalidPjeDocumentResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidPjeDocumentResponseError';
+  }
+}
+
+// Erro pra quando o PJe diz explicitamente, num JSON de erro de verdade, que
+// aquele ID de documento não existe naquele processo — não tem token que
+// resolva isso, renovar captcha e tentar de novo é desperdício.
+export class DocumentoNaoEncontradoError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DocumentoNaoEncontradoError';
+  }
+}
 
 @Injectable()
 export class FetchDocumentoService {
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
   private readonly logger = new Logger(FetchDocumentoService.name);
-  async execute(
-    processId: number,
+
+  // Monta uma única vez os headers de sessão logada (Authorization, cookies,
+  // tokenCaptcha) para depois buscar todos os documentos restritos de um
+  // processo sem repetir login/redis a cada requisição.
+  async buildContext(
     regionTRT: number,
     instancia: string,
     processNumber: string,
-  ): Promise<Buffer> {
-    try {
-      if (!processId || !regionTRT || !instancia) {
-        throw new Error('Parâmetros inválidos fornecidos');
-      }
-      const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
-        ? 2
-        : regionTRT;
+  ): Promise<DocumentoRequestContext> {
+    if (!regionTRT || !instancia) {
+      throw new Error('Parâmetros inválidos fornecidos');
+    }
+    const regionTRTValidate = LoginErrorTrt.includes(regionTRT) ? 2 : regionTRT;
 
-      const redisKey = `pje:session:${regionTRTValidate}`;
-      const cookies = (await this.redis.get(redisKey)) || '';
-      const awsWafTokenKey = `aws-waf-token:${processNumber}`;
-      const awsWafToken = await this.redis.get(awsWafTokenKey);
-      // 🔹 tokenCaptcha
-      this.logger.debug(
-        `Iniciando busca do tokenCaptcha para o processo ${processNumber}, instância ${instancia}`,
+    const redisKey = `pje:session:${regionTRTValidate}`;
+    const cookies = (await this.redis.get(redisKey)) || '';
+    const awsWafTokenKey = `aws-waf-token:${processNumber}`;
+    const awsWafToken = await this.redis.get(awsWafTokenKey);
+
+    this.logger.debug(
+      `Iniciando busca do tokenCaptcha para o processo ${processNumber}, instância ${instancia}`,
+    );
+
+    const catchaTokenRedisKey = `tokencaptcha:${processNumber}:${instancia}`;
+    let tokenCaptcha = await this.redis.get(catchaTokenRedisKey);
+
+    // fallback entre instâncias
+    if (!tokenCaptcha) {
+      this.logger.warn(
+        `⚠️ Nenhum tokenCaptcha para ${processNumber} (instância ${instancia}), tentando fallback...`,
       );
 
-      const catchaTokenRedisKey = `tokencaptcha:${processNumber}:${instancia}`;
-      let tokenCaptcha = await this.redis.get(catchaTokenRedisKey);
+      for (const inst of ['1', '2', '3']) {
+        if (inst === instancia) continue;
 
-      // fallback entre instâncias
-      if (!tokenCaptcha) {
-        this.logger.warn(
-          `⚠️ Nenhum tokenCaptcha para ${processNumber} (instância ${instancia}), tentando fallback...`,
-        );
+        const alternativaKey = `tokencaptcha:${processNumber}:${inst}`;
+        tokenCaptcha = await this.redis.get(alternativaKey);
 
-        for (const inst of ['1', '2', '3']) {
-          if (inst === instancia) continue;
-
-          const alternativaKey = `tokencaptcha:${processNumber}:${inst}`;
-          tokenCaptcha = await this.redis.get(alternativaKey);
-
-          if (tokenCaptcha) {
-            this.logger.debug(
-              `Token encontrado na instância ${inst}: ${tokenCaptcha}`,
-            );
-            break;
-          }
+        if (tokenCaptcha) {
+          this.logger.debug(`Token encontrado na instância ${inst}`);
+          break;
         }
       }
+    }
 
-      if (!tokenCaptcha) {
-        this.logger.warn(
-          `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber}`,
-        );
+    if (!tokenCaptcha) {
+      this.logger.warn(
+        `⚠️ Nenhum tokenCaptcha encontrado para ${processNumber}`,
+      );
+    }
+
+    const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
+
+    // 🔹 extrai token do cookie
+    const match = cookies.match(/access_token_1g=([^;]+)/);
+    const accessToken1g = match?.[1];
+
+    if (!accessToken1g) {
+      this.logger.error(`❌ access_token_1g não encontrado no cookie`);
+      throw new Error('Sessão inválida (sem access_token_1g)');
+    }
+
+    // 🔹 o cookie de sessão salvo no Redis (com access_token_1g e demais
+    // cookies da sessão logada) precisa ir junto no header Cookie da request
+    // de /documentos — só extrair o access_token_1g pro Authorization não
+    // basta, essa rota também valida a sessão via cookie.
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${accessToken1g}`,
+      'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      Cookie: [cookies, awsWafToken].filter(Boolean).join('; '),
+      'x-grau-instancia': instancia,
+      referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+      accept: 'application/json, text/plain, */*',
+      'sec-fetch-site': 'same-origin',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-dest': 'empty',
+      'sec-ch-ua': '"Chromium";v="146", "Not A(Brand";v="99"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"Windows"',
+    };
+
+    return { typeUrl, tokenCaptcha: tokenCaptcha || '', headers };
+  }
+
+  private async delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async fetchDocumento(
+    context: DocumentoRequestContext,
+    processId: number,
+    documentId: number,
+    processNumber: string,
+    titulo: string,
+    tentativa = 1,
+  ): Promise<{ buffer: Buffer; contentType: string }> {
+    try {
+      if (!processId || !documentId) {
+        throw new Error('Parâmetros inválidos fornecidos');
       }
 
-      // 🔹 URL
-      const typeUrl = instancia === '3' ? 'tst' : `trt${regionTRT}`;
-      const url = `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/integra?tokenCaptcha=${tokenCaptcha || ''}`;
-
-      // 🔹 extrai token do cookie
-      const match = cookies.match(/access_token_1g=([^;]+)/);
-      const accessToken1g = match?.[1];
-
-      if (!accessToken1g) {
-        this.logger.error(`❌ access_token_1g não encontrado no cookie`);
-        throw new Error('Sessão inválida (sem access_token_1g)');
-      }
-      // 🔹 headers
-      const headers = {
-        Authorization: `Bearer ${accessToken1g}`,
-        'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-        Cookie: `${awsWafToken || ''}`, // 👈 importante juntar tudo
-        'x-grau-instancia': instancia,
-        referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${processNumber}/${instancia}`,
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
-        accept: 'application/json, text/plain, */*',
-        'sec-fetch-site': 'same-origin',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-dest': 'empty',
-        'sec-ch-ua': '"Chromium";v="146", "Not A(Brand";v="99"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
-      };
-      this.logger.debug(`HEADERS PARA REQUISIÇÃO: content-type=${headers['content-type'] ?? 'n/a'} accept=${headers['accept']}`);
+      const urlBase = `https://pje.${context.typeUrl}.jus.br/pje-consulta-api/api/processos/${processId}/documentos/${documentId}`;
+      const url = `${urlBase}?tokenCaptcha=${encodeURIComponent(context.tokenCaptcha)}`;
+      this.logger.debug(
+        `📄 GET ${urlBase} (documento="${titulo}", tokenCaptcha=REDACTED)`,
+      );
 
       const response = await axios.get(url, {
-        headers,
+        headers: context.headers,
         timeout: 180000, // Aumente para 180 segundos para casos mais complexos
         responseType: 'arraybuffer',
         withCredentials: true,
       });
 
-      // Validação do conteúdo antes de salvar como PDF
-      if (!Buffer.isBuffer(response.data)) {
+      // Com `responseType: 'arraybuffer'`, o axios no Node pode devolver um
+      // ArrayBuffer puro (não um Buffer) — `Buffer.isBuffer` sozinho rejeitava
+      // esses casos válidos. `Buffer.from` abaixo já sabe converter os dois.
+      const isBufferConvertible =
+        Buffer.isBuffer(response.data) ||
+        response.data instanceof ArrayBuffer ||
+        ArrayBuffer.isView(response.data);
+      if (!isBufferConvertible) {
         this.logger.error(
-          'Erro: O conteúdo retornado pela API não é um PDF válido.',
+          'Erro: O conteúdo retornado pela API não é um arquivo válido.',
         );
-        throw new Error('Invalid PDF structure.');
+        throw new Error('Invalid document structure.');
       }
-      return Buffer.from(response.data);
-    } catch (error) {
-      this.logger.error(
-        `Erro ao buscar documento para processo ${processNumber}:`,
-        error.message,
+      const contentTypeHeader =
+        (response.headers['content-type'] as string) ?? 'application/pdf';
+      const buffer = Buffer.from(response.data);
+      this.logger.debug(
+        `📦 Documento "${titulo}" (id=${documentId}): content-type=${contentTypeHeader} size=${buffer.length}bytes`,
       );
-      throw new Error('Erro ao executar DocumentoService');
+
+      const contentTypeReal = sniffContentType(buffer, contentTypeHeader);
+
+      // Documentos reais podem ser bem curtos (ex.: uma petição de juntada
+      // de uma linha só, ~100 bytes) — um piso mínimo de tamanho rejeitava
+      // esses documentos válidos. Quem decide validade agora é só o
+      // sniffing de conteúdo acima (contentTypeReal), e a checagem de JSON
+      // de erro abaixo, não o tamanho do buffer.
+      const isDocumentoValido = /pdf|html/i.test(contentTypeReal);
+      if (!isDocumentoValido) {
+        // Não loga o corpo — essa rota também serve documentos restritos, e
+        // o conteúdo pode ser sensível. Só metadados (content-type/size)
+        // vão pro log; o corpo em si só é inspecionado em memória abaixo
+        // pra decidir se é um JSON de erro de "documento não encontrado".
+        this.logger.error(
+          `Resposta inválida do PJe pro documento "${titulo}" (id=${documentId}, processo=${processNumber}): content-type=${contentTypeHeader} size=${buffer.length}bytes`,
+        );
+
+        // JSON de erro de verdade dizendo que o documento não existe — não é
+        // problema de token, renovar captcha não resolve.
+        try {
+          const parsed = JSON.parse(buffer.toString('utf-8')) as {
+            mensagemErro?: string;
+          };
+          if (parsed?.mensagemErro) {
+            throw new DocumentoNaoEncontradoError(parsed.mensagemErro);
+          }
+        } catch (parseError) {
+          if (parseError instanceof DocumentoNaoEncontradoError) {
+            throw parseError;
+          }
+          // não era JSON de verdade — segue como InvalidPjeDocumentResponseError
+        }
+
+        throw new InvalidPjeDocumentResponseError(
+          `Resposta inválida do PJe para o documento (content-type=${contentTypeHeader}, size=${buffer.length}bytes)`,
+        );
+      }
+
+      return { buffer, contentType: contentTypeReal };
+    } catch (error) {
+      if (
+        error instanceof InvalidPjeDocumentResponseError ||
+        error instanceof DocumentoNaoEncontradoError
+      ) {
+        // Já logado (sem o corpo) acima — relança como está, sem embrulhar,
+        // pra quem chamou poder identificar esse caso específico
+        // (`instanceof`) e decidir se vale a pena renovar o tokenCaptcha e
+        // tentar de novo, ou desistir direto (documento não encontrado).
+        throw error;
+      }
+
+      const status = axios.isAxiosError(error) ? error.response?.status : null;
+      const contentType = axios.isAxiosError(error)
+        ? (error.response?.headers?.['content-type'] as string | undefined)
+        : undefined;
+      // Não loga o body — essa rota também baixa documentos restritos, e o
+      // corpo pode conter conteúdo sensível. Só metadados (status,
+      // content-type) vão pro log.
+      this.logger.error(
+        `Erro ao buscar documento "${titulo}" (id=${documentId}) para processo ${processNumber}: HTTP ${status ?? 'n/a'} content-type=${contentType ?? 'n/a'} — ${error instanceof Error ? error.message : String(error)}`,
+      );
+
+      // 5xx do PJe (ex.: ARQ-509 "Erro inesperado na consulta ao banco de
+      // dados") costuma ser sobrecarga/contenção transitória no backend
+      // deles, e 429 é bloqueio explícito por excesso de requisições — os
+      // dois valem retry com espera, diferente de 404/tokenCaptcha inválido,
+      // que não se resolvem tentando de novo. 429 espera mais (é bloqueio de
+      // taxa, não só um hiccup pontual) e respeita o header `retry-after`
+      // quando o PJe manda um.
+      const isRateLimited = status === 429;
+      const isServerError = !!status && status >= 500;
+      const MAX_TENTATIVAS = 3;
+      if ((isRateLimited || isServerError) && tentativa < MAX_TENTATIVAS) {
+        const retryAfterHeader = axios.isAxiosError(error)
+          ? error.response?.headers?.['retry-after']
+          : undefined;
+        const retryAfterMs = retryAfterHeader
+          ? Number(retryAfterHeader) * 1000
+          : undefined;
+        const esperaMs =
+          retryAfterMs || (isRateLimited ? 5000 : 2000) * tentativa;
+        this.logger.warn(
+          `🔄 HTTP ${status} do PJe pro documento "${titulo}" (id=${documentId}) — tentativa ${tentativa}/${MAX_TENTATIVAS}, retry em ${esperaMs}ms`,
+        );
+        await this.delay(esperaMs);
+        return this.fetchDocumento(
+          context,
+          processId,
+          documentId,
+          processNumber,
+          titulo,
+          tentativa + 1,
+        );
+      }
+
+      throw error instanceof Error ? error : new Error(String(error));
     }
   }
 }

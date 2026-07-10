@@ -15,16 +15,9 @@ import {
 import { ApiKeyAuthGuard } from 'src/guards/api-key.guard';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
-import {
-  ALL_TRT_QUEUES,
-  ALL_TRT_DOCUMENT_QUEUES,
-} from 'src/helpers/getTRTQueue';
+import { ALL_TRT_QUEUES } from 'src/helpers/getTRTQueue';
 
-const ALLOWED_REDIS_QUEUES = new Set([
-  ...ALL_TRT_QUEUES,
-  ...ALL_TRT_DOCUMENT_QUEUES,
-  'pje-tst',
-]);
+const ALLOWED_REDIS_QUEUES = new Set([...ALL_TRT_QUEUES, 'pje-tst']);
 
 import { Response } from 'express';
 import { PDFDocument } from 'pdf-lib';
@@ -142,7 +135,7 @@ export class PjeController {
   async clearRedis(@Param('queue') queue: string) {
     if (!ALLOWED_REDIS_QUEUES.has(queue)) {
       throw new BadRequestException(
-        `Fila desconhecida: "${queue}". Use um dos nomes: pje-trt1..24, pje-documentos-trt1..24, pje-tst`,
+        `Fila desconhecida: "${queue}". Use um dos nomes: pje-trt1..24, pje-tst`,
       );
     }
     return await this.redisService.deleteQueue(queue);

@@ -1,85 +1,32 @@
-import { getQueueToken, WorkerHost } from '@nestjs/bullmq';
+import { WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
 import axios from 'axios';
-import { Job, Queue } from 'bullmq';
+import { Job } from 'bullmq';
 import Redis from 'ioredis';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
-import { LoginErrorTrt } from 'src/utils/trt-validate';
+import { deleteByPattern } from 'src/utils/redis-delete-keys';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
+import { ProcessDocumentsFindService } from '../../services/process-documents-find.service';
 import { ProcessosResponse } from 'src/interfaces';
+import { DocumentoExtraido } from '../../services/fetch-public-documents.service';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { Root } from 'src/interfaces/normalize';
-import { AwsS3Service } from 'src/services/aws-s3.service';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
-  private readonly documentosQueues: Record<string, Queue> = {};
   constructor(
-    @Inject(LoginPoolService)
-    private readonly loginPool: LoginPoolService,
     @Inject(FetchUrlMovimentService)
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
+    @Inject(LoginPoolService)
+    private readonly loginPool: LoginPoolService,
+    @Inject(ProcessDocumentsFindService)
+    private readonly processDocsService: ProcessDocumentsFindService,
     @Inject(ScrapingService)
     private readonly scrapingService: ScrapingService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
-    @Inject(AwsS3Service)
-    private readonly awsS3Service: AwsS3Service,
-
-    // ✅ injeta todas as filas TRT
-    @Inject(getQueueToken('pje-documentos-trt1')) trt1: Queue,
-    @Inject(getQueueToken('pje-documentos-trt2')) trt2: Queue,
-    @Inject(getQueueToken('pje-documentos-trt3')) trt3: Queue,
-    @Inject(getQueueToken('pje-documentos-trt4')) trt4: Queue,
-    @Inject(getQueueToken('pje-documentos-trt5')) trt5: Queue,
-    @Inject(getQueueToken('pje-documentos-trt6')) trt6: Queue,
-    @Inject(getQueueToken('pje-documentos-trt7')) trt7: Queue,
-    @Inject(getQueueToken('pje-documentos-trt8')) trt8: Queue,
-    @Inject(getQueueToken('pje-documentos-trt9')) trt9: Queue,
-    @Inject(getQueueToken('pje-documentos-trt10')) trt10: Queue,
-    @Inject(getQueueToken('pje-documentos-trt11')) trt11: Queue,
-    @Inject(getQueueToken('pje-documentos-trt12')) trt12: Queue,
-    @Inject(getQueueToken('pje-documentos-trt13')) trt13: Queue,
-    @Inject(getQueueToken('pje-documentos-trt14')) trt14: Queue,
-    @Inject(getQueueToken('pje-documentos-trt15')) trt15: Queue,
-    @Inject(getQueueToken('pje-documentos-trt16')) trt16: Queue,
-    @Inject(getQueueToken('pje-documentos-trt17')) trt17: Queue,
-    @Inject(getQueueToken('pje-documentos-trt18')) trt18: Queue,
-    @Inject(getQueueToken('pje-documentos-trt19')) trt19: Queue,
-    @Inject(getQueueToken('pje-documentos-trt20')) trt20: Queue,
-    @Inject(getQueueToken('pje-documentos-trt21')) trt21: Queue,
-    @Inject(getQueueToken('pje-documentos-trt22')) trt22: Queue,
-    @Inject(getQueueToken('pje-documentos-trt23')) trt23: Queue,
-    @Inject(getQueueToken('pje-documentos-trt24')) trt24: Queue,
   ) {
     super();
-
-    this.documentosQueues = {
-      trt1: trt1,
-      trt2: trt2,
-      trt3: trt3,
-      trt4: trt4,
-      trt5: trt5,
-      trt6: trt6,
-      trt7: trt7,
-      trt8: trt8,
-      trt9: trt9,
-      trt10: trt10,
-      trt11: trt11,
-      trt12: trt12,
-      trt13: trt13,
-      trt14: trt14,
-      trt15: trt15,
-      trt16: trt16,
-      trt17: trt17,
-      trt18: trt18,
-      trt19: trt19,
-      trt20: trt20,
-      trt21: trt21,
-      trt22: trt22,
-      trt23: trt23,
-      trt24: trt24,
-    };
   }
 
   async process(
@@ -135,12 +82,47 @@ export class GenericProcessoWorker extends WorkerHost {
       if (regionTRT === 3 || regionTRT === 9) {
         await this.scrapingService.execute(numero, regionTRT, 1);
       }
+
+      // Quando documents:true, autentica ANTES de buscar as movimentações —
+      // sem login o PJE retorna itensProcesso incompleto (sem os documentos
+      // restritos), então a busca de movimentações precisa ir com os
+      // cookies/headers da sessão logada. A mesma sessão é reaproveitada
+      // depois na busca dos documentos restritos (via Redis).
+      let sessionCookies: string | undefined;
+      if (documents) {
+        const { cookies, account } = await this.loginPool.getCookies(
+          regionTRT,
+          numero,
+        );
+
+        if (!cookies || !account) {
+          const response = normalizeResponse(
+            numero,
+            [],
+            `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
+            {
+              status: 'ERRO',
+              motivoErro: 'LOGIN_UNAVAILABLE',
+              webhookId: `${correlationId}:login-unavailable`,
+              origem,
+            },
+          );
+          await axios.post(webhookUrl, response, { headers: webhookHeaders });
+          return;
+        }
+        sessionCookies = cookies;
+      }
+
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
+        sessionCookies,
       );
 
-      const result = instances.slice(0, 2);
+      // Sem cap aqui — processo pode ter até 3 instâncias (1º grau, 2º grau
+      // e TST). Um `.slice(0, 2)` de antes do suporte a TST descartava a 3ª
+      // instância do webhook mesmo quando ela era buscada com sucesso.
+      const result = instances;
 
       if (!instances || instances.length === 0) {
         this.logger.warn(
@@ -218,149 +200,185 @@ export class GenericProcessoWorker extends WorkerHost {
       }
 
       // --------------------------
-      // ✅ Resposta final
+      // 📄 Documentos públicos (best-effort — enriquece as movimentações antes do webhook)
+      // Pulado quando documents:true — nesse caso o fluxo de autos (login) logo
+      // abaixo já busca públicos e restritos juntos, numa única passada.
       // --------------------------
-      const response = normalizeResponse(
-        numero,
-        result as ProcessosResponse[],
-        '',
-        {
-          origem,
-          webhookId: `${correlationId}:movements-success`,
-        },
-      );
+      if (!documents) {
+        try {
+          this.logger.log(
+            `📄 [${job.queueName}] Extraindo documentos públicos para ${numero} (TRT-${regionTRT})`,
+          );
+          const publicDocs: DocumentoExtraido[] =
+            await this.fetchUrlMovimentService.fetchPublicDocuments(
+              numero,
+              instances as ProcessosResponse[],
+              regionTRT,
+              false,
+            );
 
-      this.logger.debug(
-        `RESPONSE: numero=${numero} status=${response?.resposta ?? 'n/a'}`,
-      );
+          const publicDocsById = new Map(
+            publicDocs.map((d) => [d.idUnicoDocumento, d.texto]),
+          );
+          for (const instance of instances as ProcessosResponse[]) {
+            if (!instance.itensProcesso?.length) continue;
+            for (const item of instance.itensProcesso) {
+              const texto = publicDocsById.get(item.idUnicoDocumento);
+              if (texto) item.texto = texto;
+            }
+          }
+
+          this.logger.log(
+            `✅ [${job.queueName}] ${publicDocs.length} documento(s) público(s) extraído(s) para ${numero}`,
+          );
+        } catch (publicDocError) {
+          this.logger.warn(
+            `⚠️ Falha ao extrair documentos públicos para ${numero}: ${publicDocError instanceof Error ? publicDocError.message : String(publicDocError)}`,
+          );
+        }
+      }
+
       this.logger.log(`✅ [${job.queueName}] Finalizado ${numero}`);
 
       // Evita re-envio em retries do BullMQ: checa se o webhook de sucesso já foi
       // enviado numa tentativa anterior (correlationId é estável por estar no job data).
-      const movementsOkKey = `scraper:movements-ok:${correlationId}`;
-      const alreadySentMovements = await this.redis.get(movementsOkKey);
-      if (!alreadySentMovements) {
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
-        successWebhookSent = true; // setado antes do redis.set para evitar double-webhook se o set falhar
-        await this.redis.set(movementsOkKey, '1', 'EX', 86400);
-      }
-      // Se alreadySentMovements=true (retry anterior), o webhook já foi enviado
-      successWebhookSent = true;
+      const successOkKey = `scraper:movements-ok:${correlationId}`;
+      const alreadySent = await this.redis.get(successOkKey);
 
-      if (documents) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        this.logger.log(
-          `🔐 [${job.queueName}] Consulta de documentos para ${numero} (TRT-${regionTRT})`,
-        );
-        let docsWebhookSent = false;
+      const sendOnce = async (payload: Root) => {
+        if (alreadySent) {
+          successWebhookSent = true;
+          return;
+        }
+        await axios.post(webhookUrl, payload, { headers: webhookHeaders });
+        // Marca como enviado antes do redis.set: se o POST deu certo mas o
+        // set falhar, o catch externo não deve mandar um webhook de erro
+        // por cima de um sucesso já entregue.
+        successWebhookSent = true;
         try {
-          const regionTRTValidate = LoginErrorTrt.includes(regionTRT)
-            ? 2
-            : regionTRT;
+          await this.redis.set(successOkKey, '1', 'EX', 86400);
+        } catch (redisErr: unknown) {
+          this.logger.warn(
+            `Falha ao gravar ${successOkKey} no Redis (webhook já enviado): ${redisErr instanceof Error ? redisErr.message : String(redisErr)}`,
+          );
+        }
+      };
 
-          const { cookies, account } = await this.loginPool.getCookies(
-            regionTRTValidate,
+      if (!documents) {
+        // --------------------------
+        // ✅ Resposta final (inclui texto dos docs públicos se extraídos)
+        // --------------------------
+        const response = normalizeResponse(
+          numero,
+          result as ProcessosResponse[],
+          '',
+          {
+            origem,
+            webhookId: `${correlationId}:movements-success`,
+          },
+        );
+        await sendOnce(response);
+        return;
+      }
+
+      // Com documents:true, manda só UM webhook de sucesso ao final (em vez
+      // de um pras movimentações e outro pros documentos restritos) —
+      // cada webhook vira uma gravação completa de processo/instâncias/
+      // partes/movimentações no Parquet (SaveWebhookToAthenaService), então
+      // dois webhooks pro mesmo job duplicavam essas linhas no Athena.
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      this.logger.log(
+        `🔐 [${job.queueName}] Consulta de documentos restritos para ${numero} (TRT-${regionTRT})`,
+      );
+
+      // Busca os documentos restritos direto aqui — o login já foi feito
+      // acima pra autenticar a busca de movimentações, então não faz mais
+      // sentido delegar isso a um worker/fila separado que ia logar de novo.
+      try {
+        const documentos = await this.processDocsService.execute(
+          numero,
+          instances as ProcessosResponse[],
+          regionTRT,
+        );
+
+        // Checa TODAS as instâncias, não só a primeira — com até 3 (incluindo
+        // TST), é comum a primeira vir sem documentos e outra vir com.
+        const totalDocumentos = documentos.reduce(
+          (total, doc) => total + doc.documentos.length,
+          0,
+        );
+        if (documentos.length === 0 || totalDocumentos === 0) {
+          // Nenhum documento restrito relevante encontrado — as movimentações
+          // em si foram coletadas com sucesso, então manda só elas em vez de
+          // descartar tudo como erro.
+          this.logger.warn(`⚠️ Nenhum documento encontrado para ${numero}`);
+          const resp = normalizeResponse(
             numero,
-          );
-
-          // Se não tiver cookies, significa que nenhuma conta está disponível
-          if (!cookies || !account) {
-            const resp = normalizeResponse(
-              numero,
-              [],
-              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
-              {
-                status: 'ERRO',
-                motivoErro: 'LOGIN_UNAVAILABLE',
-                webhookId: `${correlationId}:docs-login-unavailable`,
-                origem,
-              },
-            );
-            docsWebhookSent = true;
-            await axios.post(webhookUrl, resp, { headers: webhookHeaders });
-            throw new Error(
-              `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
-            );
-          }
-          const pdfBuffer = await this.fetchUrlMovimentService.fetchDocuments(
-            numero,
-            instances as ProcessosResponse[],
-            regionTRT,
-          );
-          if (!pdfBuffer) {
-            throw new Error(
-              `fetchDocuments retornou undefined para ${numero} (TRT-${regionTRT})`,
-            );
-          }
-
-          // Valida que a fila existe antes de fazer o upload para evitar
-          // objetos órfãos no S3 caso a fila não seja encontrada.
-          const queueName = `trt${regionTRT}`;
-          const documentosQueue = this.documentosQueues[queueName];
-          if (!documentosQueue) {
-            throw new Error(
-              `Fila de documentos nao encontrada para trt${regionTRT} (${numero})`,
-            );
-          }
-
-          // Salva o PDF no S3 como arquivo temporário para não trafegar o
-          // buffer pelo Redis (cada PDF pode ter dezenas de MB no payload do job).
-          const pdfS3Key = `temp-pdf/${numero}/${correlationId}.pdf`;
-          await this.awsS3Service.uploadS3Object(
-            process.env.AWS_S3_BUCKET_NAME as string,
-            pdfS3Key,
-            pdfBuffer,
-            'application/pdf',
-          );
-
-          try {
-            await documentosQueue.add(
-              'consulta-processo-documento',
-              { numero, instances, pdfS3Key, correlationId },
-              {
-                jobId: `${numero}:${correlationId}`,
-                attempts: 3,
-                backoff: { type: 'exponential', delay: 5000 },
-              },
-            );
-          } catch (enqueueError) {
-            // Remove o arquivo temporário do S3 para evitar objetos órfãos
-            // quando o enqueue falha após o upload já ter sido feito.
-            try {
-              await this.awsS3Service.deleteS3Object(
-                process.env.AWS_S3_BUCKET_NAME as string,
-                pdfS3Key,
-              );
-            } catch (deleteErr) {
-              this.logger.error(
-                `Falha ao limpar PDF temporário ${pdfS3Key} após erro de enqueue: ${deleteErr instanceof Error ? deleteErr.message : String(deleteErr)}`,
-              );
-            }
-            throw enqueueError;
-          }
-        } catch (docError) {
-          if (!docsWebhookSent) {
-            const mensagem = axios.isAxiosError(docError)
-              ? `Erro ao buscar documentos (HTTP ${docError.response?.status ?? 'sem status'}): ${docError.message}`
-              : `Erro ao processar documentos: ${docError instanceof Error ? docError.message : String(docError)}`;
-            const resp: Root = normalizeResponse(numero, [], mensagem, {
-              status: 'ERRO',
-              motivoErro: 'PJE_ERRO',
-              webhookId: `${correlationId}:docs-error`,
+            result as ProcessosResponse[],
+            '',
+            {
               origem,
-            });
-            await axios
-              .post(webhookUrl, resp, { headers: webhookHeaders })
-              .catch((webhookErr) => {
-                this.logger.error(
-                  `Falha ao enviar webhook de erro de documentos para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
-                );
-                throw webhookErr;
-              });
-          }
-          throw docError instanceof Error
-            ? docError
-            : new Error(String(docError));
+              webhookId: `${correlationId}:docs-empty`,
+            },
+          );
+          await sendOnce(resp);
+        } else {
+          const docsResult = documentos;
+          const docsResponse = normalizeResponse(numero, docsResult, '', {
+            autos: true,
+            origem,
+            webhookId: `${correlationId}:autos-success`,
+          });
+          await sendOnce(docsResponse);
+        }
+      } catch (docError) {
+        // Falha ao buscar os documentos restritos, mas as movimentações já
+        // foram coletadas com sucesso — manda o que temos em vez de perder
+        // os dados de movimentação por causa de uma falha só nos documentos.
+        this.logger.warn(
+          `⚠️ Falha ao buscar documentos restritos para ${numero}, enviando webhook só com movimentações: ${docError instanceof Error ? docError.message : String(docError)}`,
+        );
+        const fallbackResponse = normalizeResponse(
+          numero,
+          result as ProcessosResponse[],
+          '',
+          {
+            origem,
+            webhookId: `${correlationId}:docs-error`,
+          },
+        );
+        await sendOnce(fallbackResponse).catch((webhookErr) => {
+          this.logger.error(
+            `Falha ao enviar webhook de fallback (movimentações) para ${numero}: ${webhookErr instanceof Error ? webhookErr.stack : String(webhookErr)}`,
+          );
+        });
+
+        if (successWebhookSent) {
+          // O fallback (só movimentações) já foi entregue — não relança.
+          // Um retry aqui reprocessaria documentos/uploads à toa (o
+          // resultado nunca seria publicado, já que `scraper:movements-ok`
+          // já foi gravado por `sendOnce` e as tentativas seguintes nem
+          // mandariam um eventual webhook de autos-success).
+          return;
+        }
+
+        // Fallback também falhou ao enviar — nada foi publicado ainda,
+        // então vale relançar pra deixar o BullMQ tentar de novo.
+        throw docError instanceof Error
+          ? docError
+          : new Error(String(docError));
+      } finally {
+        try {
+          await deleteByPattern(this.redis, `pje:token:captcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+          await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
+            log: (msg) => this.logger.debug(msg),
+          });
+        } catch (cleanupError) {
+          this.logger.error(
+            `Falha na limpeza de tokens para ${numero}: ${cleanupError instanceof Error ? cleanupError.stack : String(cleanupError)}`,
+          );
         }
       }
     } catch (error) {

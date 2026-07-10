@@ -120,6 +120,14 @@
         {
           "name": "LAMBDA_CAPTCHA_API_KEY",
           "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_CAPTCHA_API_KEY::"
+        },
+        {
+          "name": "LAMBDA_DOCUMENT_EXTRACTOR_URL",
+          "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_DOCUMENT_EXTRACTOR_URL::"
+        },
+        {
+          "name": "LAMBDA_DOCUMENT_EXTRACTOR_API_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_DOCUMENT_EXTRACTOR_API_KEY::"
         }
       ],
 

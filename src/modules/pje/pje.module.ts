@@ -2,12 +2,8 @@ import { HttpModule } from '@nestjs/axios';
 
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import {
-  ALL_TRT_DOCUMENT_QUEUES,
-  ALL_TRT_QUEUES,
-} from 'src/helpers/getTRTQueue';
+import { ALL_TRT_QUEUES } from 'src/helpers/getTRTQueue';
 import { ScrapingService } from 'src/helpers/scraping.service';
-import { createDynamicDocumentsWorkers } from 'src/providers/dynamic-document-workers.provider';
 import { createDynamicWorkers } from 'src/providers/dynamic-workers.provider';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
@@ -16,7 +12,9 @@ import { PjeController } from './pje.controller';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { PdfExtractService } from './services/extract.service';
 import { FetchDocumentoService } from './services/fetch-documents-url.service';
+import { FetchPublicDocumentsService } from './services/fetch-public-documents.service';
 import { FetchUrlMovimentService } from './services/fetch-url.service';
+import { LambdaDocumentExtractorService } from './services/lambda-document-extractor.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
@@ -32,7 +30,6 @@ const defaultQueueOptions = {
 @Module({
   imports: [
     HttpModule,
-    // ✅ registra filas de documentos por TRT
 
     BullModule.registerQueue(
       // fila geral
@@ -40,12 +37,6 @@ const defaultQueueOptions = {
 
       // filas de processos por TRT
       ...ALL_TRT_QUEUES.map((q) => ({
-        name: q,
-        defaultJobOptions: defaultQueueOptions,
-      })),
-
-      // filas de documentos por TRT
-      ...ALL_TRT_DOCUMENT_QUEUES.map((q) => ({
         name: q,
         defaultJobOptions: defaultQueueOptions,
       })),
@@ -57,16 +48,17 @@ const defaultQueueOptions = {
     CaptchaService,
     LambdaCaptchaService,
     FetchUrlMovimentService,
+    FetchPublicDocumentsService,
     ConsultarProcessoQueue,
     AwsS3Service,
     PdfExtractService,
     LoginPoolService,
     ProcessDocumentsFindService,
     FetchDocumentoService,
+    LambdaDocumentExtractorService,
     ScrapingService,
     RedisService,
     ...createDynamicWorkers(),
-    ...createDynamicDocumentsWorkers(),
   ],
   exports: [],
 })
