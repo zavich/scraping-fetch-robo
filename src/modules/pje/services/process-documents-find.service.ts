@@ -2,6 +2,7 @@ import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { Documento, ItensProcesso, ProcessosResponse } from 'src/interfaces';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { comConcorrenciaLimitada } from 'src/utils/concurrency';
+import { flattenItensProcesso } from 'src/utils/flatten-itens-processo';
 import { normalizeString } from 'src/utils/normalize-string';
 import {
   DocumentoRequestContext,
@@ -81,7 +82,10 @@ export class ProcessDocumentsFindService {
         // vazia/undefined no Map abaixo, colapsando com outra instância no
         // mesmo bucket e buscando documentos com processId/contexto errado.
         instancia: instance.instance || (index + 1).toString(),
-        itensProcesso: instance.itensProcesso ?? [],
+        // Achata antes de filtrar — anexos (ex: procuração, estatuto, CNPJ)
+        // vêm aninhados em `item.anexos` e também são documentos restritos
+        // válidos, não só os itens de topo de `itensProcesso`.
+        itensProcesso: flattenItensProcesso(instance.itensProcesso ?? []),
       }))
       .filter((entry) => entry.itensProcesso.length > 0);
 

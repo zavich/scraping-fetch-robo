@@ -110,6 +110,9 @@ export interface Movimentacoes {
   texto?: string;
   pje_doc_id?: number;
   publico?: boolean;
+  // Anexos (ex: procuração, estatuto, CNPJ) aninhados nesta movimentação,
+  // mesma forma que o PJe já usa.
+  anexos?: Movimentacoes[];
 }
 
 export interface Audiencia {

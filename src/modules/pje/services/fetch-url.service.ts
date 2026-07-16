@@ -129,9 +129,11 @@ export class FetchUrlMovimentService {
             referer: url,
             Cookie: `${awsWafToken || ''}`,
           };
-          const { data } = await axios.get<DetalheProcesso[]>(
+          const data = await this.fetchDadosBasicos(
             `https://pje.${typeUrl}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-            { headers },
+            headers,
+            numeroDoProcesso,
+            i,
           );
 
           const detalheProcesso = data[0];
@@ -283,10 +285,67 @@ export class FetchUrlMovimentService {
           continue;
         }
       }
+
       return instances;
     } catch (error: unknown) {
       this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
       return [];
+    }
+  }
+
+  // Mesmo retry-em-403/429 que já existe em `fetchProcess` — sem isso, um
+  // bloqueio transitório do WAF na consulta de dadosbasicos (visto em
+  // produção: falha na 1ª tentativa, mas passa ao rodar o job de novo minutos
+  // depois) derrubava a instância inteira em vez de se recuperar sozinho.
+  //
+  // Não é por sessão/token (confirmado: nenhum aws-waf-token existe no Redis
+  // nem antes nem depois de uma execução bem-sucedida) nem só por
+  // `user-agent` (confirmado: 5 tentativas trocando o user-agent a cada uma,
+  // sem nenhum delay entre elas, falharam as 5 com 403 — se fosse só o header,
+  // pelo menos uma das 5 aleatórias teria passado). O que muda entre "falha
+  // agora" e "funciona rodando de novo minutos depois" é só TEMPO — por isso
+  // o retry agora espera um pouco (crescente) antes de cada nova tentativa,
+  // além de trocar o user-agent.
+  private async fetchDadosBasicos(
+    url: string,
+    headers: Record<string, string>,
+    numeroDoProcesso: string,
+    instance: number,
+    attempt = 1,
+  ): Promise<DetalheProcesso[]> {
+    const retryStatus = [403, 429];
+    const maxAttempts = 5;
+
+    try {
+      const { data } = await axios.get<DetalheProcesso[]>(url, { headers });
+      return data;
+    } catch (error: unknown) {
+      const axiosError = error as AxiosLikeError;
+
+      if (
+        retryStatus.includes(axiosError.response?.status ?? 0) &&
+        attempt < maxAttempts
+      ) {
+        const delayMs = 3000 * 2 ** (attempt - 1); // 3s, 6s, 12s, 24s
+        this.logger.warn(
+          `⚠️ dadosbasicos de ${numeroDoProcesso} (instância ${instance}) falhou com status ${axiosError.response?.status} — tentativa ${attempt}/${maxAttempts}, aguardando ${delayMs}ms e trocando user-agent`,
+        );
+        await this.delay(delayMs);
+        const retryHeaders = {
+          ...headers,
+          'user-agent':
+            userAgents[Math.floor(Math.random() * userAgents.length)],
+        };
+        return this.fetchDadosBasicos(
+          url,
+          retryHeaders,
+          numeroDoProcesso,
+          instance,
+          attempt + 1,
+        );
+      }
+
+      throw error;
     }
   }
 
@@ -385,10 +444,7 @@ export class FetchUrlMovimentService {
       let headersRedis: Record<string, string> = {};
       if (headersRedisRaw) {
         try {
-          headersRedis = JSON.parse(headersRedisRaw) as Record<
-            string,
-            string
-          >;
+          headersRedis = JSON.parse(headersRedisRaw) as Record<string, string>;
         } catch (error: unknown) {
           headersRedis = {};
         }

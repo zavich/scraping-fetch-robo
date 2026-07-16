@@ -2,6 +2,19 @@ import { ItensProcesso, Partes, Polo, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
 import { randomUUID } from 'crypto';
 
+// Anexos (ex: procuração, estatuto, CNPJ) ficam aninhados aqui, mesma forma
+// que o PJe já usa e que `ItensProcesso.anexos` traz — ver `buildMovimentacao`.
+interface NormalizedMovimentacao {
+  data: string;
+  conteudo: string;
+  id: number;
+  pje_doc_id?: number;
+  publico?: boolean;
+  uniqueNameDocumento?: string;
+  texto?: string;
+  anexos?: NormalizedMovimentacao[];
+}
+
 type NormalizeResponseOptions = {
   documento?: boolean;
   autos?: boolean;
@@ -29,6 +42,53 @@ export function normalizeResponse(
     }
     return Number(resposta);
   }
+
+  // Monta uma movimentação (e seus anexos, recursivamente) na forma final do
+  // payload — extraído do `.map()` de itensProcesso pra poder chamar a si
+  // mesmo em `item.anexos`, aninhando em vez de achatar num array só.
+  function buildMovimentacao(item: ItensProcesso): NormalizedMovimentacao {
+    // Um documento só é público de verdade quando `publico` E não marcado
+    // `documentoSigiloso` — o PJe permite os dois sinais independentes.
+    const documentoPublico = Boolean(item?.publico) && !item?.documentoSigiloso;
+
+    const partesConteudo = [
+      item?.titulo,
+      item?.tipo ? `| ${item.tipo}` : '',
+      !documentoPublico && item?.documento ? '(Restrito)' : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    const mov: NormalizedMovimentacao = {
+      data: new Intl.DateTimeFormat('pt-BR').format(new Date(item.data)),
+      conteudo: partesConteudo,
+      id: generateId(),
+    };
+
+    // `item.id` é o id real do documento no PJe (o mesmo usado na URL de
+    // busca do documento) — só existe quando o item é de fato um
+    // documento, não uma movimentação textual comum.
+    if (item?.documento && item.id != null) {
+      mov.pje_doc_id = item.id;
+      mov.publico = documentoPublico;
+    }
+
+    // adiciona uniqueNameDocumento apenas se existir e não for string vazia
+    if (item?.idUnicoDocumento != null && item.idUnicoDocumento !== '') {
+      mov.uniqueNameDocumento = String(item.idUnicoDocumento);
+    }
+
+    if (item?.texto) {
+      mov.texto = item.texto;
+    }
+
+    if (item?.anexos?.length) {
+      mov.anexos = item.anexos.map(buildMovimentacao);
+    }
+
+    return mov;
+  }
+
   if (options.origem) {
     opcoes['origem'] = options.origem;
   }
@@ -170,52 +230,7 @@ export function normalizeResponse(
       partes = atualizarNomesPartes(instance.itensProcesso ?? [], partes);
     }
 
-    const movimentacoes = instance?.itensProcesso?.map((item) => {
-      // Um documento só é público de verdade quando `publico` E não marcado
-      // `documentoSigiloso` — o PJe permite os dois sinais independentes.
-      const documentoPublico = Boolean(item?.publico) && !item?.documentoSigiloso;
-
-      const partesConteudo = [
-        item?.titulo,
-        item?.tipo ? `| ${item.tipo}` : '',
-        !documentoPublico && item?.documento ? '(Restrito)' : '',
-      ]
-        .filter(Boolean)
-        .join(' ');
-
-      const mov: {
-        data: string;
-        conteudo: string;
-        id: number;
-        pje_doc_id?: number;
-        publico?: boolean;
-        uniqueNameDocumento?: string;
-        texto?: string;
-      } = {
-        data: new Intl.DateTimeFormat('pt-BR').format(new Date(item.data)),
-        conteudo: partesConteudo,
-        id: generateId(),
-      };
-
-      // `item.id` é o id real do documento no PJe (o mesmo usado na URL de
-      // busca do documento) — só existe quando o item é de fato um
-      // documento, não uma movimentação textual comum.
-      if (item?.documento && item.id != null) {
-        mov.pje_doc_id = item.id;
-        mov.publico = documentoPublico;
-      }
-
-      // adiciona uniqueNameDocumento apenas se existir e não for string vazia
-      if (item?.idUnicoDocumento != null && item.idUnicoDocumento !== '') {
-        mov.uniqueNameDocumento = String(item.idUnicoDocumento);
-      }
-
-      if (item?.texto) {
-        mov.texto = item.texto;
-      }
-
-      return mov;
-    });
+    const movimentacoes = instance?.itensProcesso?.map(buildMovimentacao);
 
     const resposta = {
       id: instance.id,

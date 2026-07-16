@@ -17,6 +17,11 @@ export interface ItensProcesso {
   instancia: string; // grau de instância
   instanciaId: number; // id da instância
   texto?: string; // texto extraído via Lambda
+  // Documentos podem trazer anexos (ex: procuração, estatuto, CNPJ) aninhados
+  // aqui, na mesma forma de um item de itensProcesso — mesma estrutura que o
+  // PJe já usa. Repassado nativo (sem achatar) até `normalizeResponse.ts`,
+  // que replica esse aninhamento no payload final de movimentações.
+  anexos?: ItensProcesso[];
 }
 
 type Assunto = {

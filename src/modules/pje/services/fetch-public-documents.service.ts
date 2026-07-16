@@ -3,6 +3,7 @@ import axios from 'axios';
 import Redis from 'ioredis';
 import { ItensProcesso } from 'src/interfaces';
 import { comConcorrenciaLimitada } from 'src/utils/concurrency';
+import { flattenItensProcesso } from 'src/utils/flatten-itens-processo';
 import { sniffContentType } from 'src/utils/sniff-content-type';
 import { userAgents } from 'src/utils/user-agents';
 import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
@@ -35,7 +36,10 @@ export class FetchPublicDocumentsService {
           item.idUnicoDocumento,
       ),
   ): Promise<DocumentoExtraido[]> {
-    const targetDocs = itensProcesso.filter(filter);
+    // Achata antes de filtrar — documentos anexados (ex: procuração, estatuto,
+    // CNPJ) vêm aninhados em `item.anexos` e também precisam ser extraídos
+    // via Lambda, não só os itens de topo de `itensProcesso`.
+    const targetDocs = flattenItensProcesso(itensProcesso).filter(filter);
 
     if (targetDocs.length === 0) {
       this.logger.warn(`⚠️ Nenhum documento encontrado para ${processNumber}`);

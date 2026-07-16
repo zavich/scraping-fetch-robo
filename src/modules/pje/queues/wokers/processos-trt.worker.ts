@@ -4,6 +4,7 @@ import axios from 'axios';
 import { Job } from 'bullmq';
 import Redis from 'ioredis';
 import { normalizeResponse } from 'src/utils/normalizeResponse';
+import { flattenItensProcesso } from 'src/utils/flatten-itens-processo';
 import { deleteByPattern } from 'src/utils/redis-delete-keys';
 import { FetchUrlMovimentService } from '../../services/fetch-url.service';
 import { LoginPoolService } from '../../services/login-pool.service';
@@ -222,7 +223,11 @@ export class GenericProcessoWorker extends WorkerHost {
           );
           for (const instance of instances as ProcessosResponse[]) {
             if (!instance.itensProcesso?.length) continue;
-            for (const item of instance.itensProcesso) {
+            // Achata pra alcançar também os anexos aninhados em
+            // `item.anexos` — sem isso, o texto extraído de um anexo nunca
+            // era gravado de volta no item certo, que `buildMovimentacao`
+            // (normalizeResponse.ts) lê recursivamente pro payload final.
+            for (const item of flattenItensProcesso(instance.itensProcesso)) {
               const texto = publicDocsById.get(item.idUnicoDocumento);
               if (texto) item.texto = texto;
             }
