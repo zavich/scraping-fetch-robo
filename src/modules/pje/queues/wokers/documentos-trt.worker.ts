@@ -40,7 +40,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           `Número inválido para consulta de documentos`,
           true,
         );
-        await axios.post(webhookUrl, resp);
+        // await axios.post(webhookUrl, resp);
         return;
       }
 
@@ -52,7 +52,7 @@ export class GenericDocumentosWorker extends WorkerHost {
           `Erro ao gerar arquivo para consulta de documentos, tente novamente mais tarde.`,
           true,
         );
-        await axios.post(webhookUrl, resp);
+        // await axios.post(webhookUrl, resp);
         return;
       }
       // Executa consulta de documentos
@@ -66,7 +66,7 @@ export class GenericDocumentosWorker extends WorkerHost {
       const response = normalizeResponse(numero, result, '', true);
       this.logger.log(`✅ Documentos finalizados → ${numero}`);
 
-      await axios.post(webhookUrl, response);
+      // await axios.post(webhookUrl, response);
     } catch (error: any) {
       this.logger.error(error);
 

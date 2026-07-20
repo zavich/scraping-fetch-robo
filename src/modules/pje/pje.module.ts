@@ -8,7 +8,6 @@ import {
 } from 'src/helpers/getTRTQueue';
 import { createDynamicDocumentsWorkers } from 'src/providers/dynamic-document-workers.provider';
 import { createDynamicWorkers } from 'src/providers/dynamic-workers.provider';
-import { AwsS3Service } from 'src/services/aws-s3.service';
 import { CaptchaService } from 'src/services/captcha.service';
 import { PjeController } from './pje.controller';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
@@ -45,7 +44,6 @@ import { FetchDocumentoService } from './services/fetch-documents-url.service';
     WebScrapingMovimentService,
     FetchUrlMovimentService,
     ConsultarProcessoQueue,
-    AwsS3Service,
     PdfExtractService,
     LoginPoolService,
     ScrapingService,

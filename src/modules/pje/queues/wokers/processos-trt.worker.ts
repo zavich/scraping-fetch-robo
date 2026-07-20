@@ -113,7 +113,7 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
         );
 
-        await axios.post(webhookUrl, response);
+        // await axios.post(webhookUrl, response);
         return;
       }
       await this.scrapingService.execute(numero, regionTRT, 1);
@@ -136,7 +136,7 @@ export class GenericProcessoWorker extends WorkerHost {
           origem,
         );
 
-        await axios.post(webhookUrl, response);
+        // await axios.post(webhookUrl, response);
         return;
       }
 
@@ -165,7 +165,7 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
           origem,
         );
-        await axios.post(webhookUrl, response);
+        // await axios.post(webhookUrl, response);
         return;
       }
 
@@ -187,7 +187,7 @@ export class GenericProcessoWorker extends WorkerHost {
           true,
           origem,
         );
-        await axios.post(webhookUrl, response);
+        // await axios.post(webhookUrl, response);
         return;
       }
       if (documents) {
@@ -208,7 +208,7 @@ export class GenericProcessoWorker extends WorkerHost {
             `TRT-${regionTRT} indisponível ou todas as contas bloqueadas`,
             true,
           );
-          await axios.post(webhookUrl, resp);
+          // await axios.post(webhookUrl, resp);
           return;
         }
         const filePath = await this.fetchUrlMovimentService.fetchDocuments(
@@ -246,7 +246,7 @@ export class GenericProcessoWorker extends WorkerHost {
       await deleteByPattern(this.redis, `tokencaptcha:${numero}*`, {
         log: (msg) => this.logger.debug(msg),
       });
-      await axios.post(webhookUrl, response);
+      // await axios.post(webhookUrl, response);
     } catch (error) {
       this.logger.error(error);
 
@@ -257,7 +257,7 @@ export class GenericProcessoWorker extends WorkerHost {
           'Erro temporário, tente novamente mais tarde',
           true,
         );
-        await axios.post(webhookUrl, response);
+        // await axios.post(webhookUrl, response);
       }
     }
   }

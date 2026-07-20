@@ -41,10 +41,6 @@ export class FetchUrlMovimentService {
     const instances: ProcessosResponse[] = [];
 
     try {
-      const balance = await this.captchaService.getBalance();
-      if (balance < 0.001)
-        throw new Error(`Saldo insuficiente no 2Captcha: ${balance}`);
-
       const grauMax = origem === 'TST' ? 3 : 2;
       const initialGrau = origem === 'TST' ? 3 : 1;
       for (let i = initialGrau; i <= grauMax; i++) {

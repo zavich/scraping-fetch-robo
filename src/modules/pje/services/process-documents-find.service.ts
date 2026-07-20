@@ -7,9 +7,9 @@ import {
   Logger,
 } from '@nestjs/common';
 import * as fs from 'fs';
+import * as path from 'path';
 import Redis from 'ioredis';
 import { Documento, ProcessosResponse } from 'src/interfaces';
-import { AwsS3Service } from 'src/services/aws-s3.service';
 import { normalizeString } from 'src/utils/normalize-string';
 import { regexDocumentos } from 'src/utils/regex-documents';
 import { PdfExtractService } from './extract.service';
@@ -18,7 +18,6 @@ import { PdfExtractService } from './extract.service';
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
   constructor(
-    private readonly awsS3Service: AwsS3Service,
     private readonly pdfExtractService: PdfExtractService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
@@ -73,6 +72,9 @@ export class ProcessDocumentsFindService {
       }
       const fileBuffer = fs.readFileSync(filePath);
 
+      const processFolder = path.join(process.cwd(), 'tmp', processNumber);
+      fs.mkdirSync(processFolder, { recursive: true });
+
       // // remove o arquivo temporário
       try {
         fs.promises
@@ -122,15 +124,12 @@ export class ProcessDocumentsFindService {
           const fileKey = `${this.normalize(bookmark.title)}_${bookmark.index}_${Date.now()}_${Math.random()
             .toString(36)
             .slice(2, 8)}.pdf`;
-          await this.awsS3Service.uploadS3Object(
-            process.env.AWS_S3_BUCKET_NAME as string,
-            fileKey,
-            extractedPdfBuffer,
-            'application/pdf',
-          );
+          const documentPath = path.join(processFolder, fileKey);
+          fs.writeFileSync(documentPath, extractedPdfBuffer);
+
           uploadedDocuments.push({
             title: bookmark.title,
-            temp_link: fileKey,
+            temp_link: documentPath,
             uniqueName: bookmark.id,
             date: bookmark.data ?? '',
           });
