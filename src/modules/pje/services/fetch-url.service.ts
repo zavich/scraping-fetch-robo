@@ -112,6 +112,7 @@ export class FetchUrlMovimentService {
               'x-grau-instancia': i.toString(),
               referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${i}`,
               accept: 'application/json, text/plain, */*',
+              'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
               'user-agent':
                 userAgents[Math.floor(Math.random() * userAgents.length)],
             };
@@ -453,6 +454,7 @@ export class FetchUrlMovimentService {
           'x-grau-instancia': instancia,
           referer: `https://pje.${typeUrl}.jus.br/consultaprocessual/detalhe-processo/${numeroDoProcesso}/${instancia}`,
           accept: 'application/json, text/plain, */*',
+          'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
           'user-agent':
             userAgents[Math.floor(Math.random() * userAgents.length)],
         };
