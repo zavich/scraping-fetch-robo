@@ -43,10 +43,6 @@ export class LoginPoolService {
         username: process.env.PJE_USER_FIFTH as string,
         password: process.env.PJE_PASS_FIFTH as string,
       },
-      {
-        username: process.env.PJE_USER_SIXTH as string,
-        password: process.env.PJE_PASS_SIXTH as string,
-      },
     ];
   }
   private contaIndex = 0;

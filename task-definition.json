@@ -85,14 +85,6 @@
           "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_FIFTH::"
         },
         {
-          "name": "PJE_USER_SIXTH",
-          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_USER_SIXTH::"
-        },
-        {
-          "name": "PJE_PASS_SIXTH",
-          "valueFrom": "<SECRET_ARN_PREFIX>:PJE_PASS_SIXTH::"
-        },
-        {
           "name": "AWS_S3_REGION",
           "valueFrom": "<SECRET_ARN_PREFIX>:AWS_S3_REGION::"
         },
