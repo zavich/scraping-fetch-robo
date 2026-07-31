@@ -418,17 +418,51 @@ export class ScrapingService {
         }
 
         //
-        // 6. RECARREGAR PARA VALIDAR O TOKEN
+        // 6. RECARREGAR E VALIDAR SE O TOKEN FOI ACEITO
         //
-        const originalCookies = await page.cookies();
+        await new Promise((r) => setTimeout(r, 1500));
+        await page.reload({ waitUntil: 'networkidle0' });
+
+        const aindaBloqueado = await page.evaluate(() => {
+          const w = window as any;
+          const temGokuProps = !!w.gokuProps;
+          const temFrameWaf = Array.from(
+            document.querySelectorAll('iframe'),
+          ).some(
+            (f) =>
+              f.src.includes('awswaf') ||
+              f.src.includes('captcha') ||
+              f.src.includes('token'),
+          );
+          return temGokuProps || temFrameWaf;
+        });
+
+        if (aindaBloqueado) {
+          throw new Error(
+            '❌ AWS WAF ainda bloqueando após reload — token não foi aceito pelo servidor',
+          );
+        }
+
+        const cookiesAposReload = await page.cookies();
+        const tokenValidado = cookiesAposReload.find(
+          (c) => c.name === 'aws-waf-token',
+        );
+
+        if (!tokenValidado?.value) {
+          throw new Error(
+            '❌ aws-waf-token não encontrado após reload — validação falhou',
+          );
+        }
+
+        this.logger.log('✅ Token validado após reload — WAF contornado com sucesso');
+
         await this.redis.set(
           `aws-waf-token:${processNumber}`,
-          originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
+          cookiesAposReload.map((c) => `${c.name}=${c.value}`).join('; '),
           'EX',
           180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes
         );
-        await new Promise((r) => setTimeout(r, 1500));
-        await page.reload({ waitUntil: 'networkidle0' });
+
         this.logger.log('🔁 Página recarregada — AWS WAF liberado!');
         return {
           integra: null,

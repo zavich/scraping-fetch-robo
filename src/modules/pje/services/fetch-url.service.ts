@@ -57,16 +57,16 @@ export class FetchUrlMovimentService {
             regionTRT,
             awsWafToken || undefined,
           );
-          // const { data } = await axios.get<DetalheProcesso[]>(
-          //   `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
-          //   { headers },
-          // );
-          const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
-          const { data } = await scraperRequest<DetalheProcesso[]>(
-            url,
-            `${numeroDoProcesso}`, // sticky session
-            headers,
+          const { data } = await axios.get<DetalheProcesso[]>(
+            `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
+            { headers },
           );
+          // const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
+          // const { data } = await scraperRequest<DetalheProcesso[]>(
+          //   url,
+          //   `${numeroDoProcesso}`, // sticky session
+          //   headers,
+          // );
           const detalheProcesso = data[0];
           if (!detalheProcesso) continue;
 
@@ -139,18 +139,18 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${tokenDesafio}&resposta=${resposta}`;
 
     try {
-      // const response = await axios.get<ProcessosResponse>(url, {
-      //   headers: buildHeaders(numeroDoProcesso, instance, regionTRT),
-      // });
-      const response = await scraperRequest<ProcessosResponse>(
-        url,
-        `${numeroDoProcesso}`,
+      const response = await axios.get<ProcessosResponse>(url, {
         headers,
-        'GET',
-        undefined,
-        true,
-        { ultra: true },
-      );
+      });
+      // const response = await scraperRequest<ProcessosResponse>(
+      //   url,
+      //   `${numeroDoProcesso}`,
+      //   headers,
+      //   'GET',
+      //   undefined,
+      //   true,
+      //   { ultra: true },
+      // );
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance}): ${captchaToken}`,
