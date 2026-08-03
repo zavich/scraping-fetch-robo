@@ -30,14 +30,50 @@ export const userAgents = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.5790.102 Safari/537.36 OPR/101.0.4843.70',
 ];
 
+// Deriva sec-ch-ua/sec-ch-ua-platform consistentes com o User-Agent real,
+// em vez de valores fixos que contradiziam o UA sorteado (ex: UA de Firefox
+// com sec-ch-ua de Chromium — inconsistência que por si só é sinal de bot).
+function buildClientHints(ua: string) {
+  const chromeMatch = ua.match(/Chrome\/(\d+)/);
+  const isMobile = /Mobile/.test(ua);
+
+  let platform = '"Windows"';
+  if (/Mac OS X/.test(ua)) platform = '"macOS"';
+  else if (/Android/.test(ua)) platform = '"Android"';
+  else if (/Linux/.test(ua)) platform = '"Linux"';
+
+  if (!chromeMatch) {
+    // Firefox/Safari reais não enviam Client Hints — omite os headers.
+    return {
+      secChUa: undefined,
+      secChUaMobile: undefined,
+      secChUaPlatform: undefined,
+    };
+  }
+
+  const v = chromeMatch[1];
+  return {
+    secChUa: `"Not)A;Brand";v="8", "Chromium";v="${v}", "Google Chrome";v="${v}"`,
+    secChUaMobile: isMobile ? '?1' : '?0',
+    secChUaPlatform: platform,
+  };
+}
+
 export function buildHeaders(
   numeroDoProcesso: string,
   instance: string,
   regionTRT: number,
   awswaftoken?: string,
   referer?: string,
+  userAgent?: string,
 ) {
-  const ua = userAgents[Math.floor(Math.random() * userAgents.length)];
+  // Prioriza o User-Agent real do Puppeteer que resolveu o desafio da AWS —
+  // o aws-waf-token é validado junto com o fingerprint do navegador que o
+  // emitiu, então replayar com um UA aleatório e diferente faz a AWS
+  // rejeitar a request (405) mesmo com o token correto.
+  const ua =
+    userAgent || userAgents[Math.floor(Math.random() * userAgents.length)];
+  const { secChUa, secChUaMobile, secChUaPlatform } = buildClientHints(ua);
 
   return {
     accept: 'application/json, text/plain, */*',
@@ -54,8 +90,10 @@ export function buildHeaders(
     'sec-fetch-site': 'same-origin',
     'sec-fetch-mode': 'cors',
     'sec-fetch-dest': 'empty',
-    'sec-ch-ua': '"Chromium";v="120", "Not A(Brand";v="99"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"',
+    ...(secChUa && {
+      'sec-ch-ua': secChUa,
+      'sec-ch-ua-mobile': secChUaMobile,
+      'sec-ch-ua-platform': secChUaPlatform,
+    }),
   };
 }

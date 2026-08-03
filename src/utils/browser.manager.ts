@@ -1,6 +1,18 @@
 // src/utils/browser-manager.ts
 import { Browser, Page, BrowserContext } from 'puppeteer';
-import puppeteer from 'puppeteer-extra';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import puppeteerFull = require('puppeteer');
+import { addExtra } from 'puppeteer-extra';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+import rebrowserPuppeteerCore = require('rebrowser-puppeteer-core');
+
+// rebrowser-puppeteer-core desativa o Runtime.enable automático que o
+// Puppeteer normalmente dispara em toda página (necessário para
+// page.evaluate() funcionar) — esse comando é observável de dentro da
+// página e é um dos sinais que sistemas anti-bot (AWS WAF Bot Control,
+// Cloudflare, DataDome) usam pra detectar DevTools/CDP conectado, mesmo
+// com o stealth plugin ativo. https://github.com/rebrowser/rebrowser-patches
+const puppeteer = addExtra(rebrowserPuppeteerCore as any);
 
 // CommonJS compat
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -16,15 +28,21 @@ export class BrowserManager {
   static async getBrowser(): Promise<Browser> {
     if (!this.browser) {
       this.browser = await puppeteer.launch({
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-        headless: true,
+        // rebrowser-puppeteer-core não baixa/gerencia o Chrome sozinho (ao
+        // contrário do pacote "puppeteer" completo) — por isso, na ausência
+        // de PUPPETEER_EXECUTABLE_PATH, reaproveitamos o Chrome for Testing
+        // que o "puppeteer" completo já baixa/gerencia como dependência.
+        executablePath:
+          process.env.PUPPETEER_EXECUTABLE_PATH ||
+          puppeteerFull.executablePath(),
+        headless: false,
+        defaultViewport: null,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
-          '--disable-gpu',
           '--no-zygote',
-          '--disable-software-rasterizer',
+          '--window-size=1920,1080',
         ],
         protocolTimeout: 180_000, // 3 minutos
         timeout: 180_000,

@@ -50,23 +50,22 @@ export class FetchUrlMovimentService {
           )) as string;
           const redisKey = `aws-waf-token:${numeroDoProcesso}`;
           const awsWafToken = await this.redis.get(redisKey);
+          const awsWafUserAgent = await this.redis.get(
+            `aws-waf-ua:${numeroDoProcesso}`,
+          );
 
           const headers = buildHeaders(
             numeroDoProcesso,
             i.toString(),
             regionTRT,
             awsWafToken || undefined,
+            undefined,
+            awsWafUserAgent || undefined,
           );
           const { data } = await axios.get<DetalheProcesso[]>(
             `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`,
             { headers },
           );
-          // const url = `https://pje.trt${regionTRT}.jus.br/pje-consulta-api/api/processos/dadosbasicos/${numeroDoProcesso}`;
-          // const { data } = await scraperRequest<DetalheProcesso[]>(
-          //   url,
-          //   `${numeroDoProcesso}`, // sticky session
-          //   headers,
-          // );
           const detalheProcesso = data[0];
           if (!detalheProcesso) continue;
 
@@ -101,6 +100,11 @@ export class FetchUrlMovimentService {
             this.logger.error(
               `Erro ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err.message}`,
             );
+            if (err.response) {
+              this.logger.error(
+                `🔍 Diagnóstico do erro — status: ${err.response.status} | headers enviados: ${JSON.stringify(err.config?.headers)} | corpo da resposta: ${JSON.stringify(err.response.data).slice(0, 500)}`,
+              );
+            }
             break;
           }
           this.logger.warn(
