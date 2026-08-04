@@ -53,6 +53,12 @@ export class GenericProcessoWorker extends WorkerHost {
         ? { 'x-service-key': process.env.WEBHOOK_SERVICE_KEY }
         : {}),
     };
+    // TESTE LOCAL: todos os axios.post pro webhook estão comentados abaixo —
+    // isso só mantém webhookUrl/webhookHeaders "usados" pro lint não reclamar.
+    this.logger.debug(
+      `[TESTE LOCAL] webhook desativado (${webhookUrl})`,
+      webhookHeaders,
+    );
     let successWebhookSent = false;
 
     // Extrai TRT do CNJ
@@ -77,7 +83,8 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        this.logger.debug('[TESTE LOCAL] webhook não enviado:', response);
+        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
       if (regionTRT === 3 || regionTRT === 9) {
@@ -108,7 +115,8 @@ export class GenericProcessoWorker extends WorkerHost {
               origem,
             },
           );
-          await axios.post(webhookUrl, response, { headers: webhookHeaders });
+          this.logger.debug('[TESTE LOCAL] webhook não enviado:', response);
+          // await axios.post(webhookUrl, response, { headers: webhookHeaders });
           return;
         }
         sessionCookies = cookies;
@@ -139,7 +147,8 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        this.logger.debug('[TESTE LOCAL] webhook não enviado:', response);
+        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -172,7 +181,8 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'SEGREDO_JUSTICA',
           },
         );
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        this.logger.debug('[TESTE LOCAL] webhook não enviado:', response);
+        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -196,7 +206,8 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'PJE_ERRO',
           },
         );
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        this.logger.debug('[TESTE LOCAL] webhook não enviado:', response);
+        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
         return;
       }
 
@@ -255,7 +266,8 @@ export class GenericProcessoWorker extends WorkerHost {
           successWebhookSent = true;
           return;
         }
-        await axios.post(webhookUrl, payload, { headers: webhookHeaders });
+        this.logger.debug('[TESTE LOCAL] webhook não enviado:', payload);
+        // await axios.post(webhookUrl, payload, { headers: webhookHeaders });
         // Marca como enviado antes do redis.set: se o POST deu certo mas o
         // set falhar, o catch externo não deve mandar um webhook de erro
         // por cima de um sucesso já entregue.
@@ -412,7 +424,8 @@ export class GenericProcessoWorker extends WorkerHost {
       });
 
       try {
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        this.logger.debug('[TESTE LOCAL] webhook não enviado:', response);
+        // await axios.post(webhookUrl, response, { headers: webhookHeaders });
       } catch (webhookError) {
         this.logger.error(
           `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,

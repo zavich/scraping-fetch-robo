@@ -269,7 +269,9 @@ export class BrowserManager {
         Object.defineProperty(navigator, 'languages', {
           get: () => ['pt-BR', 'pt', 'en-US', 'en'],
         });
-        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => 8,
+        });
         Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
         Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
 

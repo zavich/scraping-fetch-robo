@@ -1,29 +1,40 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion */
 /* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-misused-promises */
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
-import { CDPSession, Page, BrowserContext, HTTPRequest } from 'puppeteer';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserManager } from 'src/utils/browser.manager';
 
-const WAF_TOKEN_TTL_SECONDS = 7200;
-
 @Injectable()
-export class ScrapingService implements OnModuleInit {
+export class ScrapingService {
   private readonly logger = new Logger(ScrapingService.name);
-
-  // BrowserPool removido: usaremos BrowserManager e criaremos um BrowserContext novo por execução
 
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
-  async onModuleInit() {
-    // Inicialização do pool removida. O BrowserManager é lazy e será usado por execução.
+
+  // A AWS às vezes seta o aws-waf-token duas vezes pro mesmo host — uma
+  // versão host-only e outra com Domain=.dominio (convenção da própria AWS
+  // pro cookie "de verdade"). page.cookies() devolve as duas, e juntar tudo
+  // com join('; ') sem filtrar manda um Cookie header com dois valores
+  // conflitantes de aws-waf-token — o servidor pode acabar usando o errado
+  // (o stale/host-only) em vez do que o widget acabou de emitir.
+  private serializarCookies(
+    cookies: { name: string; value: string; domain: string }[],
+  ): string {
+    const cookieMap = new Map<string, string>();
+    for (const c of cookies) {
+      const existente = cookieMap.get(c.name);
+      if (!existente || c.domain.startsWith('.')) {
+        cookieMap.set(c.name, c.value);
+      }
+    }
+    return Array.from(cookieMap.entries())
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
   }
+
   async execute(
     processNumber: string,
     regionTRT: number,
@@ -33,95 +44,26 @@ export class ScrapingService implements OnModuleInit {
     this.logger.log(
       `▶ Iniciando scraping do processo ${processNumber} (TRT ${regionTRT}, Instância ${instanceIndex})`,
     );
-    let context: BrowserContext | null = null;
 
-    // Hoisted para permitir cleanup seguro no finally
-    let page!: Page;
-    let client: CDPSession | null = null;
+    const { page, context } = await BrowserManager.createPage();
+    this.logger.log('✅ Contexto adquirido do pool');
 
-    // Função resiliente para criar uma nova página; em caso de erro de conexão
-    // tenta liberar o contexto atual e reaquiri-lo antes de tentar novamente.
-    const createPageWithRecovery = async (maxAttempts = 3) => {
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          // Se existir um contexto anterior, tente fechar páginas abertas antes de criar novo contexto
-          if (context) {
-            try {
-              const pages = await context.pages();
-              for (const p of pages) {
-                if (!p.isClosed()) await p.close();
-              }
-            } catch (e) {
-              /* ignore */
-            }
-            // fecha o contexto anterior de forma segura
-            try {
-              await BrowserManager.closeContext(context);
-            } catch (e) {
-              /* ignore */
-            }
-            context = null;
-          }
+    // Monitora via CDP as requests pro domínio awswaf.com — usado pra
+    // confirmar se o /verify realmente é disparado pelo próprio widget após
+    // clicarmos nas células e no "Confirm".
+    const cdpClient = await page.target().createCDPSession();
+    await cdpClient.send('Network.enable');
+    const awswafRequests: { method: string; url: string }[] = [];
 
-          const created = await BrowserManager.createPage();
-          context = created.context;
-          page = created.page;
-          this.logger.log('✅ Contexto criado e página pronta');
-          return;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          this.logger.warn(
-            `❌ Erro ao criar nova página (tentativa ${attempt}/${maxAttempts}): ${msg}`,
-          );
-
-          // Tenta liberar o contexto possivelmente corrompido e reaquece um novo
-          try {
-            // fechar o context corrompido
-            if (context) {
-              try {
-                await BrowserManager.closeContext(context);
-              } catch (e) {
-                /* ignore */
-              }
-              context = null;
-            }
-          } catch {
-            /* ignore */
-          }
-
-          if (attempt === maxAttempts) throw err;
-
-          await new Promise((r) => setTimeout(r, 500));
-          // próxima iteração irá criar novo contexto via BrowserManager.createPage()
-        }
+    cdpClient.on('Network.requestWillBeSent', (event) => {
+      const url = event.request?.url || '';
+      if (url.includes('awswaf.com')) {
+        awswafRequests.push({ method: event.request.method, url });
+        this.logger.debug(
+          `📡 [CDP] ${event.request.method} ${url.split('?')[0]}`,
+        );
       }
-    };
-
-    await createPageWithRecovery();
-
-    interface CdpRequestEvent {
-      requestId: string;
-      request: { url: string };
-    }
-    interface CdpResponseEvent {
-      requestId: string;
-      response?: {
-        url?: string;
-        headers?: Record<string, string>;
-        encodedDataLength?: number;
-      };
-    }
-    interface VoucherResponse {
-      token?: string;
-    }
-
-    let processCaptured = false;
-    let onResponse: ((event: CdpResponseEvent) => Promise<void>) | null = null;
-    let onRequest: ((event: CdpRequestEvent) => void) | null = null;
-    const requestMap = new Map<string, string>();
-    const MAX_MAP_SIZE = 1000;
-    // limite de bytes para considerar o body seguro para baixar/parsear
-    const MAX_BODY_BYTES = 1_000_000; // 1 MB
+    });
 
     const retry = async <T>(
       fn: () => Promise<T>,
@@ -149,104 +91,6 @@ export class ScrapingService implements OnModuleInit {
       }
       throw lastError;
     };
-
-    const initCDP = async (pg: Page): Promise<CDPSession> => {
-      this.logger.log('🔧 Inicializando CDP para monitoramento de rede...');
-      const client: CDPSession = await pg.target().createCDPSession();
-      await client.send('Network.enable');
-
-      onRequest = (event: CdpRequestEvent) => {
-        if (requestMap.size > MAX_MAP_SIZE) {
-          const firstKey = requestMap.keys().next().value;
-          requestMap.delete(firstKey);
-        }
-
-        requestMap.set(event.requestId, event.request.url);
-      };
-
-      client.on('Network.requestWillBeSent', onRequest);
-
-      onResponse = async (event: CdpResponseEvent) => {
-        try {
-          const url = (event.response?.url ??
-            requestMap.get(event.requestId) ??
-            '') as string;
-
-          if (
-            !processCaptured &&
-            url.match(/\/pje-consulta-api\/api\/processos\/\d+/)
-          ) {
-            this.logger.debug(
-              `📥 Tentando capturar JSON do processo em: ${url}`,
-            );
-
-            // Proteções de tamanho antes de requisitar o body via CDP
-            const headers = event.response?.headers || {};
-            const contentLengthHeader = Number(
-              headers['content-length'] || headers['Content-Length'] || 0,
-            );
-            const encodedLen = Number(event.response?.encodedDataLength || 0);
-
-            if (
-              contentLengthHeader > MAX_BODY_BYTES ||
-              encodedLen > MAX_BODY_BYTES
-            ) {
-              this.logger.warn(
-                `⚠️ Ignorando body grande (${contentLengthHeader || encodedLen} bytes) em ${url}`,
-              );
-              return;
-            }
-
-            for (let attempt = 0; attempt < 3; attempt++) {
-              try {
-                const body = await client.send('Network.getResponseBody', {
-                  requestId: event.requestId,
-                });
-
-                const text = body.base64Encoded
-                  ? Buffer.from(body.body, 'base64').toString('utf8')
-                  : body.body;
-
-                // Proteção adicional contra textos enormes
-                if (!text || text.length > 2_000_000) {
-                  this.logger.warn(
-                    `⚠️ Body muito grande (texto ${text ? text.length : 0} chars), ignorando`,
-                  );
-                  return;
-                }
-
-                let json: unknown;
-                try {
-                  json = JSON.parse(text);
-                } catch {
-                  return;
-                }
-
-                if (
-                  (Array.isArray(json) && json.length > 0) ||
-                  (typeof json === 'object' && json !== null && 'id' in json)
-                ) {
-                  processCaptured = true;
-                  this.logger.log('✅ Processo capturado via CDP!');
-                  break;
-                }
-              } catch {
-                /* ignore */
-              }
-              await new Promise((r) => setTimeout(r, 200));
-            }
-          }
-        } catch (e) {
-          this.logger.error(`Erro no handler de response: ${e}`);
-        }
-      };
-
-      client.on('Network.responseReceived', onResponse);
-
-      return client;
-    };
-
-    client = await initCDP(page);
 
     try {
       const cacheKey = `pje:session:${regionTRT}`;
@@ -284,11 +128,12 @@ export class ScrapingService implements OnModuleInit {
 
       this.logger.log(`🌐 Acessando URL base: ${urlBase}`);
       await retry(
-        () => page.goto(urlBase, { waitUntil: 'domcontentloaded' }),
+        () => page.goto(urlBase, { waitUntil: 'networkidle0' }),
         3,
         1000,
         'Abrir consulta',
       );
+
       const wafCookies = (await page.cookies()).filter((c) =>
         c.name.startsWith('aws-waf'),
       );
@@ -303,328 +148,426 @@ export class ScrapingService implements OnModuleInit {
         );
         this.logger.log('🧹 Cookies AWS WAF removidos.');
       }
-      // 🚧 Detecta se caiu no AWS WAF
-      // Aguarda o iframe do AWS WAF aparecer no DOM
-      await page
-        .waitForFunction(
-          () => {
-            const iframes = Array.from(document.querySelectorAll('iframe'));
-            return iframes.some(
-              (f) =>
-                f.src.includes('awswaf') ||
-                f.src.includes('captcha') ||
-                f.src.includes('token'),
-            );
-          },
-          { timeout: 2000 },
-        )
-        .catch(() => null);
 
-      // Depois que o iframe aparece, busca o frame correspondente
-      const wafFrame = page
-        .frames()
-        .find(
-          (f) =>
-            f.url().includes('awswaf') ||
-            f.url().includes('captcha') ||
-            f.url().includes('token'),
-        );
-
-      if (!wafFrame) {
-        this.logger.warn('❌ Nenhum frame AWS WAF encontrado');
-      } else {
-        this.logger.log(`✅ Frame AWS WAF detectado: ${wafFrame.url()}`);
-      }
-
-      // Detecta se é uma página de WAF
+      // Detecta se é uma página de WAF (gokuProps injetado pela AWS, ou
+      // fallback via regex no HTML — o mesmo dado, direto ou via markup)
       const wafParams = await page.evaluate(() => {
-        const w = window as Window & typeof globalThis & { gokuProps?: { key?: string; iv?: string; context?: string } };
-        const g = w.gokuProps;
-        if (g) {
-          const q1 = document.querySelector(
-            'script[src*="token.awswaf.com"]',
-          ) as HTMLScriptElement | null;
-          const q2 = document.querySelector(
-            'script[src*="captcha.awswaf.com"]',
-          ) as HTMLScriptElement | null;
-          return {
-            websiteKey: g.key || null,
-            iv: g.iv || null,
-            context: g.context || null,
-            challengeScript: q1 ? q1.src : null,
-            captchaScript: q2 ? q2.src : null,
-          };
-        }
+        const w = window as any;
 
-        // fallback: examina apenas scripts (pequeno slice do texto) para evitar innerHTML gigante
-        const scriptEls = Array.from(
-          document.scripts || [],
-        ) as HTMLScriptElement[];
-        const scripts = scriptEls.map((s) => ({
-          src: s.src || null,
-          text: s.textContent ? s.textContent.slice(0, 2000) : '',
-        }));
-        const challengeScript =
-          scripts.find((s) => s.src && s.src.includes('token.awswaf.com'))
-            ?.src || null;
-        const captchaScript =
-          scripts.find((s) => s.src && s.src.includes('captcha.awswaf.com'))
-            ?.src || null;
+        const key = w.gokuProps?.key || null;
+        const iv = w.gokuProps?.iv || null;
+        const context = w.gokuProps?.context || null;
 
-        let websiteKey: string | null = null;
-        let iv: string | null = null;
-        let contextVal: string | null = null;
-        for (const s of scripts.slice(0, 10)) {
-          const t = s.text || '';
-          if (!t) continue;
-          const mKey =
-            t.match(/"key"\s*:\s*"([^"]+)"/) ||
-            t.match(/sitekey\s*:\s*"([^"]+)"/);
-          if (mKey) websiteKey = websiteKey || (mKey[1] as string);
-          const mIv = t.match(/"iv"\s*:\s*"([^"]+)"/);
-          if (mIv) iv = iv || (mIv[1] as string);
-          const mC = t.match(/"context"\s*:\s*"([^"]+)"/);
-          if (mC) contextVal = contextVal || (mC[1] as string);
-          if (websiteKey && iv && contextVal) break;
-        }
+        const html = document.documentElement.innerHTML;
+        const backupKey =
+          (html.match(/"key"\s*:\s*"([^"]+)"/i) || [])[1] ||
+          (html.match(/"sitekey"\s*:\s*"([^"]+)"/i) || [])[1];
+        const backupIv = (html.match(/"iv"\s*:\s*"([^"]+)"/i) || [])[1];
+        const backupContext = (html.match(/"context"\s*:\s*"([^"]+)"/i) ||
+          [])[1];
+
+        const scripts = Array.from(document.querySelectorAll('script')).map(
+          (s) => s.src,
+        );
+        const challengeScript = scripts.find((s) => s.includes('challenge'));
+        const captchaScript = scripts.find((s) => s.includes('captcha'));
 
         return {
-          websiteKey,
-          iv,
-          context: contextVal,
+          websiteKey: key || backupKey,
+          iv: iv || backupIv,
+          context: context || backupContext,
           challengeScript,
           captchaScript,
         };
       });
 
-      this.logger.log(`wafFrame URL: ${wafFrame?.url() || '❌ não encontrado'}`);
-      const urlObj = new URL(urlBase);
-
-      const correctDomain = urlObj.hostname;
-
       if (wafParams?.websiteKey && wafParams?.context && wafParams?.iv) {
-        this.logger.warn('⚠️ AWS WAF detectado — iniciando resolução...');
-
-        const client = await page.target().createCDPSession();
-        await client.send('Page.stopLoading');
-
-        //
-        // 1. EXTRAIR PARÂMETROS DO WAF
-        //
-        const wafParamsExtracted = await page.evaluate(() => {
-          const goku = (window as Window & typeof globalThis & { gokuProps: { key: string; iv: string; context: string } | undefined }).gokuProps;
-          if (!goku) return null;
-
-          const challengeScript =
-            (
-              document.querySelector(
-                'script[src*="token.awswaf.com"]',
-              ) as HTMLScriptElement | null
-            )?.src || null;
-
-          const captchaScript =
-            (
-              document.querySelector(
-                'script[src*="captcha.awswaf.com"]',
-              ) as HTMLScriptElement | null
-            )?.src || null;
-
-          return {
-            websiteKey: goku.key,
-            iv: goku.iv,
-            context: goku.context,
-            challengeScript,
-            captchaScript,
-          };
-        });
-
-        this.logger.log('🧩 Parâmetros AWS WAF extraídos:');
-
-        if (!wafParamsExtracted?.websiteKey) {
-          throw new Error('Não foi possível extrair parâmetros do AWS WAF');
-        }
-
-        //
-        // 2. RESOLVER CAPTCHA VIA 2CAPTCHA
-        //
-        const solved = await this.captchaService.resolveAwsWaf({
-          websiteURL: urlBase,
-          websiteKey: wafParamsExtracted.websiteKey,
-          context: wafParamsExtracted.context,
-          iv: wafParamsExtracted.iv,
-          challengeScript: wafParamsExtracted.challengeScript || '',
-          captchaScript: wafParamsExtracted.captchaScript || '',
-        });
-
-        this.logger.log('✅ AWS WAF resolvido via 2Captcha');
-
-        const tokenToUse = solved?.existing_token;
-        if (!tokenToUse) {
-          throw new Error(
-            'existing_token não retornado pelo resolvedor AWS WAF',
-          );
-        }
-
-        //
-        // 3. OBTER /voucher DO WAF
-        //
-        const voucherBaseUrl = (
-          wafParamsExtracted.challengeScript || ''
-        ).replace(/\/challenge\.js$/, '');
-
-        this.logger.log(`🔗 Base URL do voucher: ${voucherBaseUrl}`);
-
-        const voucherResponseText = await page.evaluate(
-          async (baseUrl, voucherBody) => {
-            const res = await fetch(`${baseUrl}/voucher`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-              body: JSON.stringify(voucherBody),
-            });
-            return res.text();
-          },
-          voucherBaseUrl,
-          {
-            captcha_voucher: solved.captcha_voucher || '',
-            existing_token: solved.existing_token || '',
-          },
+        this.logger.warn(
+          '⚠️ AWS WAF detectado — resolvendo com clique real no widget...',
         );
 
-        let voucherResponse: VoucherResponse | null = null;
-        try {
-          const mem = process.memoryUsage();
-          this.logger.debug(
-            `MEM before voucher parse: heapUsed=${Math.round(mem.heapUsed / 1024 / 1024)}MB`,
-          );
-
-          const MAX_VOUCHER_CHARS = 200000; // 200 KB
-          if (
-            typeof voucherResponseText === 'string' &&
-            voucherResponseText.length > MAX_VOUCHER_CHARS
-          ) {
-            this.logger.warn(
-              `⚠️ voucherResponseText muito grande (${voucherResponseText.length} chars), ignorando parse`,
-            );
-          } else {
+        // Procura um botão/link com o texto dado em todos os frames da
+        // página (o widget da AWS pode estar no frame principal ou num
+        // iframe cross-origin de captcha.awswaf.com).
+        const clickButtonWithText = async (text: string): Promise<boolean> => {
+          for (const frame of page.frames()) {
             try {
-              voucherResponse = JSON.parse(voucherResponseText) as VoucherResponse;
+              const clicked = await frame.evaluate((needle) => {
+                const els = Array.from(
+                  document.querySelectorAll(
+                    'button, a, div[role="button"], input[type="button"], input[type="submit"]',
+                  ),
+                );
+                const el = els.find((e) =>
+                  (e.textContent || (e as HTMLInputElement).value || '')
+                    .trim()
+                    .toLowerCase()
+                    .includes(needle),
+                );
+                if (el) {
+                  (el as HTMLElement).click();
+                  return true;
+                }
+                return false;
+              }, text);
+              if (clicked) return true;
             } catch {
-              this.logger.warn('⚠️ Resposta /voucher não é JSON válido');
+              // frame cross-origin ou destruído — tenta o próximo
             }
           }
-        } catch {
-          this.logger.warn('⚠️ Erro ao processar voucherResponseText');
+          return false;
+        };
+
+        //
+        // 1. CLICA EM "BEGIN" E ACHA O CANVAS DO GRID
+        //
+        // O grid de imagens é desenhado com pixels dentro de um <canvas> —
+        // não existe nenhuma <img> real pro grid em si. Os alvos de clique
+        // de verdade são <button>s numerados (1, 2, 3...) dentro do canvas
+        // (conteúdo de fallback/acessibilidade). A AWS às vezes sorteia a
+        // variante de ÁUDIO em vez da de canvas; como só sabemos resolver a
+        // de canvas, recarrega e tenta de novo até achar um, ou desiste.
+        let captchaFrame = page.mainFrame();
+        let canvasHandle: Awaited<
+          ReturnType<(typeof captchaFrame)['$']>
+        > | null = null;
+        let instruction = '';
+        const MAX_TENTATIVAS_VARIANTE = 5;
+
+        for (
+          let tentativaVariante = 1;
+          tentativaVariante <= MAX_TENTATIVAS_VARIANTE;
+          tentativaVariante++
+        ) {
+          // O widget vem em inglês ("Begin") ou português ("Iniciar")
+          // dependendo do accept-language — tenta os dois.
+          const clicouBegin = (await clickButtonWithText('begin'))
+            ? true
+            : await clickButtonWithText('iniciar');
+          this.logger.log(
+            clicouBegin
+              ? '👉 Botão "Begin"/"Iniciar" clicado'
+              : '⚠️ Botão "Begin"/"Iniciar" não encontrado — talvez já esteja no grid',
+          );
+          await new Promise((r) => setTimeout(r, 1500));
+
+          captchaFrame =
+            page.frames().find((f) => f.url().includes('captcha.awswaf.com')) ||
+            page.mainFrame();
+
+          canvasHandle = await captchaFrame.$('canvas');
+
+          if (canvasHandle) {
+            // A instrução (ex: "Escolha todos(as) os relógios" ou "Choose
+            // all the hats") fica no <div> irmão anterior do <div> que
+            // envolve o canvas — extraído direto do DOM, funciona em
+            // qualquer idioma (ao contrário de regex tipo /choose|select/).
+            instruction = await canvasHandle.evaluate((canvas) => {
+              const outerDiv = canvas.parentElement?.parentElement;
+              const instrucaoDiv = outerDiv?.children?.[0];
+              return instrucaoDiv?.textContent?.trim() || '';
+            });
+          }
+
+          if (canvasHandle && instruction) {
+            this.logger.log(
+              `🧩 Instrução do captcha: "${instruction}" (variante de canvas, tentativa ${tentativaVariante})`,
+            );
+            break;
+          }
+
+          this.logger.warn(
+            `⚠️ Sem canvas de imagem — provável variante de áudio (tentativa ${tentativaVariante}/${MAX_TENTATIVAS_VARIANTE}) — recarregando pra tentar de novo`,
+          );
+
+          if (tentativaVariante === MAX_TENTATIVAS_VARIANTE) {
+            throw new Error(
+              '❌ Não conseguiu cair na variante de canvas do captcha após várias tentativas (variante de áudio não é suportada)',
+            );
+          }
+
+          // Um reload simples reaproveita a mesma sessão/preferência de
+          // acessibilidade e sempre volta pra mesma variante. Limpa cookies
+          // do WAF e localStorage/sessionStorage e faz uma navegação nova
+          // (não reload) pra forçar a AWS a sortear de novo.
+          const wafCookiesRetry = (await page.cookies()).filter((c) =>
+            c.name.startsWith('aws-waf'),
+          );
+          if (wafCookiesRetry.length) {
+            await page.deleteCookie(
+              ...wafCookiesRetry.map((c) => ({
+                name: c.name,
+                domain: c.domain,
+                path: c.path || '/',
+              })),
+            );
+          }
+          await page
+            .evaluate(() => {
+              localStorage.clear();
+              sessionStorage.clear();
+            })
+            .catch(() => null);
+          await page
+            .goto(urlBase, { waitUntil: 'networkidle0' })
+            .catch(() => null);
+          await new Promise((r) => setTimeout(r, 1500));
         }
 
-        const newToken = voucherResponse?.token;
+        if (!canvasHandle) {
+          throw new Error('❌ Canvas do grid não encontrado');
+        }
+        const canvas = canvasHandle;
 
-        //
-        // 4. LIMPAR COOKIES EXISTENTES DO WAF
-        //
-        const wafCookies = (await page.cookies()).filter((c) =>
-          c.name.startsWith('aws-waf'),
+        // Os botões numerados podem levar um tempo pra todos aparecerem —
+        // espera a contagem estabilizar antes de considerar definitiva.
+        let buttonHandles = await canvas.$$('button');
+        let contagemAnterior = -1;
+        for (let tentativa = 0; tentativa < 14; tentativa++) {
+          if (
+            buttonHandles.length > 0 &&
+            buttonHandles.length === contagemAnterior
+          ) {
+            break;
+          }
+          contagemAnterior = buttonHandles.length;
+          await new Promise((r) => setTimeout(r, 400));
+          buttonHandles = await canvas.$$('button');
+        }
+
+        if (!buttonHandles.length) {
+          throw new Error(
+            '❌ Nenhum botão de célula encontrado no canvas do captcha',
+          );
+        }
+
+        // Os botões são conteúdo de fallback do <canvas> — o browser não dá
+        // layout/posição visual real a eles quando o canvas é suportado
+        // (que é sempre o caso aqui), então bounding box não serve pra
+        // descobrir linhas/colunas. Em todos os grids que já vimos a AWS
+        // sempre usa 3 colunas (9→3x3, 6→2x3, 3→1x3), então deriva o número
+        // de linhas direto da contagem.
+        const columns = 3;
+        const rows = Math.max(1, Math.ceil(buttonHandles.length / columns));
+
+        this.logger.log(
+          `🔘 ${buttonHandles.length} botões de célula encontrados (assumindo ${columns} colunas → ${rows} linha(s))`,
         );
 
-        if (wafCookies.length) {
-          await page.deleteCookie(
-            ...wafCookies.map((c) => ({
-              name: c.name,
-              domain: c.domain,
-              path: c.path || '/',
-            })),
-          );
-          this.logger.log('🧹 Cookies AWS WAF removidos.');
+        //
+        // 3. TIRA UM PRINT DO CANVAS (onde o grid é desenhado de verdade)
+        //
+        const gridScreenshot = await canvas.screenshot({ encoding: 'base64' });
+
+        //
+        // 4. MANDA PRO 2CAPTCHA (GridTask) SÓ PRA RECONHECER A IMAGEM —
+        //    quem clica e submete o /verify é o nosso próprio browser
+        //
+        const cellIndices = await this.captchaService.solveGridImage(
+          gridScreenshot,
+          instruction,
+          rows,
+          columns,
+        );
+
+        this.logger.log(
+          `🎯 Células a clicar (bruto, do 2Captcha): ${cellIndices.join(', ') || '(nenhuma)'}`,
+        );
+
+        if (!cellIndices.length) {
+          throw new Error('❌ GridTask não retornou nenhuma célula pra clicar');
         }
 
-        await page.evaluate(async () => {
-          localStorage.clear();
-          sessionStorage.clear();
+        // Confirmado visualmente: o GridTask já numera as células em base 1,
+        // na mesma ordem de leitura (esquerda->direita, cima->baixo) usada
+        // pelos números dos botões de fallback do canvas. Ou seja, o índice
+        // retornado JÁ É o número do botão — nada de deslocar.
+        const numerosBotaoAClicar = cellIndices;
 
-          // Limpa caches do Service Worker / Cache API como segurança adicional
-          if ('caches' in window) {
-            try {
-              const keys = await caches.keys();
-              await Promise.all(keys.map((k) => caches.delete(k)));
-            } catch (e) {
-              /* ignore */
-            }
+        this.logger.log(
+          `🎯 Botões a clicar (por número, base 1): ${numerosBotaoAClicar.join(', ')}`,
+        );
+
+        //
+        // 5. CLICA NOS BOTÕES CERTOS, DE VERDADE, NA NOSSA PÁGINA
+        //
+        // Busca os botões de novo — a GridTask pode levar mais de 15s pra
+        // responder, e o widget pode ter trocado o desafio nesse meio
+        // tempo. Mapeia por NÚMERO (texto do próprio botão), não por
+        // posição no array — mais confiável que confiar na ordem do DOM.
+        const buttonHandlesFrescos = await canvas.$$('button');
+        const botaoPorNumero = new Map<
+          number,
+          (typeof buttonHandlesFrescos)[number]
+        >();
+        for (const btn of buttonHandlesFrescos) {
+          const texto = await btn.evaluate((b) => b.textContent?.trim() || '');
+          const numero = parseInt(texto, 10);
+          if (!isNaN(numero)) botaoPorNumero.set(numero, btn);
+        }
+        this.logger.log(
+          `🔘 Re-capturados ${buttonHandlesFrescos.length} botões antes de clicar (números disponíveis: ${Array.from(
+            botaoPorNumero.keys(),
+          )
+            .sort((a, b) => a - b)
+            .join(', ')})`,
+        );
+
+        for (const numero of numerosBotaoAClicar) {
+          const handle = botaoPorNumero.get(numero);
+          if (!handle) {
+            this.logger.warn(`⚠️ Botão número ${numero} não encontrado`);
+            continue;
           }
-        });
+          try {
+            // .click() do Puppeteer simula um clique de mouse real e exige
+            // um ponto clicável na tela — mas esses botões são conteúdo de
+            // fallback do <canvas>, sem posição/layout visual quando o
+            // canvas é suportado. Chama .click() nativo via JS em vez
+            // disso, que dispara o handler sem depender de posição visual.
+            await handle.evaluate((el) => (el as HTMLElement).click());
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.logger.warn(`⚠️ Falha ao clicar no botão ${numero}: ${msg}`);
+          }
+          await new Promise((r) => setTimeout(r, 300 + Math.random() * 400));
+        }
+
+        // Registra o listener ANTES de clicar em "Confirm" pra não perder a
+        // request — o SPA da PJE dispara /propriedades sozinho assim que o
+        // desafio é resolvido, e pode ser rápido demais pra escutar só
+        // depois do clique.
+        const propriedadesResponsePromise = page
+          .waitForResponse(
+            (res) =>
+              res.url().includes('/pje-consulta-api/api/propriedades') &&
+              res.request().method() === 'GET',
+            { timeout: 30000 },
+          )
+          .catch(() => null);
 
         //
-        // 5. DEFINIR COOKIE DO TOKEN
+        // 6. CLICA NO BOTÃO DE CONFIRMAR
         //
-        if (!newToken) {
-          this.logger.warn('⚠️ Voucher não retornou token WAF — pulando setCookie');
-        } else {
-        try {
-          const originalCookies = await page.cookies();
-          const wafOriginal = originalCookies.find((c) =>
-            c.name.includes('aws'),
+        const clicouConfirm = await clickButtonWithText('confirm');
+        if (!clicouConfirm) {
+          throw new Error(
+            '❌ Botão "Confirm" não encontrado após clicar nas imagens',
           );
-          const finalDomain = wafOriginal?.domain || correctDomain;
+        }
+        this.logger.log(
+          '✅ Grid resolvido e confirmado — aguardando o /verify nativo da AWS...',
+        );
 
-          await page.setCookie({
-            name: 'aws-waf-token',
-            value: newToken,
-            domain: finalDomain,
-            path: '/',
-            httpOnly: false,
-            secure: true,
-            expires: Math.floor(Date.now() / 1000) + 3600,
-          });
-
-          this.logger.log(
-            '🍪 Cookie aws-waf-token setado com sucesso (via setCookie)',
+        //
+        // 7. AGUARDA O aws-waf-token APARECER (o próprio widget faz /verify
+        //    + /voucher sozinho e seta o cookie ele mesmo). A prova real de
+        //    sucesso é o cookie: window.gokuProps é só a config estática
+        //    injetada na carga da página, o widget nunca limpa isso, então
+        //    não serve como sinal de "desafio resolvido" — usar isso fazia o
+        //    código dar timeout e lançar erro mesmo quando o /voucher já
+        //    tinha emitido o token com sucesso.
+        //
+        let cookiesFinais: Awaited<ReturnType<typeof page.cookies>> = [];
+        let tokensFinais: typeof cookiesFinais = [];
+        const prazoLimite = Date.now() + 60000;
+        while (Date.now() < prazoLimite) {
+          cookiesFinais = await page.cookies();
+          tokensFinais = cookiesFinais.filter(
+            (c) => c.name === 'aws-waf-token' && c.value,
           );
-        } catch (err) {
+          if (tokensFinais.length) break;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+
+        const chamouVerify = awswafRequests.some((r) =>
+          r.url.includes('/verify'),
+        );
+        this.logger.log(
+          `🔍 Requests awswaf.com capturadas após o clique (${awswafRequests.length}): ${JSON.stringify(
+            awswafRequests.map((r) => ({
+              method: r.method,
+              url: r.url.split('?')[0],
+            })),
+          )}`,
+        );
+        if (!chamouVerify) {
           this.logger.warn(
-            '⚠️ Falha no setCookie — usando fallback document.cookie',
+            '⚠️ Nenhuma request para /verify foi capturada — o clique sintético pode não ter disparado o handler real do widget',
           );
-          await page.evaluate((token) => {
-            document.cookie = `aws-waf-token=${token}; path=/; max-age=3600; Secure; SameSite=None`;
-          }, newToken);
-          this.logger.log(
-            '🍪 Cookie aws-waf-token setado via fallback document.cookie',
-          );
-        }
         }
 
-        //
-        // 6. RECARREGAR PARA VALIDAR O TOKEN
-        //
-        const originalCookies = await page.cookies();
+        if (!tokensFinais.length) {
+          throw new Error(
+            '❌ aws-waf-token não encontrado após o widget confirmar o grid',
+          );
+        }
+
+        // O cookie aparece logo após o /voucher, mas a prova definitiva de
+        // que ele é válido é o próprio app da PJE usá-lo com sucesso numa
+        // chamada de API normal e protegida (não é rota do desafio da AWS)
+        // — /propriedades, disparada sozinha pelo SPA assim que o desafio é
+        // resolvido. Espera essa confirmação e relê os cookies nesse
+        // momento, pra salvar exatamente o valor que a AWS aceitou de
+        // verdade, e não um token intermediário que pode mudar depois.
+        const propriedadesResponse = await propriedadesResponsePromise;
+
+        if (propriedadesResponse) {
+          this.logger.log(
+            `✅ Chamada de /propriedades confirmada (status ${propriedadesResponse.status()}) — usando cookies desse momento`,
+          );
+          cookiesFinais = await page.cookies();
+          tokensFinais = cookiesFinais.filter(
+            (c) => c.name === 'aws-waf-token' && c.value,
+          );
+          if (!tokensFinais.length) {
+            throw new Error(
+              '❌ aws-waf-token sumiu após a chamada de /propriedades',
+            );
+          }
+        } else {
+          this.logger.warn(
+            '⚠️ Chamada de /propriedades não foi capturada — salvando o token obtido logo após o /voucher mesmo assim',
+          );
+        }
+
+        // Checa duplicidade no snapshot que será REALMENTE persistido (o do
+        // /propriedades, quando disponível) — checar só o snapshot inicial
+        // deixaria passar batido um duplicado que só aparece depois.
+        if (tokensFinais.length > 1) {
+          this.logger.warn(
+            `⚠️ Encontrados ${tokensFinais.length} cookies aws-waf-token (duplicado por domínio): ${JSON.stringify(tokensFinais.map((c) => ({ domain: c.domain, path: c.path })))}`,
+          );
+        }
+
+        this.logger.log('✅ AWS WAF contornado via clique real no widget');
+
         await this.redis.set(
           `aws-waf-token:${processNumber}`,
-          originalCookies.map((c) => `${c.name}=${c.value}`).join('; '),
+          this.serializarCookies(cookiesFinais),
           'EX',
-          WAF_TOKEN_TTL_SECONDS,
+          180000, // 3 minutos de validade no Redis, para evitar reCAPTCHA frequentes
         );
-        await new Promise((r) => setTimeout(r, 1500));
-        await page.reload({ waitUntil: 'domcontentloaded' });
-        this.logger.log('🔁 Página recarregada — AWS WAF liberado!');
+
         return {
           integra: null,
           process: { mensagemErro: 'AWS WAF contornado' },
           singleInstance: false,
         };
       }
+
       this.logger.log('✅ Nenhum AWS WAF detectado na página');
-      // await this.captureRealRequest(page, regionTRT);
-      // 👇 1. espera frontend inicializar
-      // await new Promise((r) => setTimeout(r, 2000));
-      // 👇 1. espera frontend inicializar (delay randômico)
-      const delay = Math.floor(Math.random() * (3500 - 1500 + 1)) + 1500;
-      await new Promise((r) => setTimeout(r, delay));
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      // 👇 2. aguarda o cookie aparecer (isso é o segredo)
+
+      await new Promise((r) => setTimeout(r, 2000));
+      await page.reload({ waitUntil: 'networkidle0' });
       this.logger.log('⏳ Aguardando aws-waf-token...');
 
       let token: string | null = null;
+      let cookiesAtuais: Awaited<ReturnType<typeof page.cookies>> = [];
 
       for (let i = 0; i < 10; i++) {
-        const cookies = await page.cookies();
-        const found = cookies.find((c) => c.name === 'aws-waf-token');
+        cookiesAtuais = await page.cookies();
+        const found = cookiesAtuais.find((c) => c.name === 'aws-waf-token');
 
         if (found?.value) {
           token = found.value;
@@ -634,116 +577,34 @@ export class ScrapingService implements OnModuleInit {
         await new Promise((r) => setTimeout(r, 500));
       }
 
-      // 👇 3. validação
+      // Quando a AWS não desafia a sessão, ela pode simplesmente não emitir
+      // o cookie aws-waf-token (artefato do desafio JS que nem rodou). Não é
+      // falha: persistimos os cookies de sessão que existirem.
       if (!token) {
         this.logger.warn(
-          `⚠️ aws-waf-token não encontrado após espera, prosseguindo sem token...`,
+          '⚠️ aws-waf-token não apareceu — seguindo sem ele (provável sessão não desafiada pela AWS)',
         );
-        return;
       }
 
-      // 👇 4. salva
+      if (!cookiesAtuais.length) {
+        throw new Error('❌ Nenhum cookie de sessão disponível após reload');
+      }
+
       await this.redis.set(
         `aws-waf-token:${processNumber}`,
-        `aws-waf-token=${token}`,
+        this.serializarCookies(cookiesAtuais),
         'EX',
-        WAF_TOKEN_TTL_SECONDS,
+        18000, // 5 horas de validade no Redis, para evitar reCAPTCHA frequentes
       );
     } finally {
       this.logger.log('♻ Limpando recursos e liberando contexto...');
-
-      // Detach / disable no client somente se foi inicializado
-      if (client) {
-        try {
-          await client.send('Network.disable');
-        } catch {}
-        try {
-          await client.detach();
-        } catch {
-          /* ignore */
-        }
-      }
-
-      // Fecha a página com segurança
       try {
-        if (page && !page.isClosed()) {
-          try {
-            await page.close({ runBeforeUnload: true });
-          } catch {
-            try {
-              await page.close();
-            } catch {
-              /* ignore */
-            }
-          }
-        }
+        if (page && !page.isClosed()) await page.close();
       } catch {
-        /* ignore */
+        // ignore
       }
-
-      // Remove listeners se o client existir
-      try {
-        if (client && typeof client.off === 'function') {
-          if (onResponse) client.off('Network.responseReceived', onResponse);
-          if (onRequest) client.off('Network.requestWillBeSent', onRequest);
-        }
-      } catch {
-        /* ignore */
-      }
-
-      // Garante fechamento do contexto caso exista
-      try {
-        if (context) await BrowserManager.closeContext(context);
-      } catch {
-        /* ignore */
-      }
-
+      await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado');
-    }
-  }
-  async captureRealRequest(page: Page) {
-    await BrowserManager.ensureRequestInterception(page);
-
-    const onRequestIntercept = async (request: HTTPRequest) => {
-      try {
-        const url = request.url();
-
-        if (url.includes('/pje-consulta-api/api/propriedades')) {
-          // Exemplo de captura de headers (comentado de forma segura)
-          // const headers = request.headers();
-          // const filteredHeaders = {
-          //   referer: headers.referer,
-          //   'user-agent': headers['user-agent'],
-          //   'x-grau-instancia': headers['x-grau-instancia'],
-          //   accept: headers.accept,
-          // };
-          // await this.redis.set(`headers:${regionTRT}`, JSON.stringify(filteredHeaders), 'EX', 3600);
-        }
-      } catch {
-        /* ignore */
-      } finally {
-        try {
-          if (!request.isInterceptResolutionHandled()) {
-            await request.continue();
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    };
-
-    page.on('request', onRequestIntercept);
-    // remover automaticamente quando a página fechar
-    try {
-      page.once('close', () => {
-        try {
-          page.off('request', onRequestIntercept);
-        } catch {
-          /* ignore */
-        }
-      });
-    } catch {
-      /* ignore */
     }
   }
 }
