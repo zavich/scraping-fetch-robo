@@ -55,6 +55,21 @@ export class GenericProcessoWorker extends WorkerHost {
     };
     let successWebhookSent = false;
 
+    // Cronometragem por estágio (ARQ-XXX / diagnóstico de capacidade) — só
+    // embrulha chamadas já existentes com Date.now() antes/depois, sem tocar
+    // no miolo de retry/403/captcha (scraping.service.ts/fetch-url.service.ts
+    // continuam intocados). null = estágio não alcançado nessa execução
+    // (ex.: documents:false nunca passa por login/documentosRestritos).
+    const startedAt = Date.now();
+    const queueWaitMs =
+      typeof job.timestamp === 'number' ? startedAt - job.timestamp : null;
+    const stageDurationsMs: Record<string, number | null> = {
+      login: null,
+      fetchMovimentacoes: null,
+      documentosPublicos: null,
+      documentosRestritos: null,
+    };
+
     // Extrai TRT do CNJ
     const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
     const regionTRT = match ? Number(match[1]) : null;
@@ -91,10 +106,12 @@ export class GenericProcessoWorker extends WorkerHost {
       // depois na busca dos documentos restritos (via Redis).
       let sessionCookies: string | undefined;
       if (documents) {
+        const loginStartedAt = Date.now();
         const { cookies, account } = await this.loginPool.getCookies(
           regionTRT,
           numero,
         );
+        stageDurationsMs.login = Date.now() - loginStartedAt;
 
         if (!cookies || !account) {
           const response = normalizeResponse(
@@ -114,11 +131,14 @@ export class GenericProcessoWorker extends WorkerHost {
         sessionCookies = cookies;
       }
 
+      const fetchMovimentacoesStartedAt = Date.now();
       const instances = await this.fetchUrlMovimentService.execute(
         numero,
         origem,
         sessionCookies,
       );
+      stageDurationsMs.fetchMovimentacoes =
+        Date.now() - fetchMovimentacoesStartedAt;
 
       // Sem cap aqui — processo pode ter até 3 instâncias (1º grau, 2º grau
       // e TST). Um `.slice(0, 2)` de antes do suporte a TST descartava a 3ª
@@ -210,6 +230,7 @@ export class GenericProcessoWorker extends WorkerHost {
           this.logger.log(
             `📄 [${job.queueName}] Extraindo documentos públicos para ${numero} (TRT-${regionTRT})`,
           );
+          const publicDocsStartedAt = Date.now();
           const publicDocs: DocumentoExtraido[] =
             await this.fetchUrlMovimentService.fetchPublicDocuments(
               numero,
@@ -217,6 +238,8 @@ export class GenericProcessoWorker extends WorkerHost {
               regionTRT,
               false,
             );
+          stageDurationsMs.documentosPublicos =
+            Date.now() - publicDocsStartedAt;
 
           const publicDocsById = new Map(
             publicDocs.map((d) => [d.idUnicoDocumento, d.texto]),
@@ -300,11 +323,14 @@ export class GenericProcessoWorker extends WorkerHost {
       // acima pra autenticar a busca de movimentações, então não faz mais
       // sentido delegar isso a um worker/fila separado que ia logar de novo.
       try {
+        const restrictedDocsStartedAt = Date.now();
         const documentos = await this.processDocsService.execute(
           numero,
           instances as ProcessosResponse[],
           regionTRT,
         );
+        stageDurationsMs.documentosRestritos =
+          Date.now() - restrictedDocsStartedAt;
 
         // Checa TODAS as instâncias, não só a primeira — com até 3 (incluindo
         // TST), é comum a primeira vir sem documentos e outra vir com.
@@ -421,6 +447,33 @@ export class GenericProcessoWorker extends WorkerHost {
       }
 
       throw error instanceof Error ? error : new Error(String(error));
+    } finally {
+      // Roda em QUALQUER saída (return ou throw, de qualquer um dos pontos
+      // acima) — um único ponto de log em vez de duplicar em cada retorno.
+      this.logStageDurations(
+        numero,
+        queueWaitMs,
+        Date.now() - startedAt,
+        stageDurationsMs,
+      );
+    }
+  }
+
+  // Nunca deixa a própria instrumentação derrubar o job — um erro aqui (ex.:
+  // logger mal configurado) não pode virar um webhook de ERRO pra uma coleta
+  // que na verdade deu certo.
+  private logStageDurations(
+    numero: string,
+    queueWaitMs: number | null,
+    totalMs: number,
+    stageDurationsMs: Record<string, number | null>,
+  ): void {
+    try {
+      this.logger.log(
+        `⏱ tempos ${numero}: ${JSON.stringify({ queueWaitMs, totalMs, ...stageDurationsMs })}`,
+      );
+    } catch {
+      // instrumentação não pode ser motivo de falha do job
     }
   }
 }
