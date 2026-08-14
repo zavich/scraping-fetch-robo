@@ -18,6 +18,7 @@ import { LambdaDocumentExtractorService } from './services/lambda-document-extra
 import { LoginPoolService } from './services/login-pool.service';
 import { PjeLoginService } from './services/login.service';
 import { ProcessDocumentsFindService } from './services/process-documents-find.service';
+import { QueueMetricsReporterService } from './services/queue-metrics-reporter.service';
 import { RedisService } from 'src/services/redis.service';
 
 const defaultQueueOptions = {
@@ -58,6 +59,7 @@ const defaultQueueOptions = {
     LambdaDocumentExtractorService,
     ScrapingService,
     RedisService,
+    QueueMetricsReporterService,
     ...createDynamicWorkers(),
   ],
   exports: [],
