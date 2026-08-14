@@ -1,7 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { getQueueToken } from '@nestjs/bullmq';
-import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
 import {
   CloudWatchClient,
@@ -23,14 +27,18 @@ import { ALL_TRT_QUEUES } from 'src/helpers/getTRTQueue';
 //     visibilidade/dashboard, não usada pra decisão de scaling.
 const QUEUE_NAMES = [...ALL_TRT_QUEUES, 'pje-tst'];
 const METRIC_NAMESPACE = 'ScrapingRoboApi/Queues';
+const REPORT_INTERVAL_MS = 60_000;
 
 @Injectable()
-export class QueueMetricsReporterService implements OnModuleInit {
+export class QueueMetricsReporterService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(QueueMetricsReporterService.name);
   private queues: Queue[] = [];
   private readonly cloudwatch = new CloudWatchClient({
     region: process.env.AWS_REGION || 'sa-east-1',
   });
+  private intervalHandle: NodeJS.Timeout | null = null;
 
   constructor(private readonly moduleRef: ModuleRef) {}
 
@@ -38,6 +46,14 @@ export class QueueMetricsReporterService implements OnModuleInit {
   // (pje.module.ts) via o token que @nestjs/bullmq usa internamente — mesma
   // ideia de createDynamicWorkers (dynamic-workers.provider.ts), sem precisar
   // injetar as 25 filas uma a uma no construtor.
+  //
+  // setInterval em vez de @Cron (@nestjs/schedule): esse pacote usa
+  // crypto.randomUUID() global internamente, que não existe por padrão no
+  // Node 18 (só ficou global a partir do Node 20+) — o container roda Node
+  // 18, e o @Cron travava o bootstrap inteiro (unhandledRejection dentro de
+  // ScheduleExplorer.onModuleInit, a task nunca chegava a escutar na porta e
+  // caía no health check do ALB). setInterval evita esse caminho quebrado
+  // por completo, sem precisar de polyfill global em main.ts.
   onModuleInit(): void {
     this.queues = QUEUE_NAMES.map((name) => {
       try {
@@ -49,9 +65,19 @@ export class QueueMetricsReporterService implements OnModuleInit {
         return null;
       }
     }).filter((queue): queue is Queue => queue !== null);
+
+    this.intervalHandle = setInterval(() => {
+      void this.reportQueueMetrics();
+    }, REPORT_INTERVAL_MS);
   }
 
-  @Cron(CronExpression.EVERY_MINUTE)
+  onModuleDestroy(): void {
+    if (this.intervalHandle) {
+      clearInterval(this.intervalHandle);
+      this.intervalHandle = null;
+    }
+  }
+
   async reportQueueMetrics(): Promise<void> {
     // Nunca pode derrubar o processo por conta própria — é só observabilidade.
     try {
