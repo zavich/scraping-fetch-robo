@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: scraping-api-prod
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -20,6 +20,11 @@ jobs:
       ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
       ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
       TASK_FAMILY: ${{ secrets.TASK_FAMILY }}
+      # Serviço dedicado à fila do TRT3 (WORKER_QUEUE_MODE=trt3-only). Roda a
+      # mesma imagem, com task definition própria — sem estes dois, ele ficava
+      # para trás a cada deploy e seguia com código antigo.
+      ECS_SERVICE_TRT3: ${{ secrets.ECS_SERVICE_TRT3 }}
+      TASK_FAMILY_TRT3: ${{ secrets.TASK_FAMILY_TRT3 }}
 
     steps:
       - name: Checkout
@@ -29,6 +34,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Validate TRT3 service config
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${{ env.ECS_SERVICE_TRT3 }}" || -z "${{ env.TASK_FAMILY_TRT3 }}" ]]; then
+            echo "ECS_SERVICE_TRT3 e TASK_FAMILY_TRT3 precisam estar configurados."
+            echo "Sem eles o serviço dedicado ao TRT3 nao e atualizado e fica com codigo antigo."
+            exit 1
+          fi
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -74,22 +89,47 @@ jobs:
             exit 1
           fi
 
-      - name: Render Task Definition
+      - name: Render Task Definition (principal)
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
           TASK_FAMILY: ${{ env.TASK_FAMILY }}
           IMAGE_URI: ${{ env.IMAGE_URI }}
           NODE_ENV: production
+          # 'all' preserva o comportamento historico deste servico (consome as
+          # 25 filas). Trocar para 'exclude-trt3' quando quiser que a fila do
+          # TRT3 seja atendida so pelo servico dedicado.
+          WORKER_QUEUE_MODE: ${{ secrets.WORKER_QUEUE_MODE || 'all' }}
           TASK_ROLE_ARN: ${{ secrets.TASK_ROLE_ARN }}
           EXECUTION_ROLE_ARN: ${{ secrets.EXECUTION_ROLE_ARN }}
           SECRET_ARN_PREFIX: ${{ secrets.SECRET_ARN_PREFIX }}
           LOG_GROUP: ${{ secrets.LOG_GROUP }}
         run: node ./scripts/render-task-definition.mjs task-def-rendered.json
 
-      - name: Deploy ECS
+      - name: Deploy ECS (principal)
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: task-def-rendered.json
           service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Render Task Definition (TRT3)
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          TASK_FAMILY: ${{ env.TASK_FAMILY_TRT3 }}
+          IMAGE_URI: ${{ env.IMAGE_URI }}
+          NODE_ENV: production
+          WORKER_QUEUE_MODE: trt3-only
+          TASK_ROLE_ARN: ${{ secrets.TASK_ROLE_ARN }}
+          EXECUTION_ROLE_ARN: ${{ secrets.EXECUTION_ROLE_ARN }}
+          SECRET_ARN_PREFIX: ${{ secrets.SECRET_ARN_PREFIX }}
+          LOG_GROUP: ${{ secrets.LOG_GROUP }}
+        run: node ./scripts/render-task-definition.mjs task-def-trt3-rendered.json
+
+      - name: Deploy ECS (TRT3)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: task-def-trt3-rendered.json
+          service: ${{ env.ECS_SERVICE_TRT3 }}
           cluster: ${{ env.ECS_CLUSTER }}
           wait-for-service-stability: true
