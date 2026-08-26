@@ -42,6 +42,8 @@ export class BedrockCaptchaService {
   // lambda for pra outra região, é aqui que precisa de env própria.
   private readonly REGION = process.env.AWS_S3_REGION as string;
   private readonly API_KEY = process.env.GRID_SOLVER_LAMBDA_API_KEY as string;
+  private readonly X_API_KEY = process.env
+    .GRID_SOLVER_LAMBDA_X_API_KEY as string;
 
   private client: LambdaClient | null = null;
 
@@ -87,6 +89,9 @@ export class BedrockCaptchaService {
         Payload: Buffer.from(
           JSON.stringify({
             api_key: this.API_KEY,
+            // Vai no payload porque a invocação é por SDK, que não tem
+            // headers HTTP — o lambda aceita nos dois lugares.
+            'x-api-key': this.X_API_KEY,
             image_b64: imageBase64,
             instruction,
             rows,

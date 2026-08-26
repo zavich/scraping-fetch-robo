@@ -132,6 +132,10 @@
         {
           "name": "GRID_SOLVER_LAMBDA_API_KEY",
           "valueFrom": "<SECRET_ARN_PREFIX>:GRID_SOLVER_LAMBDA_API_KEY::"
+        },
+        {
+          "name": "GRID_SOLVER_LAMBDA_X_API_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:GRID_SOLVER_LAMBDA_X_API_KEY::"
         }
       ],
 
