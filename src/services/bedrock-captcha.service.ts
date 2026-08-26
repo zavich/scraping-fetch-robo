@@ -60,7 +60,14 @@ export class BedrockCaptchaService {
         '⚠️ USE_BEDROCK_CAPTCHA=true mas GRID_SOLVER_LAMBDA_API_KEY não foi definida — resolvedor de grid desligado',
       );
     }
-    return this.ENABLED && !!this.REGION && !!this.API_KEY;
+    if (this.ENABLED && !this.X_API_KEY) {
+      this.logger.warn(
+        '⚠️ USE_BEDROCK_CAPTCHA=true mas GRID_SOLVER_LAMBDA_X_API_KEY não foi definida — resolvedor de grid desligado',
+      );
+    }
+    // As duas chaves são obrigatórias no lambda: sem uma delas toda
+    // invocação volta 401, então é melhor nem habilitar.
+    return this.ENABLED && !!this.REGION && !!this.API_KEY && !!this.X_API_KEY;
   }
 
   private getClient(): LambdaClient {
