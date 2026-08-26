@@ -35,6 +35,16 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Validate TRT3 service config
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${{ env.ECS_SERVICE_TRT3 }}" || -z "${{ env.TASK_FAMILY_TRT3 }}" ]]; then
+            echo "ECS_SERVICE_TRT3 e TASK_FAMILY_TRT3 precisam estar configurados."
+            echo "Sem eles o serviço dedicado ao TRT3 nao e atualizado e fica com codigo antigo."
+            exit 1
+          fi
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -76,16 +86,6 @@ jobs:
 
           if [[ "$REDIS_URL" != *"${{ secrets.REDIS_URL_FINGERPRINT }}"* ]]; then
             echo "INVALID REDIS_URL detected!"
-            exit 1
-          fi
-
-      - name: Validate TRT3 service config
-        run: |
-          set -euo pipefail
-
-          if [[ -z "${{ env.ECS_SERVICE_TRT3 }}" || -z "${{ env.TASK_FAMILY_TRT3 }}" ]]; then
-            echo "ECS_SERVICE_TRT3 e TASK_FAMILY_TRT3 precisam estar configurados."
-            echo "Sem eles o serviço dedicado ao TRT3 nao e atualizado e fica com codigo antigo."
             exit 1
           fi
 
