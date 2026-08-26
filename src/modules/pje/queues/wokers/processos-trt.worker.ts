@@ -36,7 +36,7 @@ export class GenericProcessoWorker extends WorkerHost {
   private async enviarWebhook(
     url: string,
     payload: unknown,
-    headers: Record<string, string>,
+    headers: Record<string, string | undefined>,
   ): Promise<void> {
     if (process.env.WEBHOOK_DISABLED === 'true') {
       this.logger.warn(
@@ -44,7 +44,13 @@ export class GenericProcessoWorker extends WorkerHost {
       );
       return;
     }
-    await axios.post(url, payload, { headers });
+
+    const sanitizedHeaders: Record<string, string> = {};
+    for (const [key, value] of Object.entries(headers)) {
+      if (typeof value === 'string') sanitizedHeaders[key] = value;
+    }
+
+    await axios.post(url, payload, { headers: sanitizedHeaders });
   }
 
   async process(
