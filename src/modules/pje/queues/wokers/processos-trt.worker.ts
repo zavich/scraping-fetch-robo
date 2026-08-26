@@ -12,7 +12,12 @@ import { ProcessDocumentsFindService } from '../../services/process-documents-fi
 import { ProcessosResponse } from 'src/interfaces';
 import { DocumentoExtraido } from '../../services/fetch-public-documents.service';
 import { ScrapingService } from 'src/helpers/scraping.service';
-import { Root } from 'src/interfaces/normalize';
+import { Root, WebhookTimings } from 'src/interfaces/normalize';
+
+// O robo-api responde o webhook de forma síncrona (grava em S3/Redis antes de
+// responder), então o teto precisa acomodar payloads grandes — 30s cobre com
+// folga o pior caso observado sem deixar o worker preso.
+const WEBHOOK_TIMEOUT_MS = 30_000;
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -35,8 +40,9 @@ export class GenericProcessoWorker extends WorkerHost {
   // por um log — a flag existe só pra isso, o padrão continua enviando.
   private async enviarWebhook(
     url: string,
-    payload: unknown,
+    payload: Root,
     headers: Record<string, string | undefined>,
+    timings?: WebhookTimings,
   ): Promise<void> {
     if (process.env.WEBHOOK_DISABLED === 'true') {
       this.logger.warn(
@@ -50,7 +56,18 @@ export class GenericProcessoWorker extends WorkerHost {
       if (typeof value === 'string') sanitizedHeaders[key] = value;
     }
 
-    await axios.post(url, payload, { headers: sanitizedHeaders });
+    // Anexa os tempos no envio (e não em cada `normalizeResponse`) para que
+    // todo caminho de saída — sucesso, erro, not-found, fallback — leve a
+    // medição sem precisar repetir a montagem em cada ponto.
+    const corpo: Root = timings ? { ...payload, timings } : payload;
+
+    // Instrumentação nunca pode ser motivo de o webhook não chegar: um POST
+    // sem timeout deixaria o job preso indefinidamente se o robo-api parar
+    // de responder, e o BullMQ só reagiria no `lockDuration` (120s).
+    await axios.post(url, corpo, {
+      headers: sanitizedHeaders,
+      timeout: WEBHOOK_TIMEOUT_MS,
+    });
   }
 
   async process(
@@ -97,6 +114,22 @@ export class GenericProcessoWorker extends WorkerHost {
     const match = numero.match(/^\d{7}-\d{2}\.\d{4}\.\d\.(\d{2})\.\d{4}$/);
     const regionTRT = match ? Number(match[1]) : null;
 
+    // Fotografia dos tempos NO MOMENTO do envio — cada saída (erro precoce,
+    // not-found, sucesso, fallback) tem um total diferente, então precisa ser
+    // recalculado a cada webhook em vez de montado uma vez só.
+    const buildTimings = (): WebhookTimings => ({
+      queueWaitMs,
+      totalMs: Date.now() - startedAt,
+      trt: regionTRT,
+      documents,
+      stages: {
+        login: stageDurationsMs.login,
+        fetchMovimentacoes: stageDurationsMs.fetchMovimentacoes,
+        documentosPublicos: stageDurationsMs.documentosPublicos,
+        documentosRestritos: stageDurationsMs.documentosRestritos,
+      },
+    });
+
     try {
       // --------------------------
       // 🔍 Validação TRT
@@ -115,7 +148,12 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+        await this.enviarWebhook(
+          webhookUrl,
+          response,
+          webhookHeaders,
+          buildTimings(),
+        );
         return;
       }
       if (regionTRT === 3 || regionTRT === 9) {
@@ -148,7 +186,12 @@ export class GenericProcessoWorker extends WorkerHost {
               origem,
             },
           );
-          await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+          await this.enviarWebhook(
+            webhookUrl,
+            response,
+            webhookHeaders,
+            buildTimings(),
+          );
           return;
         }
         sessionCookies = cookies;
@@ -182,7 +225,12 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+        await this.enviarWebhook(
+          webhookUrl,
+          response,
+          webhookHeaders,
+          buildTimings(),
+        );
         return;
       }
 
@@ -215,7 +263,12 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'SEGREDO_JUSTICA',
           },
         );
-        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+        await this.enviarWebhook(
+          webhookUrl,
+          response,
+          webhookHeaders,
+          buildTimings(),
+        );
         return;
       }
 
@@ -239,7 +292,12 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'PJE_ERRO',
           },
         );
-        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+        await this.enviarWebhook(
+          webhookUrl,
+          response,
+          webhookHeaders,
+          buildTimings(),
+        );
         return;
       }
 
@@ -247,6 +305,13 @@ export class GenericProcessoWorker extends WorkerHost {
       // 📄 Documentos públicos (best-effort — enriquece as movimentações antes do webhook)
       // Pulado quando documents:true — nesse caso o fluxo de autos (login) logo
       // abaixo já busca públicos e restritos juntos, numa única passada.
+      //
+      // Consequência na medição: `stageDurationsMs.documentosPublicos` só é
+      // preenchido nesta rota. Numa coleta com documents:true ele fica null e
+      // o tempo de baixar TODOS os documentos (públicos inclusive) aparece em
+      // `documentosRestritos` — os dois campos nunca coexistem numa mesma
+      // execução. Quem consome os timings precisa tratá-los como um único
+      // estágio de download, não como duas etapas somáveis.
       // --------------------------
       if (!documents) {
         try {
@@ -301,7 +366,12 @@ export class GenericProcessoWorker extends WorkerHost {
           successWebhookSent = true;
           return;
         }
-        await this.enviarWebhook(webhookUrl, payload, webhookHeaders);
+        await this.enviarWebhook(
+          webhookUrl,
+          payload,
+          webhookHeaders,
+          buildTimings(),
+        );
         // Marca como enviado antes do redis.set: se o POST deu certo mas o
         // set falhar, o catch externo não deve mandar um webhook de erro
         // por cima de um sucesso já entregue.
@@ -461,7 +531,12 @@ export class GenericProcessoWorker extends WorkerHost {
       });
 
       try {
-        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+        await this.enviarWebhook(
+          webhookUrl,
+          response,
+          webhookHeaders,
+          buildTimings(),
+        );
       } catch (webhookError) {
         this.logger.error(
           `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,

@@ -1,3 +1,35 @@
+// Tempos de coleta medidos pelo worker e anexados ao payload do webhook.
+// Já eram cronometrados para log (`logStageDurations`); mandar junto permite
+// que o robo-api saiba ONDE o tempo foi gasto, não só que demorou — sem isso
+// o breakdown por estágio só existe no CloudWatch Logs, fora de qualquer
+// consulta. Todo campo é opcional: um estágio não alcançado nessa execução
+// (ex.: `login` quando documents:false) fica null, e um payload sem
+// `timings` continua válido para quem já consome o webhook.
+export interface WebhookTimings {
+  // Tempo que o job passou parado na fila antes de o worker pegá-lo.
+  queueWaitMs: number | null;
+  // Duração total do processamento no worker, do início até este envio.
+  totalMs: number;
+  // Região do TRT extraída do CNJ — dimensão principal da análise por fila.
+  trt: number | null;
+  // `true` quando a coleta incluiu documentos restritos (exige login).
+  documents: boolean;
+  // `documentosPublicos` e `documentosRestritos` são MUTUAMENTE EXCLUSIVOS:
+  // medem o mesmo trabalho — baixar os documentos — por caminhos diferentes
+  // do worker. Com `documents: false` o tempo cai em `documentosPublicos`;
+  // com `documents: true` o fluxo de autos baixa públicos e restritos na
+  // mesma passada (ProcessDocumentsFindService filtra por `item.documento`,
+  // sem separar) e todo o tempo cai em `documentosRestritos`. Um deles é
+  // sempre null — o que NÃO significa que nada foi baixado por aquele
+  // caminho; significa que aquele caminho não foi o usado.
+  stages: {
+    login: number | null;
+    fetchMovimentacoes: number | null;
+    documentosPublicos: number | null;
+    documentosRestritos: number | null;
+  };
+}
+
 export interface Root {
   id: number;
   webhookId: string;
@@ -15,6 +47,7 @@ export interface Root {
   valor?: string;
   event?: string;
   uuid?: string;
+  timings?: WebhookTimings;
 }
 export interface CreatedAt {
   date: string;
