@@ -65,8 +65,17 @@ export class FetchUrlMovimentService {
         process.env.USE_LAMBDA_CAPTCHA === 'true' &&
         !!process.env.LAMBDA_CAPTCHA_URL &&
         !!process.env.LAMBDA_CAPTCHA_API_KEY;
-      const shouldValidate2CaptchaBalance =
-        !useLambdaCaptcha || regionTRT === 3;
+      const useBedrockCaptcha =
+        process.env.USE_BEDROCK_CAPTCHA === 'true' &&
+        !!process.env.AWS_S3_REGION &&
+        !!process.env.GRID_SOLVER_LAMBDA_API_KEY &&
+        !!process.env.GRID_SOLVER_LAMBDA_X_API_KEY;
+      // Só exige saldo no 2Captcha quando ele é necessário. Com o Lambda
+      // ativo para captchas de imagem E o Bedrock ativo para o grid do WAF,
+      // o 2Captcha é irrelevante — se o Lambda falhar, o fallback reporta o
+      // erro. Mas se o Bedrock estiver desativado/mal configurado, o fluxo
+      // do WAF ainda depende do 2Captcha, então o saldo precisa ser validado.
+      const shouldValidate2CaptchaBalance = !(useLambdaCaptcha && useBedrockCaptcha);
 
       if (shouldValidate2CaptchaBalance) {
         const balance = await this.captchaService.getBalance();

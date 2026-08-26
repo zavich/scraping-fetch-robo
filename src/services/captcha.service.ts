@@ -1,6 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
+import { BedrockCaptchaService } from './bedrock-captcha.service';
 import { LambdaCaptchaService } from './lambda-captcha.service';
 
 // Interfaces globais para tipagem
@@ -21,6 +22,11 @@ interface TaskResult {
 
 interface GridTaskResult {
   status: string;
+  // `cost` é o valor debitado nesta task e vem em toda resposta do
+  // getTaskResult — sem registrar isso não há como saber quanto o grid do
+  // TRT3 custa de verdade, nem comparar com o backend do Bedrock.
+  cost?: string;
+  solveCount?: number;
   solution?: {
     click?: unknown;
     data?: unknown;
@@ -48,6 +54,7 @@ export class CaptchaService {
   constructor(
     private readonly httpService: HttpService,
     @Optional() private readonly lambdaCaptchaService?: LambdaCaptchaService,
+    @Optional() private readonly bedrockCaptchaService?: BedrockCaptchaService,
   ) {}
 
   private sleep(ms: number) {
@@ -64,12 +71,13 @@ export class CaptchaService {
         imageFile = imageFile.substring(imageFile.indexOf(',') + 1);
       }
 
-      // 🔄 NOVO: Usar Lambda como backend principal (exceto TRT3)
-      const useLambda = !!(
-        this.USE_LAMBDA &&
-        this.lambdaCaptchaService &&
-        regionTRT !== 3
-      );
+      // Lambda como backend principal, inclusive no TRT3. A exclusão do
+      // TRT3 que existia aqui nunca teve motivo registrado e mandava todo
+      // captcha de imagem do TRT3 pro 2Captcha (pago) enquanto os outros 23
+      // TRTs resolviam de graça. Se o Lambda errar, o 2Captcha segue como
+      // fallback logo abaixo e o loop de tentativas do fetch-url reapresenta
+      // o desafio.
+      const useLambda = !!(this.USE_LAMBDA && this.lambdaCaptchaService);
 
       this.logger.debug(
         `CaptchaService Debug: USE_LAMBDA=${this.USE_LAMBDA}, lambdaCaptchaService=${this.lambdaCaptchaService ? 'OK' : 'null'}, regionTRT=${regionTRT}, useLambda=${useLambda}`,
@@ -315,6 +323,31 @@ export class CaptchaService {
     rows: number,
     columns: number,
   ): Promise<number[]> {
+    // Bedrock primeiro: a GridTask do 2Captcha é a task mais cara em uso e
+    // ainda custa 10-30s de polling, com a fila do TRT3 rodando em
+    // concorrência 1. Se falhar por qualquer motivo, cai pro 2Captcha —
+    // mesmo desenho do fallback Lambda→2Captcha do `resolveCaptcha`.
+    if (this.bedrockCaptchaService?.isEnabled()) {
+      try {
+        const { indices } = await this.bedrockCaptchaService.solveGrid(
+          imageBase64,
+          instruction,
+          rows,
+          columns,
+        );
+        if (indices.length) return indices;
+        this.logger.warn(
+          '⚠️ Bedrock não apontou nenhuma célula — caindo pro 2Captcha',
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Erro desconhecido';
+        this.logger.warn(
+          `⚠️ Falha ao resolver o grid no Bedrock, tentando fallback 2Captcha... ${message}`,
+        );
+      }
+    }
+
     this.logger.log(
       `🖼️ Resolvendo grid via 2Captcha (GridTask): "${instruction}" (${rows}x${columns})`,
     );
@@ -373,7 +406,7 @@ export class CaptchaService {
     }
 
     this.logger.log(
-      `🧾 Resultado GridTask: ${JSON.stringify(result.solution)}`,
+      `🧾 Resultado GridTask: ${JSON.stringify(result.solution)} — custo US$ ${result.cost ?? '?'}`,
     );
 
     const raw: unknown =

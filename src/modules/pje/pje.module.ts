@@ -6,6 +6,7 @@ import { ALL_TRT_QUEUES } from 'src/helpers/getTRTQueue';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { createDynamicWorkers } from 'src/providers/dynamic-workers.provider';
 import { AwsS3Service } from 'src/services/aws-s3.service';
+import { BedrockCaptchaService } from 'src/services/bedrock-captcha.service';
 import { CaptchaService } from 'src/services/captcha.service';
 import { LambdaCaptchaService } from 'src/services/lambda-captcha.service';
 import { PjeController } from './pje.controller';
@@ -48,6 +49,7 @@ const defaultQueueOptions = {
     PjeLoginService,
     CaptchaService,
     LambdaCaptchaService,
+    BedrockCaptchaService,
     FetchUrlMovimentService,
     FetchPublicDocumentsService,
     ConsultarProcessoQueue,
