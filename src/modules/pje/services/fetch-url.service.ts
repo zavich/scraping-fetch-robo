@@ -65,8 +65,10 @@ export class FetchUrlMovimentService {
         process.env.USE_LAMBDA_CAPTCHA === 'true' &&
         !!process.env.LAMBDA_CAPTCHA_URL &&
         !!process.env.LAMBDA_CAPTCHA_API_KEY;
-      const shouldValidate2CaptchaBalance =
-        !useLambdaCaptcha || regionTRT === 3;
+      // Só exige saldo no 2Captcha quando ele é o único backend. Com o
+      // Lambda ativo o saldo é irrelevante pra começar o trabalho — ele só
+      // importa se o Lambda falhar, e aí o próprio fallback reporta o erro.
+      const shouldValidate2CaptchaBalance = !useLambdaCaptcha;
 
       if (shouldValidate2CaptchaBalance) {
         const balance = await this.captchaService.getBalance();

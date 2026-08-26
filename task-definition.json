@@ -120,6 +120,18 @@
         {
           "name": "LAMBDA_DOCUMENT_EXTRACTOR_API_KEY",
           "valueFrom": "<SECRET_ARN_PREFIX>:LAMBDA_DOCUMENT_EXTRACTOR_API_KEY::"
+        },
+        {
+          "name": "USE_BEDROCK_CAPTCHA",
+          "valueFrom": "<SECRET_ARN_PREFIX>:USE_BEDROCK_CAPTCHA::"
+        },
+        {
+          "name": "GRID_SOLVER_LAMBDA_NAME",
+          "valueFrom": "<SECRET_ARN_PREFIX>:GRID_SOLVER_LAMBDA_NAME::"
+        },
+        {
+          "name": "GRID_SOLVER_LAMBDA_API_KEY",
+          "valueFrom": "<SECRET_ARN_PREFIX>:GRID_SOLVER_LAMBDA_API_KEY::"
         }
       ],
 

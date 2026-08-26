@@ -4,6 +4,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { CaptchaService } from 'src/services/captcha.service';
 import { BrowserManager } from 'src/utils/browser.manager';
+import type { Frame } from 'puppeteer';
 
 @Injectable()
 export class ScrapingService {
@@ -357,7 +358,13 @@ export class ScrapingService {
         //
         // 3. TIRA UM PRINT DO CANVAS (onde o grid é desenhado de verdade)
         //
-        const gridScreenshot = await canvas.screenshot({ encoding: 'base64' });
+        // O canvas do desafio tem só 320x320 — nessa resolução o
+        // reconhecimento erra muito (medido: 25% de acerto contra 58-75% em
+        // 640x640). Redesenha num canvas 2x dentro do próprio browser, que
+        // não custa dependência nova nem mexe no viewport da página. Se a AWS
+        // desenhar imagem cross-origin sem CORS o canvas fica "tainted" e o
+        // toDataURL lança — nesse caso cai no screenshot normal.
+        const gridScreenshot = await this.capturarGridAmpliado(canvas);
 
         //
         // 4. MANDA PRO 2CAPTCHA (GridTask) SÓ PRA RECONHECER A IMAGEM —
@@ -606,5 +613,32 @@ export class ScrapingService {
       await BrowserManager.closeContext(context);
       this.logger.log('✅ Contexto liberado');
     }
+  }
+
+  private async capturarGridAmpliado(
+    canvas: NonNullable<Awaited<ReturnType<Frame['$']>>>,
+  ): Promise<string> {
+    const ampliado = await canvas.evaluate((c: HTMLCanvasElement) => {
+      try {
+        const alvo = document.createElement('canvas');
+        alvo.width = c.width * 2;
+        alvo.height = c.height * 2;
+        const ctx = alvo.getContext('2d');
+        if (!ctx) return null;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(c, 0, 0, alvo.width, alvo.height);
+        return alvo.toDataURL('image/png').split(',')[1];
+      } catch {
+        return null;
+      }
+    });
+
+    if (ampliado) return ampliado;
+
+    this.logger.warn(
+      '⚠️ Não foi possível ampliar o canvas do grid (provável canvas tainted) — usando o screenshot em 320x320',
+    );
+    return canvas.screenshot({ encoding: 'base64' });
   }
 }

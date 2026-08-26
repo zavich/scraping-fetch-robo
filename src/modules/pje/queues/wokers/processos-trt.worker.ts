@@ -30,6 +30,23 @@ export class GenericProcessoWorker extends WorkerHost {
     super();
   }
 
+  // Em teste local não existe destino de webhook, e o axios estoura antes de
+  // dar pra ver o resultado do scraping. WEBHOOK_DISABLED=true troca o envio
+  // por um log — a flag existe só pra isso, o padrão continua enviando.
+  private async enviarWebhook(
+    url: string,
+    payload: unknown,
+    headers: Record<string, string>,
+  ): Promise<void> {
+    if (process.env.WEBHOOK_DISABLED === 'true') {
+      this.logger.warn(
+        `🚫 WEBHOOK_DISABLED=true — envio para ${url} ignorado (payload não enviado)`,
+      );
+      return;
+    }
+    await axios.post(url, payload, { headers });
+  }
+
   async process(
     job: Job<{
       numero: string;
@@ -92,7 +109,7 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
         return;
       }
       if (regionTRT === 3 || regionTRT === 9) {
@@ -125,7 +142,7 @@ export class GenericProcessoWorker extends WorkerHost {
               origem,
             },
           );
-          await axios.post(webhookUrl, response, { headers: webhookHeaders });
+          await this.enviarWebhook(webhookUrl, response, webhookHeaders);
           return;
         }
         sessionCookies = cookies;
@@ -159,7 +176,7 @@ export class GenericProcessoWorker extends WorkerHost {
           },
         );
 
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
         return;
       }
 
@@ -192,7 +209,7 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'SEGREDO_JUSTICA',
           },
         );
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
         return;
       }
 
@@ -216,7 +233,7 @@ export class GenericProcessoWorker extends WorkerHost {
             motivoErro: 'PJE_ERRO',
           },
         );
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
         return;
       }
 
@@ -278,7 +295,7 @@ export class GenericProcessoWorker extends WorkerHost {
           successWebhookSent = true;
           return;
         }
-        await axios.post(webhookUrl, payload, { headers: webhookHeaders });
+        await this.enviarWebhook(webhookUrl, payload, webhookHeaders);
         // Marca como enviado antes do redis.set: se o POST deu certo mas o
         // set falhar, o catch externo não deve mandar um webhook de erro
         // por cima de um sucesso já entregue.
@@ -438,7 +455,7 @@ export class GenericProcessoWorker extends WorkerHost {
       });
 
       try {
-        await axios.post(webhookUrl, response, { headers: webhookHeaders });
+        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
       } catch (webhookError) {
         this.logger.error(
           `Falha ao enviar webhook de erro para ${numero}: ${webhookError instanceof Error ? webhookError.stack : String(webhookError)}`,
