@@ -32,6 +32,10 @@
         {
           "name": "NODE_ENV",
           "value": "<NODE_ENV>"
+        },
+        {
+          "name": "WORKER_QUEUE_MODE",
+          "value": "<WORKER_QUEUE_MODE>"
         }
       ],
       "secrets": [
