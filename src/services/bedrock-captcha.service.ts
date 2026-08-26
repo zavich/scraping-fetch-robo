@@ -53,7 +53,12 @@ export class BedrockCaptchaService {
         '⚠️ USE_BEDROCK_CAPTCHA=true mas AWS_S3_REGION não foi definida — resolvedor de grid desligado',
       );
     }
-    return this.ENABLED && !!this.REGION;
+    if (this.ENABLED && !this.API_KEY) {
+      this.logger.warn(
+        '⚠️ USE_BEDROCK_CAPTCHA=true mas GRID_SOLVER_LAMBDA_API_KEY não foi definida — resolvedor de grid desligado',
+      );
+    }
+    return this.ENABLED && !!this.REGION && !!this.API_KEY;
   }
 
   private getClient(): LambdaClient {
@@ -103,7 +108,12 @@ export class BedrockCaptchaService {
     const envelope = JSON.parse(
       Buffer.from(resposta.Payload).toString(),
     ) as RespostaLambda;
-    const corpo = JSON.parse(envelope.body) as CorpoLambda;
+    let corpo: CorpoLambda;
+    try {
+      corpo = JSON.parse(envelope.body) as CorpoLambda;
+    } catch {
+      corpo = { erro: envelope.body };
+    }
 
     if (envelope.statusCode !== 200) {
       throw new Error(
