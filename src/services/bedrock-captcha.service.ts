@@ -105,9 +105,19 @@ export class BedrockCaptchaService {
       throw new Error(`Lambda ${this.FUNCTION_NAME} não devolveu payload`);
     }
 
-    const envelope = JSON.parse(
-      Buffer.from(resposta.Payload).toString(),
-    ) as RespostaLambda;
+    const rawPayload = Buffer.from(resposta.Payload).toString();
+
+    let envelope: RespostaLambda;
+    try {
+      envelope = JSON.parse(rawPayload) as RespostaLambda;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const sample = rawPayload.slice(0, 500);
+      throw new Error(
+        `Lambda ${this.FUNCTION_NAME} devolveu payload inválido: ${message} — início do payload: ${sample}`,
+      );
+    }
+
     let corpo: CorpoLambda;
     try {
       corpo = JSON.parse(envelope.body) as CorpoLambda;
