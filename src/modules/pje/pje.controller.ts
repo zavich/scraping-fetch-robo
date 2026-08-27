@@ -24,6 +24,7 @@ import { PDFDocument } from 'pdf-lib';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { RedisService } from 'src/services/redis.service';
+import { BenchmarkDocumentoService } from './services/benchmark-documento.service';
 @Controller('processos')
 export class PjeController {
   private readonly logger = new Logger(PjeController.name);
@@ -33,6 +34,7 @@ export class PjeController {
     private readonly extractService: PdfExtractService,
     private readonly loginPoolService: LoginPoolService,
     private readonly redisService: RedisService,
+    private readonly benchmarkDocumentoService: BenchmarkDocumentoService,
   ) {}
   @Post('extract-by-id')
   @UseGuards(ApiKeyAuthGuard)
@@ -90,13 +92,59 @@ export class PjeController {
     }
 
     try {
-      const { bookmarks } = await this.extractService.extractBookmarks(file.buffer);
+      const { bookmarks } = await this.extractService.extractBookmarks(
+        file.buffer,
+      );
       return res.json(bookmarks);
     } catch (err) {
       this.logger.error('Erro ao extrair bookmarks:', err);
       return res.status(500).json({ error: 'Erro ao extrair bookmarks' });
     }
   }
+  // Mede quanto tempo leva para buscar UM documento específico de um processo
+  // (ex.: só a petição inicial), de forma SÍNCRONA: a resposta traz o tempo de
+  // cada etapa em vez de mandar webhook. Não enfileira e não publica nada no
+  // robo-api — é uma rota de diagnóstico de performance, não um caminho de
+  // coleta.
+  //
+  // Como a coleta roda inline, a requisição fica aberta o tempo todo da
+  // medição (pode passar de um minuto com login e captcha) — o cliente
+  // precisa de timeout generoso.
+  //
+  //   POST /processos/benchmark-documento
+  //   { "numero": "0000000-00.0000.0.00.0000", "termo": "petição inicial" }
+  //
+  // `apenasListar: true` mostra os documentos que casam com o termo sem
+  // baixar nenhum — útil para descobrir como a petição se chama naquele TRT
+  // antes de medir. `limite` (padrão 1) controla quantos são baixados: com 1,
+  // o tempo de download é o de um documento só.
+  @Post('benchmark-documento')
+  @UseGuards(ApiKeyAuthGuard)
+  async benchmarkDocumento(
+    @Body()
+    body: {
+      numero?: string;
+      termo?: string;
+      apenasListar?: boolean;
+      limite?: number;
+      comLogin?: boolean;
+      origem?: string;
+    },
+  ) {
+    if (!body?.numero) {
+      throw new BadRequestException('Campo "numero" obrigatório no body');
+    }
+
+    return this.benchmarkDocumentoService.execute({
+      numero: body.numero,
+      termo: body.termo,
+      apenasListar: body.apenasListar,
+      limite: body.limite,
+      comLogin: body.comLogin,
+      origem: body.origem,
+    });
+  }
+
   @Post('/:numero')
   @UseGuards(ApiKeyAuthGuard)
   async getFindProcess(

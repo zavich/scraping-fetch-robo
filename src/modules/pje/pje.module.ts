@@ -10,6 +10,7 @@ import { BedrockCaptchaService } from 'src/services/bedrock-captcha.service';
 import { CaptchaService } from 'src/services/captcha.service';
 import { LambdaCaptchaService } from 'src/services/lambda-captcha.service';
 import { PjeController } from './pje.controller';
+import { BenchmarkDocumentoService } from './services/benchmark-documento.service';
 import { ConsultarProcessoQueue } from './queues/service/consultar-processo';
 import { PdfExtractService } from './services/extract.service';
 import { FetchDocumentoService } from './services/fetch-documents-url.service';
@@ -60,6 +61,7 @@ const defaultQueueOptions = {
     FetchDocumentoService,
     LambdaDocumentExtractorService,
     ScrapingService,
+    BenchmarkDocumentoService,
     RedisService,
     QueueMetricsReporterService,
     ...createDynamicWorkers(),
