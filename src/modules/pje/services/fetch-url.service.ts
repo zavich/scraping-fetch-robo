@@ -1,8 +1,8 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { AnubisService } from './anubis.service';
 import Redis from 'ioredis';
 import {
   DetalheProcesso,
@@ -33,6 +33,7 @@ export class FetchUrlMovimentService {
   constructor(
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
+    private readonly anubis: AnubisService,
     private readonly fetchPublicDocumentsService: FetchPublicDocumentsService,
   ) {}
   private async delay(ms: number) {
@@ -75,7 +76,9 @@ export class FetchUrlMovimentService {
       // o 2Captcha é irrelevante — se o Lambda falhar, o fallback reporta o
       // erro. Mas se o Bedrock estiver desativado/mal configurado, o fluxo
       // do WAF ainda depende do 2Captcha, então o saldo precisa ser validado.
-      const shouldValidate2CaptchaBalance = !(useLambdaCaptcha && useBedrockCaptcha);
+      const shouldValidate2CaptchaBalance = !(
+        useLambdaCaptcha && useBedrockCaptcha
+      );
 
       if (shouldValidate2CaptchaBalance) {
         const balance = await this.captchaService.getBalance();
@@ -316,6 +319,46 @@ export class FetchUrlMovimentService {
   // agora" e "funciona rodando de novo minutos depois" é só TEMPO — por isso
   // o retry agora espera um pouco (crescente) antes de cada nova tentativa,
   // além de trocar o user-agent.
+  /** `https://pje.trt23.jus.br/...` -> 23. Zero quando não é um TRT numerado. */
+  private trtDaUrl(url: string): number {
+    return Number(/pje\.trt(\d+)\./.exec(url)?.[1] ?? 0);
+  }
+
+  /**
+   * GET que respeita o Anubis: quando o tribunal está atrás do desafio, a
+   * chamada sai de DENTRO do Firefox; nos demais, é o axios de sempre.
+   *
+   * TODAS as chamadas ao domínio precisam passar por aqui. Interceptar só uma
+   * devolve a página de desafio nas outras, e o chamador quebra tentando ler
+   * JSON de um HTML — foi o que aconteceu em 15/09/2026 com
+   * `Cannot use 'in' operator to search for 'imagem'`.
+   */
+  private async getRespeitandoAnubis<T>(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<{ data: T; headers: Record<string, string> }> {
+    const viaAnubis = await this.anubis.requisitar(
+      this.trtDaUrl(url),
+      url,
+      headers,
+    );
+
+    if (viaAnubis) {
+      if (viaAnubis.status >= 400) {
+        const falha = new Error(`anubis: HTTP ${viaAnubis.status}`);
+        Object.assign(falha, { response: { status: viaAnubis.status } });
+        throw falha;
+      }
+      return {
+        data: JSON.parse(viaAnubis.corpo) as T,
+        headers: viaAnubis.headers,
+      };
+    }
+
+    const r = await axios.get<T>(url, { headers });
+    return { data: r.data, headers: r.headers as Record<string, string> };
+  }
+
   private async fetchDadosBasicos(
     url: string,
     headers: Record<string, string>,
@@ -327,7 +370,10 @@ export class FetchUrlMovimentService {
     const maxAttempts = 5;
 
     try {
-      const { data } = await axios.get<DetalheProcesso[]>(url, { headers });
+      const { data } = await this.getRespeitandoAnubis<DetalheProcesso[]>(
+        url,
+        headers,
+      );
       return data;
     } catch (error: unknown) {
       const axiosError = error as AxiosLikeError;
@@ -383,10 +429,11 @@ export class FetchUrlMovimentService {
       url += `?tokenDesafio=${encodeURIComponent(tokenDesafio)}&resposta=${encodeURIComponent(resposta)}`;
 
     try {
-      const response = await axios.get<ProcessosResponse>(url, {
+      const response = await this.getRespeitandoAnubis<ProcessosResponse>(
+        url,
         headers,
-      });
-      const captchaToken = response.headers['captchatoken'] as string;
+      );
+      const captchaToken = response.headers['captchatoken'];
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance})`,
       );

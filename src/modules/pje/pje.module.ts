@@ -1,3 +1,4 @@
+import { AnubisService } from './services/anubis.service';
 import { HttpModule } from '@nestjs/axios';
 
 import { BullModule } from '@nestjs/bullmq';
@@ -46,6 +47,7 @@ const defaultQueueOptions = {
   ],
   controllers: [PjeController],
   providers: [
+    AnubisService,
     PjeLoginService,
     CaptchaService,
     LambdaCaptchaService,

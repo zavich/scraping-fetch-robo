@@ -27,11 +27,17 @@ FROM node:20-slim
 
 WORKDIR /usr/src/app
 
-# Instala Chromium + libs necessárias
+# Instala Chromium + libs necessárias.
+#
+# firefox-esr entra por causa do Anubis (ver AnubisService): de sa-east-1 o
+# Chromium headless leva 403 do CloudFront ANTES de alcançar o desafio, com ou
+# sem stealth — é o fingerprint do motor, não detecção de automação. Só Firefox
+# passa. É browser de uso pontual, só para renovar cookie.
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-common \
     chromium-driver \
+    firefox-esr \
     dumb-init \
     libx11-6 \
     libx11-xcb1 \
@@ -58,6 +64,9 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROME_PATH=/usr/bin/chromium
+# Consumido pelo AnubisService; sem isto o puppeteer procura um Firefox que
+# ele mesmo baixaria, e o download está desabilitado nesta imagem.
+ENV FIREFOX_EXECUTABLE_PATH=/usr/bin/firefox-esr
 ENV NODE_ENV=production
 
 # Copia dependências já buildadas
