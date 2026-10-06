@@ -155,11 +155,12 @@ export class GenericProcessoWorker extends WorkerHost {
       }
 
       const fetchMovimentacoesStartedAt = Date.now();
-      const instances = await this.fetchUrlMovimentService.execute(
-        numero,
-        origem,
-        sessionCookies,
-      );
+      const { instances, houveFalha } =
+        await this.fetchUrlMovimentService.execute(
+          numero,
+          origem,
+          sessionCookies,
+        );
       stageDurationsMs.fetchMovimentacoes =
         Date.now() - fetchMovimentacoesStartedAt;
 
@@ -168,7 +169,34 @@ export class GenericProcessoWorker extends WorkerHost {
       // instância do webhook mesmo quando ela era buscada com sucesso.
       const result = instances;
 
-      if (!instances || instances.length === 0) {
+      // Nada encontrado porque o PJe não respondeu (403/405, captcha não
+      // resolvido), não porque o processo não existe. Mandar NAO_ENCONTRADO
+      // aqui fazia o cliente tratar um processo real como inexistente (35 de
+      // 35 casos na semana de 29/09/2026 eram isso: TRT8 com 403, TRT3/TRT12
+      // com 405). ERRO com o motivo de "PJe não respondeu normalmente", o
+      // mesmo do catch abaixo, que os consumidores já tratam como transitório.
+      // Sem relançar: o BullMQ refaria o job contra um PJe que está bloqueando.
+      if (instances.length === 0 && houveFalha) {
+        this.logger.warn(
+          `⚠️ PJe não respondeu para o processo ${numero} — reportando ERRO, não NAO_ENCONTRADO`,
+        );
+        const response = normalizeResponse(
+          numero,
+          [],
+          `Pje ${numero} fora do ar`,
+          {
+            origem,
+            webhookId: `${correlationId}:sem-resposta`,
+            status: 'ERRO',
+            motivoErro: 'PJE_FORA_DO_AR',
+          },
+        );
+
+        await this.enviarWebhook(webhookUrl, response, webhookHeaders);
+        return;
+      }
+
+      if (instances.length === 0) {
         this.logger.warn(
           `⚠️ Nenhum resultado encontrado para o processo ${numero}`,
         );
