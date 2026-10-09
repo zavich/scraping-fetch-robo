@@ -86,23 +86,41 @@ export class QueueMetricsReporterService
       let oldestAgeMs = 0;
 
       for (const queue of this.queues) {
-        const [waitingCount, oldestWaitingJobs] = await Promise.all([
+        // No BullMQ 5, job com priority > 0 não entra na lista "wait": vai
+        // pro set "prioritized", que getWaitingCount/getWaiting não enxergam.
+        // ConsultarProcessoQueue enfileira tudo que não é prioritário com
+        // priority 5, então contar só "wait" deixava as duas métricas
+        // cravadas em 0 e o autoscaling nunca escalava.
+        const [
+          waitingCount,
+          prioritizedCount,
+          oldestWaitingJobs,
+          oldestPrioritizedJobs,
+        ] = await Promise.all([
           queue.getWaitingCount(),
-          // Índice 0 é o próximo a ser processado (FIFO) — o mais antigo da
-          // fila. Pega só 1 item, não a lista inteira (fila pode ter
+          queue.getPrioritizedCount(),
+          // Índice 0 é o próximo a ser processado — o mais antigo de cada
+          // lista. Pega só 1 item, não a lista inteira (fila pode ter
           // milhares de jobs em pico).
           queue.getWaiting(0, 0),
+          queue.getPrioritized(0, 0),
         ]);
 
-        totalWaiting += waitingCount;
+        totalWaiting += waitingCount + prioritizedCount;
 
-        const oldestJob: unknown = oldestWaitingJobs[0];
-        const timestamp =
-          oldestJob && typeof oldestJob === 'object' && 'timestamp' in oldestJob
-            ? (oldestJob as { timestamp: unknown }).timestamp
-            : null;
-        if (typeof timestamp === 'number') {
-          oldestAgeMs = Math.max(oldestAgeMs, now - timestamp);
+        for (const oldestJob of [
+          oldestWaitingJobs[0],
+          oldestPrioritizedJobs[0],
+        ] as unknown[]) {
+          const timestamp =
+            oldestJob &&
+            typeof oldestJob === 'object' &&
+            'timestamp' in oldestJob
+              ? (oldestJob as { timestamp: unknown }).timestamp
+              : null;
+          if (typeof timestamp === 'number') {
+            oldestAgeMs = Math.max(oldestAgeMs, now - timestamp);
+          }
         }
       }
 
