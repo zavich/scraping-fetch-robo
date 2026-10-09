@@ -588,11 +588,9 @@ export class FetchUrlMovimentService {
       return [];
     }
 
+    // O delay só é aplicado se algum documento precisar mesmo ir ao PJe —
+    // ver FetchPublicDocumentsService (cache de texto).
     const delayMs = this.getDelayMs();
-    this.logger.debug(
-      `⏱ Delay de ${delayMs}ms antes de buscar documentos públicos da ${ultimaInstancia.instance}ª instância`,
-    );
-    await this.delay(delayMs);
 
     // Quando includeRestricted, busca também os documentos restritos (todos,
     // sem filtro por título) via /documentos/{id}, sem depender do fluxo de
@@ -609,6 +607,7 @@ export class FetchUrlMovimentService {
       processNumber,
       ultimaInstancia.itensProcesso,
       filter,
+      delayMs,
     );
   }
 }
