@@ -26,6 +26,14 @@ interface AxiosLikeError {
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
 
+// O TST (instância 3) é consultado uma única vez, sem retry em 403/429.
+// Medido em staging (lote de 414 CNJs, 2026-10-13): 197 processos levaram 403
+// do TST; o retry (até 5 tentativas, ~45s) recuperou só 11, e os 11 voltaram
+// "sem id" (processo inexistente no TST) — nenhum dado do TST foi ganho. Já o
+// tempo preso no retry foi 95% do tempo de vaga da fila do TRT, derrubando a
+// vazão do lote de ~30 para ~5 processos/min.
+const TST_INSTANCIA = 3;
+
 @Injectable()
 export class FetchUrlMovimentService {
   private readonly logger = new Logger(FetchUrlMovimentService.name);
@@ -324,7 +332,7 @@ export class FetchUrlMovimentService {
     attempt = 1,
   ): Promise<DetalheProcesso[]> {
     const retryStatus = [403, 429];
-    const maxAttempts = 5;
+    const maxAttempts = instance === TST_INSTANCIA ? 1 : 5;
 
     try {
       const { data } = await axios.get<DetalheProcesso[]>(url, { headers });
@@ -407,7 +415,8 @@ export class FetchUrlMovimentService {
     } catch (error: unknown) {
       const isTRT15 = regionTRT === 15;
       const retryStatus = [429, 403];
-      const maxAttempts = isTRT15 ? 7 : 5;
+      const maxAttempts =
+        Number(instance) === TST_INSTANCIA ? 1 : isTRT15 ? 7 : 5;
       const axiosError = error as AxiosLikeError;
 
       if (
