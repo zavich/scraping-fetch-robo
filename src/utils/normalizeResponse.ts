@@ -1,6 +1,6 @@
 import { ItensProcesso, Partes, Polo, ProcessosResponse } from 'src/interfaces';
 import { Root } from 'src/interfaces/normalize';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 // Anexos (ex: procuração, estatuto, CNPJ) ficam aninhados aqui, mesma forma
 // que o PJe já usa e que `ItensProcesso.anexos` traz — ver `buildMovimentacao`.
@@ -43,10 +43,33 @@ export function normalizeResponse(
     return Number(resposta);
   }
 
+  // Id ESTÁVEL da movimentação: a mesma movimentação precisa ter o mesmo id em
+  // toda coleta. O PJe só dá `id` a documentos — movimentação textual vem sem —
+  // e antes o id era aleatório a cada coleta. Como o lake é append-only e
+  // deduplica com DISTINCT (que inclui o id), cada recoleta duplicava todas as
+  // movimentações (medido: 103 -> 218 -> 333 no mesmo processo em 3 coletas).
+  //
+  // A chave usa o que o PJe devolve igual entre coletas: processo, grau, a
+  // `data` com microssegundos e o título. `ocorrencia` desempata itens
+  // idênticos dentro da mesma coleta, na ordem em que o PJe os lista. O hash
+  // vira um inteiro de 52 bits: cabe no INT64 do lake e é seguro em Number.
+  function idEstavel(chave: string): number {
+    const hex = createHash('sha256').update(chave).digest('hex').slice(0, 13);
+    return parseInt(hex, 16);
+  }
+
+  type ContextoMovimentacao = {
+    prefixo: string;
+    ocorrencias: Map<string, number>;
+  };
+
   // Monta uma movimentação (e seus anexos, recursivamente) na forma final do
   // payload — extraído do `.map()` de itensProcesso pra poder chamar a si
   // mesmo em `item.anexos`, aninhando em vez de achatar num array só.
-  function buildMovimentacao(item: ItensProcesso): NormalizedMovimentacao {
+  function buildMovimentacao(
+    item: ItensProcesso,
+    contexto: ContextoMovimentacao,
+  ): NormalizedMovimentacao {
     // Um documento só é público de verdade quando `publico` E não marcado
     // `documentoSigiloso` — o PJe permite os dois sinais independentes.
     const documentoPublico = Boolean(item?.publico) && !item?.documentoSigiloso;
@@ -59,10 +82,20 @@ export function normalizeResponse(
       .filter(Boolean)
       .join(' ');
 
+    const base = [
+      contexto.prefixo,
+      item?.data ?? '',
+      item?.titulo ?? '',
+      item?.id ?? '',
+    ].join('|');
+    const ocorrencia = contexto.ocorrencias.get(base) ?? 0;
+    contexto.ocorrencias.set(base, ocorrencia + 1);
+    const chave = `${base}|${ocorrencia}`;
+
     const mov: NormalizedMovimentacao = {
       data: new Intl.DateTimeFormat('pt-BR').format(new Date(item.data)),
       conteudo: partesConteudo,
-      id: generateId(),
+      id: idEstavel(chave),
     };
 
     // `item.id` é o id real do documento no PJe (o mesmo usado na URL de
@@ -83,7 +116,13 @@ export function normalizeResponse(
     }
 
     if (item?.anexos?.length) {
-      mov.anexos = item.anexos.map(buildMovimentacao);
+      const contextoAnexos: ContextoMovimentacao = {
+        prefixo: chave,
+        ocorrencias: new Map(),
+      };
+      mov.anexos = item.anexos.map((anexo) =>
+        buildMovimentacao(anexo, contextoAnexos),
+      );
     }
 
     return mov;
@@ -230,7 +269,14 @@ export function normalizeResponse(
       partes = atualizarNomesPartes(instance.itensProcesso ?? [], partes);
     }
 
-    const movimentacoes = instance?.itensProcesso?.map(buildMovimentacao);
+    const grau = instance.instance ?? (index + 1).toString();
+    const contextoMovimentacoes: ContextoMovimentacao = {
+      prefixo: `${numero}|${grau}`,
+      ocorrencias: new Map(),
+    };
+    const movimentacoes = instance?.itensProcesso?.map((item) =>
+      buildMovimentacao(item, contextoMovimentacoes),
+    );
 
     const resposta = {
       id: instance.id,
