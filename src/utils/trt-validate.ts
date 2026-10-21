@@ -6,8 +6,10 @@
 // login de documentos restritos falhava em todas as contas e a coleta voltava
 // como PJE_FORA_DO_AR. Testado no TRT4 (0021065-12.2024.5.04.0022): com o token
 // do TRT2 a visão autenticada traz 40 documentos restritos, contra 0 sem login.
-// 3, 12, 20 e 23 ficaram de fora: a resposta foi inconclusiva (WAF/anti-bot,
-// 500, 200), não "rota inexistente".
+// O TRT3 entra pela mesma razão (o endpoint de auth foi removido), embora o
+// teste direto devolva 405 do anti-bot antes de chegar na rota.
+// 12, 20 e 23 ficaram de fora: a resposta foi inconclusiva (WAF, 500, 200),
+// não "rota inexistente".
 export const LoginErrorTrt = [
-  1, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24,
+  1, 3, 4, 5, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24,
 ];
