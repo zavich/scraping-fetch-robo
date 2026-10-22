@@ -4,8 +4,10 @@ import { AwsS3Service } from 'src/services/aws-s3.service';
 import { comConcorrenciaLimitada } from 'src/utils/concurrency';
 import { flattenItensProcesso } from 'src/utils/flatten-itens-processo';
 import { normalizeString } from 'src/utils/normalize-string';
+import { ScrapingService } from 'src/helpers/scraping.service';
 import {
   BloqueioTemporarioError,
+  DesafioAntiBotError,
   DocumentoRequestContext,
   FetchDocumentoService,
   InvalidPjeDocumentResponseError,
@@ -27,6 +29,7 @@ export class ProcessDocumentsFindService {
     private readonly fetchDocumentoService: FetchDocumentoService,
     private readonly lambdaExtractorService: LambdaDocumentExtractorService,
     private readonly fetchUrlMovimentService: FetchUrlMovimentService,
+    private readonly scrapingService: ScrapingService,
   ) {}
 
   private getErrorMessage(error: unknown): string {
@@ -284,23 +287,32 @@ export class ProcessDocumentsFindService {
       return promise;
     };
 
-    // Bloqueio do WAF (ver BloqueioTemporarioError): a partir do primeiro,
-    // os itens restantes nem vão ao PJe — entram na fila de adiados, que é
-    // retentada depois de uma pausa, um por vez.
-    let emBloqueio = false;
+    // Bloqueio do WAF (403, BloqueioTemporarioError) ou desafio anti-bot
+    // expirado (405, DesafioAntiBotError): a partir do primeiro, os itens
+    // restantes nem vão ao PJe — entram na fila de adiados, retentada um por
+    // vez depois de uma pausa (bloqueio) e/ou de renovar o token (desafio).
+    let parado = false;
+    let houveBloqueio = false;
+    let houveDesafio = false;
     let adiados: typeof todosOsItens = [];
     const buscarOuAdiar = async (
       entry: (typeof todosOsItens)[number],
     ): Promise<Documento | null> => {
-      if (emBloqueio) {
+      if (parado) {
         adiados.push(entry);
         return null;
       }
       try {
         return await buscarComCache(entry);
       } catch (error) {
-        if (!(error instanceof BloqueioTemporarioError)) throw error;
-        emBloqueio = true;
+        if (error instanceof BloqueioTemporarioError) {
+          houveBloqueio = true;
+        } else if (error instanceof DesafioAntiBotError) {
+          houveDesafio = true;
+        } else {
+          throw error;
+        }
+        parado = true;
         adiados.push(entry);
         return null;
       }
@@ -314,11 +326,23 @@ export class ProcessDocumentsFindService {
 
     for (const esperaMs of ESPERAS_APOS_BLOQUEIO_MS) {
       if (adiados.length === 0) break;
-      this.logger.warn(
-        `⏸️ WAF bloqueou os downloads de ${processNumber} — ${adiados.length} documento(s) adiado(s), nova tentativa em ${esperaMs / 1000}s`,
-      );
-      await this.delay(esperaMs);
-      emBloqueio = false;
+      if (houveBloqueio) {
+        this.logger.warn(
+          `⏸️ WAF bloqueou os downloads de ${processNumber} — ${adiados.length} documento(s) adiado(s), nova tentativa em ${esperaMs / 1000}s`,
+        );
+        await this.delay(esperaMs);
+      }
+      if (houveDesafio) {
+        this.logger.warn(
+          `🔑 Desafio anti-bot expirou nos downloads de ${processNumber} — renovando o token antes de retentar ${adiados.length} documento(s)`,
+        );
+        await this.renovarTokenAntiBot(processNumber, regionTRT);
+        // O contexto guarda o Cookie com o token antigo: refaz na próxima busca.
+        contextosPorInstancia.clear();
+      }
+      parado = false;
+      houveBloqueio = false;
+      houveDesafio = false;
       const daRodada = adiados;
       adiados = [];
       for (const entry of daRodada) {
@@ -327,7 +351,7 @@ export class ProcessDocumentsFindService {
     }
     if (adiados.length > 0) {
       this.logger.error(
-        `❌ ${adiados.length} documento(s) de ${processNumber} continuaram bloqueados pelo WAF depois de ${ESPERAS_APOS_BLOQUEIO_MS.length} nova(s) tentativa(s) — seguem sem download`,
+        `❌ ${adiados.length} documento(s) de ${processNumber} continuaram recusados pelo WAF (bloqueio/desafio) depois de ${ESPERAS_APOS_BLOQUEIO_MS.length} nova(s) tentativa(s) — seguem sem download`,
       );
     }
 
@@ -367,6 +391,23 @@ export class ProcessDocumentsFindService {
 
   private async delay(ms: number) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Resolve o desafio do WAF de novo no navegador — o mesmo passo do início
+  // da coleta — e grava o aws-waf-token novo no Redis, de onde buildContext o
+  // lê. Falha aqui não derruba os downloads: a rodada tenta mesmo assim e o
+  // que continuar recusado fica registrado no fim.
+  private async renovarTokenAntiBot(
+    processNumber: string,
+    regionTRT: number,
+  ): Promise<void> {
+    try {
+      await this.scrapingService.execute(processNumber, regionTRT, 1);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `⚠️ Falha ao renovar o token anti-bot de ${processNumber}: ${this.getErrorMessage(error)}`,
+      );
+    }
   }
 
   // Só tenta renovar o tokenCaptcha e buscar de novo pra
@@ -492,7 +533,10 @@ export class ProcessDocumentsFindService {
     } catch (error: unknown) {
       // Bloqueio do WAF não é falha do documento: sobe pra quem coordena
       // os downloads adiar e tentar de novo depois (ver fetchDocumentosRestritos).
-      if (error instanceof BloqueioTemporarioError) {
+      if (
+        error instanceof BloqueioTemporarioError ||
+        error instanceof DesafioAntiBotError
+      ) {
         throw error;
       }
       // `instanciaId`/`processId`/`instancia` aqui são diagnóstico —
