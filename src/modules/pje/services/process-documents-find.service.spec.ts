@@ -118,7 +118,7 @@ describe('ProcessDocumentsFindService — bloqueio do WAF nos downloads restrito
     expect(baixados(resultado)).toBe(2);
   });
 
-  it('desafio expirado (405): renova o token e baixa o resto sem a pausa de 60s', async () => {
+  it('desafio expirado (405): renova uma vez, na hora, e baixa tudo sem pausa', async () => {
     // A partir da 5ª chamada o token expira; só volta a passar depois de renovado.
     const { service, esperas, scrapingService } = montar((n, renovados) =>
       n >= 5 && renovados === 0 ? 'desafio' : 'ok',
@@ -126,20 +126,37 @@ describe('ProcessDocumentsFindService — bloqueio do WAF nos downloads restrito
 
     const resultado = await service.execute(CNJ, [instancia(12)], 3);
 
+    // As requisições em voo que também voltaram 405 não pedem outra renovação.
     expect(scrapingService.execute).toHaveBeenCalledTimes(1);
     expect(scrapingService.execute).toHaveBeenCalledWith(CNJ, 3, 1);
     expect(esperas).not.toContain(60_000);
     expect(baixados(resultado)).toBe(12);
   });
 
-  it('desafio que não cede: renova nas duas rodadas e segue sem os recusados', async () => {
+  it('desafio que aparece só na última rodada, depois do bloqueio: renova ali mesmo', async () => {
+    // Caso real do TRT3: bloqueio 403 nas chamadas 4–7 (em voo + 1ª rodada) e,
+    // quando o bloqueio passa, o token já expirou (405) até ser renovado.
+    const { service, scrapingService, esperas } = montar((n, renovados) => {
+      if (n >= 4 && n <= 7) return 'bloqueio';
+      if (n > 7 && renovados === 0) return 'desafio';
+      return 'ok';
+    });
+
+    const resultado = await service.execute(CNJ, [instancia(10)], 3);
+
+    expect(esperas).toEqual(expect.arrayContaining([60_000, 120_000]));
+    expect(scrapingService.execute).toHaveBeenCalledTimes(1);
+    expect(baixados(resultado)).toBe(10);
+  });
+
+  it('desafio que não cede: para depois do teto de renovações', async () => {
     const { service, scrapingService } = montar((n) =>
       n >= 3 ? 'desafio' : 'ok',
     );
 
     const resultado = await service.execute(CNJ, [instancia(8)], 3);
 
-    expect(scrapingService.execute).toHaveBeenCalledTimes(2);
+    expect(scrapingService.execute).toHaveBeenCalledTimes(3);
     expect(baixados(resultado)).toBe(2);
   });
 });

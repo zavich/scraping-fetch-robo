@@ -20,6 +20,11 @@ import { LambdaDocumentExtractorService } from './lambda-document-extractor.serv
 // rodada sai depois de 1 min, a 2ª depois de mais 2 min.
 const ESPERAS_APOS_BLOQUEIO_MS = [60_000, 120_000];
 
+// Renovações do token anti-bot (navegador resolvendo o desafio de novo) por
+// coleta. Cada uma custa um desafio resolvido; o token dura alguns minutos, e
+// uma coleta longa com pausas de bloqueio costuma precisar de uma ou duas.
+const MAX_RENOVACOES_TOKEN = 3;
+
 @Injectable()
 export class ProcessDocumentsFindService {
   logger = new Logger(ProcessDocumentsFindService.name);
@@ -287,13 +292,41 @@ export class ProcessDocumentsFindService {
       return promise;
     };
 
-    // Bloqueio do WAF (403, BloqueioTemporarioError) ou desafio anti-bot
-    // expirado (405, DesafioAntiBotError): a partir do primeiro, os itens
-    // restantes nem vão ao PJe — entram na fila de adiados, retentada um por
-    // vez depois de uma pausa (bloqueio) e/ou de renovar o token (desafio).
+    // Desafio anti-bot expirado (405, DesafioAntiBotError): renova o token NA
+    // HORA e repete o mesmo documento — em qualquer passada, inclusive na
+    // última rodada. Esperar a rodada seguinte não servia: o token expira
+    // justamente durante as pausas do bloqueio, e na última rodada não há
+    // seguinte (medido: 22/10 13:21, 119 documentos perdidos assim). Uma
+    // renovação por vez — quem bater no 405 enquanto ela roda espera a mesma
+    // —, com teto por coleta para não ficar em laço se o desafio não ceder.
+    let renovacoes = 0;
+    // Geração do token em uso: sobe a cada renovação. Um 405 de requisição que
+    // saiu com um token já substituído não pede outra renovação — só repete.
+    let geracaoToken = 0;
+    let renovacaoEmCurso: Promise<void> | null = null;
+    const renovarUmaVez = (): Promise<void> => {
+      if (!renovacaoEmCurso) {
+        renovacoes += 1;
+        this.logger.warn(
+          `🔑 Desafio anti-bot expirou nos downloads de ${processNumber} — renovando o token (${renovacoes}/${MAX_RENOVACOES_TOKEN})`,
+        );
+        renovacaoEmCurso = this.renovarTokenAntiBot(processNumber, regionTRT)
+          .then(() => {
+            // O contexto guarda o Cookie com o token antigo: refaz na próxima busca.
+            contextosPorInstancia.clear();
+            geracaoToken += 1;
+          })
+          .finally(() => {
+            renovacaoEmCurso = null;
+          });
+      }
+      return renovacaoEmCurso;
+    };
+
+    // Bloqueio do WAF (403, BloqueioTemporarioError), ou desafio que não cedeu
+    // às renovações: a partir do primeiro, os itens restantes nem vão ao PJe —
+    // entram na fila de adiados, retentada um por vez depois de uma pausa.
     let parado = false;
-    let houveBloqueio = false;
-    let houveDesafio = false;
     let adiados: typeof todosOsItens = [];
     const buscarOuAdiar = async (
       entry: (typeof todosOsItens)[number],
@@ -302,14 +335,19 @@ export class ProcessDocumentsFindService {
         adiados.push(entry);
         return null;
       }
+      const geracaoNoInicio = geracaoToken;
       try {
         return await buscarComCache(entry);
       } catch (error) {
-        if (error instanceof BloqueioTemporarioError) {
-          houveBloqueio = true;
-        } else if (error instanceof DesafioAntiBotError) {
-          houveDesafio = true;
-        } else {
+        if (error instanceof DesafioAntiBotError) {
+          if (geracaoNoInicio < geracaoToken) {
+            return buscarOuAdiar(entry);
+          }
+          if (renovacaoEmCurso || renovacoes < MAX_RENOVACOES_TOKEN) {
+            await renovarUmaVez();
+            return buscarOuAdiar(entry);
+          }
+        } else if (!(error instanceof BloqueioTemporarioError)) {
           throw error;
         }
         parado = true;
@@ -326,23 +364,11 @@ export class ProcessDocumentsFindService {
 
     for (const esperaMs of ESPERAS_APOS_BLOQUEIO_MS) {
       if (adiados.length === 0) break;
-      if (houveBloqueio) {
-        this.logger.warn(
-          `⏸️ WAF bloqueou os downloads de ${processNumber} — ${adiados.length} documento(s) adiado(s), nova tentativa em ${esperaMs / 1000}s`,
-        );
-        await this.delay(esperaMs);
-      }
-      if (houveDesafio) {
-        this.logger.warn(
-          `🔑 Desafio anti-bot expirou nos downloads de ${processNumber} — renovando o token antes de retentar ${adiados.length} documento(s)`,
-        );
-        await this.renovarTokenAntiBot(processNumber, regionTRT);
-        // O contexto guarda o Cookie com o token antigo: refaz na próxima busca.
-        contextosPorInstancia.clear();
-      }
+      this.logger.warn(
+        `⏸️ WAF recusou os downloads de ${processNumber} — ${adiados.length} documento(s) adiado(s), nova tentativa em ${esperaMs / 1000}s`,
+      );
+      await this.delay(esperaMs);
       parado = false;
-      houveBloqueio = false;
-      houveDesafio = false;
       const daRodada = adiados;
       adiados = [];
       for (const entry of daRodada) {
@@ -441,12 +467,13 @@ export class ProcessDocumentsFindService {
         `🔄 tokenCaptcha rejeitado pro documento "${item.titulo}" (id=${item.id}, instância ${instancia}) de ${processNumber} — renovando e tentando de novo.`,
       );
 
-      const tokenRenovado = await this.fetchUrlMovimentService.refreshTokenCaptcha(
-        processNumber,
-        processId,
-        instancia,
-        regionTRT,
-      );
+      const tokenRenovado =
+        await this.fetchUrlMovimentService.refreshTokenCaptcha(
+          processNumber,
+          processId,
+          instancia,
+          regionTRT,
+        );
 
       if (!tokenRenovado) {
         throw error;
@@ -461,7 +488,6 @@ export class ProcessDocumentsFindService {
       );
     }
   }
-
 
   private async processarDocumento(
     context: DocumentoRequestContext,
