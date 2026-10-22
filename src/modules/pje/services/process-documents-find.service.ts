@@ -5,12 +5,18 @@ import { comConcorrenciaLimitada } from 'src/utils/concurrency';
 import { flattenItensProcesso } from 'src/utils/flatten-itens-processo';
 import { normalizeString } from 'src/utils/normalize-string';
 import {
+  BloqueioTemporarioError,
   DocumentoRequestContext,
   FetchDocumentoService,
   InvalidPjeDocumentResponseError,
 } from './fetch-documents-url.service';
 import { FetchUrlMovimentService } from './fetch-url.service';
 import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
+
+// Pausas antes de cada nova rodada dos downloads adiados por bloqueio do WAF.
+// O bloqueio por taxa costuma ser reavaliado em janelas de minutos: a 1ª
+// rodada sai depois de 1 min, a 2ª depois de mais 2 min.
+const ESPERAS_APOS_BLOQUEIO_MS = [60_000, 120_000];
 
 @Injectable()
 export class ProcessDocumentsFindService {
@@ -245,14 +251,22 @@ export class ProcessDocumentsFindService {
       const promise = (async () => {
         await this.delay(INTERVALO_ENTRE_REQUESTS_MS);
         const context = await getContexto(grau);
-        const documento = await this.processarDocumento(
-          context,
-          processId,
-          item,
-          processNumber,
-          regionTRT,
-          grau,
-        );
+        let documento: Documento | null;
+        try {
+          documento = await this.processarDocumento(
+            context,
+            processId,
+            item,
+            processNumber,
+            regionTRT,
+            grau,
+          );
+        } catch (error) {
+          // Bloqueado: sai do cache pra retentativa (ou outra ocorrência da
+          // mesma chave) buscar de novo, em vez de herdar a rejeição.
+          resultadoPorChave.delete(chave);
+          throw error;
+        }
 
         if (documento === null) {
           // Falhou com o contexto dessa instância — remove do cache pra uma
@@ -270,11 +284,52 @@ export class ProcessDocumentsFindService {
       return promise;
     };
 
+    // Bloqueio do WAF (ver BloqueioTemporarioError): a partir do primeiro,
+    // os itens restantes nem vão ao PJe — entram na fila de adiados, que é
+    // retentada depois de uma pausa, um por vez.
+    let emBloqueio = false;
+    let adiados: typeof todosOsItens = [];
+    const buscarOuAdiar = async (
+      entry: (typeof todosOsItens)[number],
+    ): Promise<Documento | null> => {
+      if (emBloqueio) {
+        adiados.push(entry);
+        return null;
+      }
+      try {
+        return await buscarComCache(entry);
+      } catch (error) {
+        if (!(error instanceof BloqueioTemporarioError)) throw error;
+        emBloqueio = true;
+        adiados.push(entry);
+        return null;
+      }
+    };
+
     const resultados = await comConcorrenciaLimitada(
       todosOsItens,
       CONCORRENCIA_MAXIMA,
-      buscarComCache,
+      buscarOuAdiar,
     );
+
+    for (const esperaMs of ESPERAS_APOS_BLOQUEIO_MS) {
+      if (adiados.length === 0) break;
+      this.logger.warn(
+        `⏸️ WAF bloqueou os downloads de ${processNumber} — ${adiados.length} documento(s) adiado(s), nova tentativa em ${esperaMs / 1000}s`,
+      );
+      await this.delay(esperaMs);
+      emBloqueio = false;
+      const daRodada = adiados;
+      adiados = [];
+      for (const entry of daRodada) {
+        resultados[todosOsItens.indexOf(entry)] = await buscarOuAdiar(entry);
+      }
+    }
+    if (adiados.length > 0) {
+      this.logger.error(
+        `❌ ${adiados.length} documento(s) de ${processNumber} continuaram bloqueados pelo WAF depois de ${ESPERAS_APOS_BLOQUEIO_MS.length} nova(s) tentativa(s) — seguem sem download`,
+      );
+    }
 
     for (const grau of new Set(todosOsItens.map((i) => i.grau))) {
       const doGrau = resultados.filter(
@@ -435,6 +490,11 @@ export class ProcessDocumentsFindService {
       };
       return documento;
     } catch (error: unknown) {
+      // Bloqueio do WAF não é falha do documento: sobe pra quem coordena
+      // os downloads adiar e tentar de novo depois (ver fetchDocumentosRestritos).
+      if (error instanceof BloqueioTemporarioError) {
+        throw error;
+      }
       // `instanciaId`/`processId`/`instancia` aqui são diagnóstico —
       // suspeita de que documentos "não encontrados" no processId atual
       // (`instance.id`) podem pertencer a um processo apenso/relacionado
