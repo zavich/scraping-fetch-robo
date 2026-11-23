@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios from 'axios';
+import { descreverErro } from 'src/utils/describe-error';
 
 @Injectable()
 export class ReCaptchaService {
@@ -106,7 +107,9 @@ export class ReCaptchaService {
       this.logger.debug(`Captcha resolvido com sucesso`);
       return result; // token que você insere no form
     } catch (error) {
-      this.logger.error('Erro ao resolver captcha via 2Captcha', error);
+      this.logger.error(
+        `Erro ao resolver captcha via 2Captcha: ${descreverErro(error)}`,
+      );
       throw error;
     }
   }

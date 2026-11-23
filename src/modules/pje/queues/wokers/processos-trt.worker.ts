@@ -13,6 +13,7 @@ import { ProcessosResponse } from 'src/interfaces';
 import { DocumentoExtraido } from '../../services/fetch-public-documents.service';
 import { ScrapingService } from 'src/helpers/scraping.service';
 import { Root } from 'src/interfaces/normalize';
+import { descreverErro } from 'src/utils/describe-error';
 
 export class GenericProcessoWorker extends WorkerHost {
   private readonly logger = new Logger(GenericProcessoWorker.name);
@@ -464,7 +465,7 @@ export class GenericProcessoWorker extends WorkerHost {
         }
       }
     } catch (error) {
-      this.logger.error(error);
+      this.logger.error(descreverErro(error));
 
       if (successWebhookSent) {
         throw error instanceof Error ? error : new Error(String(error));

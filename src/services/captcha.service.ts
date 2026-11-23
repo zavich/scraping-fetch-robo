@@ -3,6 +3,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import { BedrockCaptchaService } from './bedrock-captcha.service';
 import { LambdaCaptchaService } from './lambda-captcha.service';
+import { descreverErro } from 'src/utils/describe-error';
 import { usarLambdaCaptcha } from 'src/utils/env-flags';
 
 // Interfaces globais para tipagem
@@ -185,7 +186,9 @@ export class CaptchaService {
         // Se CAPCHA_NOT_READY, continua no loop
       }
     } catch (error) {
-      this.logger.error('Erro no método resolveCaptcha', error);
+      this.logger.error(
+        `Erro no método resolveCaptcha: ${descreverErro(error)}`,
+      );
       throw error;
     }
   }
@@ -210,7 +213,9 @@ export class CaptchaService {
         return 0;
       }
     } catch (error) {
-      this.logger.error('Falha ao consultar saldo no 2Captcha:', error);
+      this.logger.error(
+        `Falha ao consultar saldo no 2Captcha: ${descreverErro(error)}`,
+      );
       return 0;
     }
   }

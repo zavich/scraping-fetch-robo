@@ -17,6 +17,7 @@ import {
 import { userAgents } from 'src/utils/user-agents';
 import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
 import { Corte403PorTribunal } from './corte-403-por-tribunal';
+import { descreverErro } from 'src/utils/describe-error';
 import { usarBedrockCaptcha, usarLambdaCaptcha } from 'src/utils/env-flags';
 
 interface AxiosLikeError {
@@ -338,7 +339,9 @@ export class FetchUrlMovimentService {
     } catch (error: unknown) {
       // Falha antes de consultar qualquer instância (ex.: saldo do 2Captcha) —
       // nada foi verificado no PJe, então também não confirma ausência.
-      this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
+      this.logger.error(
+        `Erro ao buscar processo ${numeroDoProcesso}: ${descreverErro(error)}`,
+      );
       return { instances: [], houveFalha: true };
     }
   }

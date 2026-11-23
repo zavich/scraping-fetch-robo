@@ -24,6 +24,7 @@ import { PDFDocument } from 'pdf-lib';
 import { PdfExtractService } from './services/extract.service';
 import { LoginPoolService } from './services/login-pool.service';
 import { RedisService } from 'src/services/redis.service';
+import { descreverErro } from 'src/utils/describe-error';
 @Controller('processos')
 export class PjeController {
   private readonly logger = new Logger(PjeController.name);
@@ -70,7 +71,7 @@ export class PjeController {
       );
       return res.send(pdfBuffer);
     } catch (err) {
-      this.logger.error('Erro ao processar PDF:', err);
+      this.logger.error(`Erro ao processar PDF: ${descreverErro(err)}`);
       return res.status(500).json({ error: 'Erro ao processar PDF' });
     }
   }
@@ -93,7 +94,7 @@ export class PjeController {
       const { bookmarks } = await this.extractService.extractBookmarks(file.buffer);
       return res.json(bookmarks);
     } catch (err) {
-      this.logger.error('Erro ao extrair bookmarks:', err);
+      this.logger.error(`Erro ao extrair bookmarks: ${descreverErro(err)}`);
       return res.status(500).json({ error: 'Erro ao extrair bookmarks' });
     }
   }
@@ -157,7 +158,7 @@ export class PjeController {
         message: 'Reprocessamento concluído.',
       };
     } catch (error) {
-      this.logger.error('Erro ao reprocessar jobs:', error);
+      this.logger.error(`Erro ao reprocessar jobs: ${descreverErro(error)}`);
       throw error;
     }
   }

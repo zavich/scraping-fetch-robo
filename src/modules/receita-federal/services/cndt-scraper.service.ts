@@ -6,6 +6,7 @@ import axios from 'axios';
 import { CaptchaService } from 'src/services/captcha.service';
 import { AwsS3Service } from 'src/services/aws-s3.service';
 import { BrowserManager } from 'src/utils/browser.manager';
+import { descreverErro } from 'src/utils/describe-error';
 
 @Injectable()
 export class CndtScraperService {
@@ -128,7 +129,7 @@ export class CndtScraperService {
 
       return { cnpj, url: fileKey };
     } catch (error) {
-      this.logger.error('Erro no scraping CNDt:', error);
+      this.logger.error(`Erro no scraping CNDt: ${descreverErro(error)}`);
       throw error;
     } finally {
       // 🔥 Fecha apenas o contexto, mantendo o browser vivo
