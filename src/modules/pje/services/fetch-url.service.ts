@@ -17,6 +17,7 @@ import {
 import { userAgents } from 'src/utils/user-agents';
 import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
 import { Corte403PorTribunal } from './corte-403-por-tribunal';
+import { descreverErro } from 'src/utils/describe-error';
 
 interface AxiosLikeError {
   response?: { status?: number };
@@ -323,7 +324,9 @@ export class FetchUrlMovimentService {
 
       return instances;
     } catch (error: unknown) {
-      this.logger.error(`Erro ao buscar processo ${numeroDoProcesso}`, error);
+      this.logger.error(
+        `Erro ao buscar processo ${numeroDoProcesso}: ${descreverErro(error)}`,
+      );
       return [];
     }
   }

@@ -6,6 +6,7 @@ import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { Queue } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { BrowserManager } from './utils/browser.manager';
+import { descreverErro } from 'src/utils/describe-error';
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -43,12 +44,16 @@ async function bootstrap() {
 
   // Previne crash do processo por promises nao tratadas
   process.on('unhandledRejection', (reason: unknown) => {
-    logger.error('[unhandledRejection] Promise rejeitada sem handler:', reason);
+    logger.error(
+      `[unhandledRejection] Promise rejeitada sem handler: ${descreverErro(reason)}`,
+    );
     // Log mas nao crasha — deixa o NestJS/BullMQ tratar o job
   });
 
   process.on('uncaughtException', async (error: Error) => {
-    logger.error('[uncaughtException] Excecao nao capturada:', error);
+    logger.error(
+      `[uncaughtException] Excecao nao capturada: ${descreverErro(error)}`,
+    );
     try {
       await app.close().catch(() => {});
       await BrowserManager.closeAll().catch(() => {});
@@ -94,4 +99,3 @@ async function bootstrap() {
 }
 
 bootstrap();
-
