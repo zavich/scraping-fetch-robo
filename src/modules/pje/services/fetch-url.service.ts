@@ -18,11 +18,21 @@ import { userAgents } from 'src/utils/user-agents';
 import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
 import { Corte403PorTribunal } from './corte-403-por-tribunal';
 import { descreverErro } from 'src/utils/describe-error';
+import { usarBedrockCaptcha, usarLambdaCaptcha } from 'src/utils/env-flags';
 
 interface AxiosLikeError {
   response?: { status?: number };
   code?: string;
   message?: string;
+}
+
+export interface ResultadoConsultaInstancias {
+  instances: Partial<ProcessosResponse>[];
+  // Alguma instância falhou (erro HTTP, captcha não resolvido, erro antes do
+  // loop) em vez de responder. Sem nenhuma instância encontrada, isso NÃO
+  // confirma que o processo não existe — o PJe pode ter bloqueado a consulta
+  // (403/405), e reportar "não encontrado" esconderia um processo real.
+  houveFalha: boolean;
 }
 
 // Configura um timeout global para o axios
@@ -77,7 +87,7 @@ export class FetchUrlMovimentService {
     numeroDoProcesso: string,
     origem?: string,
     sessionCookies?: string,
-  ): Promise<Partial<ProcessosResponse>[]> {
+  ): Promise<ResultadoConsultaInstancias> {
     const regionTRT = numeroDoProcesso?.includes('.')
       ? Number(numeroDoProcesso.split('.')[3])
       : null;
@@ -85,14 +95,15 @@ export class FetchUrlMovimentService {
       throw new Error(`Invalid process number: ${numeroDoProcesso}`);
 
     const instances: Partial<ProcessosResponse>[] = [];
+    let houveFalha = false;
 
     try {
       const useLambdaCaptcha =
-        process.env.USE_LAMBDA_CAPTCHA === 'true' &&
+        usarLambdaCaptcha() &&
         !!process.env.LAMBDA_CAPTCHA_URL &&
         !!process.env.LAMBDA_CAPTCHA_API_KEY;
       const useBedrockCaptcha =
-        process.env.USE_BEDROCK_CAPTCHA === 'true' &&
+        usarBedrockCaptcha() &&
         !!process.env.AWS_S3_REGION &&
         !!process.env.GRID_SOLVER_LAMBDA_API_KEY &&
         !!process.env.GRID_SOLVER_LAMBDA_X_API_KEY;
@@ -293,6 +304,7 @@ export class FetchUrlMovimentService {
             this.logger.warn(
               `⚠️ Instância ${i} do processo ${numeroDoProcesso} ficou travada em desafio de captcha após ${captchaAttempts} tentativa(s) — não será incluída no resultado.`,
             );
+            houveFalha = true;
             continue;
           }
 
@@ -318,16 +330,19 @@ export class FetchUrlMovimentService {
               `Falha ao buscar instância ${i} para o processo ${numeroDoProcesso}: ${err}`,
             );
           }
+          houveFalha = true;
           continue;
         }
       }
 
-      return instances;
+      return { instances, houveFalha };
     } catch (error: unknown) {
+      // Falha antes de consultar qualquer instância (ex.: saldo do 2Captcha) —
+      // nada foi verificado no PJe, então também não confirma ausência.
       this.logger.error(
         `Erro ao buscar processo ${numeroDoProcesso}: ${descreverErro(error)}`,
       );
-      return [];
+      return { instances: [], houveFalha: true };
     }
   }
 

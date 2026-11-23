@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
+import { usarBedrockCaptcha } from 'src/utils/env-flags';
 
 export interface BedrockGridResult {
   indices: number[];
@@ -34,7 +35,7 @@ interface CorpoLambda {
 @Injectable()
 export class BedrockCaptchaService {
   private readonly logger = new Logger(BedrockCaptchaService.name);
-  private readonly ENABLED = process.env.USE_BEDROCK_CAPTCHA === 'true';
+  private readonly ENABLED = usarBedrockCaptcha();
   private readonly FUNCTION_NAME =
     process.env.GRID_SOLVER_LAMBDA_NAME || 'pje-waf-grid-solver';
   // Reaproveita a região que o robô já usa pra AWS (mesma do bucket S3 e
@@ -52,17 +53,17 @@ export class BedrockCaptchaService {
       // Falhar em silêncio aqui já custou um diagnóstico: sem a região o
       // serviço ficava desligado sem dizer por quê, e tudo caía no 2Captcha.
       this.logger.warn(
-        '⚠️ USE_BEDROCK_CAPTCHA=true mas AWS_S3_REGION não foi definida — resolvedor de grid desligado',
+        '⚠️ Bedrock captcha ligado mas AWS_S3_REGION não foi definida — resolvedor de grid desligado',
       );
     }
     if (this.ENABLED && !this.API_KEY) {
       this.logger.warn(
-        '⚠️ USE_BEDROCK_CAPTCHA=true mas GRID_SOLVER_LAMBDA_API_KEY não foi definida — resolvedor de grid desligado',
+        '⚠️ Bedrock captcha ligado mas GRID_SOLVER_LAMBDA_API_KEY não foi definida — resolvedor de grid desligado',
       );
     }
     if (this.ENABLED && !this.X_API_KEY) {
       this.logger.warn(
-        '⚠️ USE_BEDROCK_CAPTCHA=true mas GRID_SOLVER_LAMBDA_X_API_KEY não foi definida — resolvedor de grid desligado',
+        '⚠️ Bedrock captcha ligado mas GRID_SOLVER_LAMBDA_X_API_KEY não foi definida — resolvedor de grid desligado',
       );
     }
     // As duas chaves são obrigatórias no lambda: sem uma delas toda
