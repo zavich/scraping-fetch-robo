@@ -1,6 +1,7 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, Logger } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
+import { usarLambdaCaptcha } from 'src/utils/env-flags';
 
 export interface LambdaCaptchaResponse {
   text: string;
@@ -12,7 +13,7 @@ export class LambdaCaptchaService {
   private readonly logger = new Logger(LambdaCaptchaService.name);
   private readonly LAMBDA_URL = process.env.LAMBDA_CAPTCHA_URL as string;
   private readonly API_KEY = process.env.LAMBDA_CAPTCHA_API_KEY as string;
-  private readonly USE_LAMBDA = process.env.USE_LAMBDA_CAPTCHA === 'true';
+  private readonly USE_LAMBDA = usarLambdaCaptcha();
 
   constructor(private readonly httpService: HttpService) {
     if (this.USE_LAMBDA) {

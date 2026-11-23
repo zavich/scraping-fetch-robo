@@ -3,6 +3,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import { BedrockCaptchaService } from './bedrock-captcha.service';
 import { LambdaCaptchaService } from './lambda-captcha.service';
+import { usarLambdaCaptcha } from 'src/utils/env-flags';
 
 // Interfaces globais para tipagem
 interface CreateTaskResponse {
@@ -49,7 +50,7 @@ export interface CaptchaResult {
 export class CaptchaService {
   private readonly logger = new Logger(CaptchaService.name);
   private readonly API_KEY = process.env.API_KEY_2CAPTCHA as string;
-  private readonly USE_LAMBDA = process.env.USE_LAMBDA_CAPTCHA === 'true';
+  private readonly USE_LAMBDA = usarLambdaCaptcha();
 
   constructor(
     private readonly httpService: HttpService,

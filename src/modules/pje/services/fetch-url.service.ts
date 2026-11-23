@@ -17,6 +17,7 @@ import {
 import { userAgents } from 'src/utils/user-agents';
 import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
 import { Corte403PorTribunal } from './corte-403-por-tribunal';
+import { usarBedrockCaptcha, usarLambdaCaptcha } from 'src/utils/env-flags';
 
 interface AxiosLikeError {
   response?: { status?: number };
@@ -97,11 +98,11 @@ export class FetchUrlMovimentService {
 
     try {
       const useLambdaCaptcha =
-        process.env.USE_LAMBDA_CAPTCHA === 'true' &&
+        usarLambdaCaptcha() &&
         !!process.env.LAMBDA_CAPTCHA_URL &&
         !!process.env.LAMBDA_CAPTCHA_API_KEY;
       const useBedrockCaptcha =
-        process.env.USE_BEDROCK_CAPTCHA === 'true' &&
+        usarBedrockCaptcha() &&
         !!process.env.AWS_S3_REGION &&
         !!process.env.GRID_SOLVER_LAMBDA_API_KEY &&
         !!process.env.GRID_SOLVER_LAMBDA_X_API_KEY;
