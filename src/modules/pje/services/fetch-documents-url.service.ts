@@ -32,6 +32,31 @@ export class DocumentoNaoEncontradoError extends Error {
   }
 }
 
+// 403 com página HTML: bloqueio temporário do WAF do tribunal depois de muitas
+// requisições seguidas — erro do próprio PJe vem em JSON. Medido no TRT3
+// (0010362-49.2026.5.03.0064, 22/10): ~130 downloads em 3,5 min e, a partir
+// daí, TODA requisição do processo voltou 403/html. Tentar de novo na hora só
+// prolonga o bloqueio; quem chama adia e tenta depois de uma pausa.
+export class BloqueioTemporarioError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BloqueioTemporarioError';
+  }
+}
+
+// 405 com página HTML: o WAF do tribunal voltou a exigir o desafio anti-bot —
+// o aws-waf-token resolvido pelo navegador no começo da coleta expirou.
+// Medido no TRT3 (0010362-49.2026.5.03.0064, 22/10): depois de ~7 min de
+// coleta, os downloads restantes do 2º grau voltaram 405/html. Só um token
+// novo (navegador resolvendo o desafio de novo) resolve; ver
+// ProcessDocumentsFindService.
+export class DesafioAntiBotError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DesafioAntiBotError';
+  }
+}
+
 @Injectable()
 export class FetchDocumentoService {
   constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
@@ -241,6 +266,18 @@ export class FetchDocumentoService {
       // que não se resolvem tentando de novo. 429 espera mais (é bloqueio de
       // taxa, não só um hiccup pontual) e respeita o header `retry-after`
       // quando o PJe manda um.
+      if (status === 405 && /text\/html/i.test(contentType ?? '')) {
+        throw new DesafioAntiBotError(
+          `HTTP 405 (desafio anti-bot do WAF) pro documento id=${documentId} de ${processNumber}`,
+        );
+      }
+
+      if (status === 403 && /text\/html/i.test(contentType ?? '')) {
+        throw new BloqueioTemporarioError(
+          `HTTP 403 (bloqueio do WAF) pro documento id=${documentId} de ${processNumber}`,
+        );
+      }
+
       const isRateLimited = status === 429;
       const isServerError = !!status && status >= 500;
       const MAX_TENTATIVAS = 3;

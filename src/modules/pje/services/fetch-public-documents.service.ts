@@ -7,6 +7,7 @@ import { flattenItensProcesso } from 'src/utils/flatten-itens-processo';
 import { sniffContentType } from 'src/utils/sniff-content-type';
 import { userAgents } from 'src/utils/user-agents';
 import { LambdaDocumentExtractorService } from './lambda-document-extractor.service';
+import { DocumentTextCacheService } from './document-text-cache.service';
 
 export interface DocumentoExtraido {
   idUnicoDocumento: string;
@@ -20,7 +21,14 @@ export class FetchPublicDocumentsService {
   constructor(
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly lambdaExtractorService: LambdaDocumentExtractorService,
+    private readonly textCache: DocumentTextCacheService,
   ) {}
+
+  // Só documento público entra no cache — restrito (documents:true) nunca é
+  // persistido fora do fluxo que o pediu.
+  private ehCacheavel(item: ItensProcesso): boolean {
+    return Boolean(item.publico && !item.documentoSigiloso);
+  }
 
   async execute(
     processId: number,
@@ -35,6 +43,10 @@ export class FetchPublicDocumentsService {
           item.documento &&
           item.idUnicoDocumento,
       ),
+    // Pausa antes da primeira requisição ao PJe (ritmo anti-bloqueio de quem
+    // chama). Fica aqui, e não no chamador, para ser pulada quando todos os
+    // documentos vêm do cache e o PJe nem é consultado.
+    delayAntesDoPjeMs = 0,
   ): Promise<DocumentoExtraido[]> {
     // Achata antes de filtrar — documentos anexados (ex: procuração, estatuto,
     // CNPJ) vêm aninhados em `item.anexos` e também precisam ser extraídos
@@ -54,6 +66,46 @@ export class FetchPublicDocumentsService {
     );
 
     const typeUrl = instance === '3' ? 'tst' : `trt${regionTRT}`;
+
+    // Recoleta de processo já coletado: a maior parte dos documentos é a mesma
+    // da vez anterior. Consulta ao S3 é bem mais barata que PJe + Lambda.
+    const CONCORRENCIA_CACHE = 10;
+    const doCache = await comConcorrenciaLimitada(
+      targetDocs,
+      CONCORRENCIA_CACHE,
+      async (item) =>
+        this.ehCacheavel(item)
+          ? this.textCache.get(
+              typeUrl,
+              processNumber,
+              item.id,
+              item.idUnicoDocumento,
+            )
+          : null,
+    );
+    const hits: DocumentoExtraido[] = [];
+    const pendentes: ItensProcesso[] = [];
+    targetDocs.forEach((item, indice) => {
+      const texto = doCache[indice];
+      if (texto !== null) {
+        hits.push({ idUnicoDocumento: item.idUnicoDocumento, texto });
+      } else {
+        pendentes.push(item);
+      }
+    });
+
+    if (pendentes.length === 0) {
+      this.logger.log(
+        `✅ Instância ${instance} (${processNumber}): ${hits.length}/${targetDocs.length} documento(s) vindos do cache — PJe não consultado`,
+      );
+      return hits;
+    }
+
+    this.logger.debug(
+      `⏱ Delay de ${delayAntesDoPjeMs}ms antes de buscar ${pendentes.length} documento(s) da ${instance}ª instância no PJe (${hits.length} do cache)`,
+    );
+    await this.delay(delayAntesDoPjeMs);
+
     const awsWafToken =
       (await this.redis.get(`aws-waf-token:${processNumber}`)) ?? '';
 
@@ -87,7 +139,7 @@ export class FetchPublicDocumentsService {
     const INTERVALO_ENTRE_REQUESTS_MS = 300;
 
     const results = await comConcorrenciaLimitada(
-      targetDocs,
+      pendentes,
       CONCORRENCIA_MAXIMA,
       async (item) => {
         try {
@@ -139,6 +191,19 @@ export class FetchPublicDocumentsService {
             },
           );
 
+          // Texto vazio não entra: o extrator devolve '' quando a resposta da
+          // Lambda vem num formato inesperado, e gravar isso no cache tornaria
+          // permanente uma falha que pode ser transitória.
+          if (this.ehCacheavel(item) && texto.trim().length > 0) {
+            await this.textCache.set(
+              typeUrl,
+              processNumber,
+              item.id,
+              item.idUnicoDocumento,
+              texto,
+            );
+          }
+
           const documento: DocumentoExtraido = {
             idUnicoDocumento: item.idUnicoDocumento,
             texto,
@@ -165,10 +230,10 @@ export class FetchPublicDocumentsService {
     );
 
     this.logger.log(
-      `✅ Instância ${instance} (${processNumber}): ${extracted.length}/${targetDocs.length} documento(s) extraído(s) com sucesso`,
+      `✅ Instância ${instance} (${processNumber}): ${extracted.length + hits.length}/${targetDocs.length} documento(s) extraído(s) com sucesso (${hits.length} do cache)`,
     );
 
-    return extracted;
+    return [...hits, ...extracted];
   }
 
   private async delay(ms: number) {

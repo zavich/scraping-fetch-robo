@@ -36,6 +36,10 @@
         {
           "name": "WORKER_QUEUE_MODE",
           "value": "<WORKER_QUEUE_MODE>"
+        },
+        {
+          "name": "WORKER_CONCURRENCY_OVERRIDES",
+          "value": "pje-trt2=3"
         }
       ],
       "secrets": [

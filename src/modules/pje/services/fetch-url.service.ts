@@ -16,6 +16,7 @@ import {
 } from './fetch-public-documents.service';
 import { userAgents } from 'src/utils/user-agents';
 import { findUltimaInstancia } from 'src/utils/find-ultima-instancia';
+import { Corte403PorTribunal } from './corte-403-por-tribunal';
 
 interface AxiosLikeError {
   response?: { status?: number };
@@ -35,6 +36,14 @@ export interface ResultadoConsultaInstancias {
 // Configura um timeout global para o axios
 axios.defaults.timeout = 10000; // 10 segundos
 
+// O TST (instância 3) é consultado uma única vez, sem retry em 403/429.
+// Medido em staging (lote de 414 CNJs, 2026-10-13): 197 processos levaram 403
+// do TST; o retry (até 5 tentativas, ~45s) recuperou só 11, e os 11 voltaram
+// "sem id" (processo inexistente no TST) — nenhum dado do TST foi ganho. Já o
+// tempo preso no retry foi 95% do tempo de vaga da fila do TRT, derrubando a
+// vazão do lote de ~30 para ~5 processos/min.
+const TST_INSTANCIA = 3;
+
 @Injectable()
 export class FetchUrlMovimentService {
   private readonly logger = new Logger(FetchUrlMovimentService.name);
@@ -43,7 +52,23 @@ export class FetchUrlMovimentService {
     private readonly captchaService: CaptchaService,
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
     private readonly fetchPublicDocumentsService: FetchPublicDocumentsService,
-  ) {}
+  ) {
+    this.corte403 = new Corte403PorTribunal(this.redis, this.logger);
+  }
+  private readonly corte403: Corte403PorTribunal;
+
+  // 403 só é repetido quando o tribunal não está em corte (ver
+  // Corte403PorTribunal); 429 segue sempre com as tentativas, porque ali
+  // esperar resolve.
+  private async podeRepetir(status: number, host: string): Promise<boolean> {
+    if (status !== 403) return true;
+    if (!(await this.corte403.emCorte(host))) return true;
+    this.logger.warn(
+      `✂️ ${host} em corte de 403 — sem nova tentativa (ver Corte403PorTribunal)`,
+    );
+    return false;
+  }
+
   private async delay(ms: number) {
     return new Promise((res) => setTimeout(res, ms));
   }
@@ -338,17 +363,24 @@ export class FetchUrlMovimentService {
     attempt = 1,
   ): Promise<DetalheProcesso[]> {
     const retryStatus = [403, 429];
-    const maxAttempts = 5;
+    const maxAttempts = instance === TST_INSTANCIA ? 1 : 5;
 
+    const host = Corte403PorTribunal.host(url);
     try {
       const { data } = await axios.get<DetalheProcesso[]>(url, { headers });
+      await this.corte403.registrarSucesso(host);
       return data;
     } catch (error: unknown) {
       const axiosError = error as AxiosLikeError;
+      const status = axiosError.response?.status ?? 0;
+      // Todo 403 conta para a sequência do tribunal, inclusive o da última
+      // tentativa — senão o corte só começaria no processo seguinte.
+      if (status === 403) await this.corte403.registrar403(host);
 
       if (
-        retryStatus.includes(axiosError.response?.status ?? 0) &&
-        attempt < maxAttempts
+        retryStatus.includes(status) &&
+        attempt < maxAttempts &&
+        (await this.podeRepetir(status, host))
       ) {
         const delayMs = 3000 * 2 ** (attempt - 1); // 3s, 6s, 12s, 24s
         this.logger.warn(
@@ -396,10 +428,12 @@ export class FetchUrlMovimentService {
     else if (tokenDesafio && resposta)
       url += `?tokenDesafio=${encodeURIComponent(tokenDesafio)}&resposta=${encodeURIComponent(resposta)}`;
 
+    const host = Corte403PorTribunal.host(url);
     try {
       const response = await axios.get<ProcessosResponse>(url, {
         headers,
       });
+      await this.corte403.registrarSucesso(host);
       const captchaToken = response.headers['captchatoken'] as string;
       this.logger.debug(
         `Token CAPTCHA recebido para ${numeroDoProcesso} (instância ${instance})`,
@@ -421,12 +455,18 @@ export class FetchUrlMovimentService {
     } catch (error: unknown) {
       const isTRT15 = regionTRT === 15;
       const retryStatus = [429, 403];
-      const maxAttempts = isTRT15 ? 7 : 5;
+      const maxAttempts =
+        Number(instance) === TST_INSTANCIA ? 1 : isTRT15 ? 7 : 5;
       const axiosError = error as AxiosLikeError;
+      const status = axiosError.response?.status ?? 0;
+      // Todo 403 conta para a sequência do tribunal, inclusive o da última
+      // tentativa — senão o corte só começaria no processo seguinte.
+      if (status === 403) await this.corte403.registrar403(host);
 
       if (
-        retryStatus.includes(axiosError.response?.status ?? 0) &&
-        attempt < maxAttempts
+        retryStatus.includes(status) &&
+        attempt < maxAttempts &&
+        (await this.podeRepetir(status, host))
       ) {
         // REFRESH token CAPTCHA a cada tentativa TRT15
         const newTokenCaptcha =
@@ -602,11 +642,9 @@ export class FetchUrlMovimentService {
       return [];
     }
 
+    // O delay só é aplicado se algum documento precisar mesmo ir ao PJe —
+    // ver FetchPublicDocumentsService (cache de texto).
     const delayMs = this.getDelayMs();
-    this.logger.debug(
-      `⏱ Delay de ${delayMs}ms antes de buscar documentos públicos da ${ultimaInstancia.instance}ª instância`,
-    );
-    await this.delay(delayMs);
 
     // Quando includeRestricted, busca também os documentos restritos (todos,
     // sem filtro por título) via /documentos/{id}, sem depender do fluxo de
@@ -623,6 +661,7 @@ export class FetchUrlMovimentService {
       processNumber,
       ultimaInstancia.itensProcesso,
       filter,
+      delayMs,
     );
   }
 }
